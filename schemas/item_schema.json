@@ -1,0 +1,62 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "PeknoUniversalItem",
+  "type": "object",
+  "required": ["id", "title", "source_type", "created_at", "raw_link", "intent"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "全局唯一ID，建议格式：pluginID_originalID"
+    },
+    "title": {
+      "type": "string",
+      "description": "展示用的标题"
+    },
+    "source_type": {
+      "type": "string",
+      "description": "来源插件名，例如 'bilibili'"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "原始内容的发布时间"
+    },
+    "raw_link": {
+      "type": "string",
+      "format": "uri",
+      "description": "点击后跳转的原始链接"
+    },
+    "intent": {
+      "type": "string",
+      "enum": ["video", "article", "code", "image", "social_post"],
+      "description": "数据类型，决定前端使用的基础模板"
+    },
+    "capabilities": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "声明此条数据支持的操作，如 ['summarize', 'preview']"
+    },
+    "content_text": {
+      "type": "string",
+      "description": "用于RAG和搜索的纯文本内容"
+    },
+    "summary": {
+      "type": "string",
+      "description": "AI生成的摘要，初始可为空"
+    },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "分类标签（含自动分类）"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["inbox", "watch_later", "archived"],
+      "default": "inbox"
+    },
+    "metadata_extra": {
+      "type": "object",
+      "description": "插件自定义的私有数据，如视频BVID或Star数"
+    }
+  }
+}
