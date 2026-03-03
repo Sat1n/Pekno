@@ -33,5 +33,29 @@ def test_bilibili_ingestion():
     except Exception as e:
         pytest.fail(f"❌ 数据契约校验失败: {e}")
 
+# 模拟测试逻辑
+from worker.ingestion.pipeline import IngestionPipeline
+
+@pytest.mark.anyio  # 告诉 pytest 这个函数是异步的
+async def test_pipeline_flow():
+    pipeline = IngestionPipeline()
+    mock_item = UniversalItem(
+        id="bili_12345",
+        title="Pekno 虹膜计划启动",
+        source_type="bilibili",
+        raw_link="https://bilibili.com/video/BV123",
+        intent=ItemIntent.video,
+        capabilities=["summarize"]
+    )
+    
+    # 执行流水线
+    processed = await pipeline.process_item(mock_item)
+    
+    assert processed.summary is not None
+    assert "AI-Auto" in processed.tags
+
+# 运行它，然后观察你的终端日志！
+
 if __name__ == "__main__":
     test_bilibili_ingestion()
+    test_pipeline_flow()

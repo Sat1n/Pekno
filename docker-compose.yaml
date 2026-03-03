@@ -1,0 +1,20 @@
+services:
+  # 神经纤维：Redis 任务队列
+  iris-redis:
+    image: redis:7-alpine
+    container_name: iris-redis
+    ports:
+      - "6379:6379"
+
+  # 长期记忆：带向量插件的数据库
+  iris-db:
+    image: ankane/pgvector:latest
+    container_name: iris-db
+    environment:
+      POSTGRES_USER: natis
+      POSTGRES_PASSWORD: pekno_password
+      POSTGRES_DB: pekno_iris
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data

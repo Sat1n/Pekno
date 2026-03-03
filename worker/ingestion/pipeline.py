@@ -1,30 +1,38 @@
 from hub.core.models import UniversalItem
-from typing import Optional
+from hub.core.logger import worker_log
+from worker.broker import broker
 
 class IngestionPipeline:
     def __init__(self):
-        # 这里以后会初始化 LLM 客户端和 Embedding 模型
-        self.name = "Iris-Ingestor"
+        self.logger = worker_log
 
     async def process_item(self, item: UniversalItem):
-        """
-        处理单条数据的标准流水线
-        """
-        print(f"🚀 {self.name} 开始处理: {item.title}")
+        self.logger.info(f">>> 接收到新任务: {item.title} (ID: {item.id})")
 
-        # 1. 自动打标签 (模拟逻辑)
-        if not item.tags:
-            item.tags = await self._auto_tagging(item)
+        # DEBUG 记录插件私有数据，防止 metadata_extra 丢失字段
+        self.logger.debug(f"DEBUG - [Entry] 插件私有元数据: {item.metadata_extra}")
 
-        # 2. 提取全文/摘要 (模拟逻辑)
-        if item.capabilities and "summarize" in item.capabilities:
-            item.summary = await self._generate_summary(item)
+        try:
+            # 1. 自动分类
+            if not item.tags:
+                self.logger.debug(f"正在为 {item.id} 进行 AI 自动打标签...")
+                item.tags = await self._auto_tagging(item)
 
-        # 3. 执行向量化并入库
-        await self._store_to_vector_db(item)
-        
-        print(f"✅ {item.id} 已成功存入 Iris 记忆库")
-        return item
+            # 2. 摘要生成
+            if item.capabilities and "summarize" in item.capabilities:
+                self.logger.info(f"触发 AI 总结服务: {item.id}")
+                item.summary = await self._generate_summary(item)
+
+            # 3. 向量存储
+            self.logger.debug(f"正在执行向量化入库: {item.id}")
+            await self._store_to_vector_db(item)
+            
+            self.logger.info(f"成功存入 Iris 记忆库: {item.id}")
+            return item
+
+        except Exception as e:
+            self.logger.error(f"处理任务失败 {item.id}: {str(e)}", exc_info=True)
+            raise e
 
     async def _auto_tagging(self, item: UniversalItem):
         # 实际开发时这里会调用 LLM
@@ -37,3 +45,9 @@ class IngestionPipeline:
     async def _store_to_vector_db(self, item: UniversalItem):
         # 这里对接 pgvector
         pass
+
+@broker.task(task_name="process_new_item")
+async def process_new_item_task(item_dict: dict):
+    item = UniversalItem.model_validate(item_dict)
+    pipeline = IngestionPipeline()
+    return await pipeline.process_item(item)

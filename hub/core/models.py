@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import List, Optional, Dict, Any
 from enum import Enum
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field, HttpUrl, ConfigDict
 
 class ItemIntent(str, Enum):
     video = "video"
@@ -20,23 +20,20 @@ class UniversalItem(BaseModel):
     Pekno 万能信息实体类 - Iris 的核心数据结构
     直接对应 schemas/item_schema.json
     """
-    id: str = Field(..., description="唯一ID")
-    title: str = Field(..., min_length=1)
-    source_type: str = Field(..., description="来源插件名")
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    title: str
+    source_type: str
     created_at: datetime = Field(default_factory=datetime.now)
     raw_link: HttpUrl
     intent: ItemIntent
+    # 增加这个字段，因为 pipeline 里用到了
+    cover_url: Optional[str] = None 
     
-    # 可选字段
     capabilities: List[str] = Field(default_factory=list)
     content_text: Optional[str] = None
     summary: Optional[str] = None
     tags: List[str] = Field(default_factory=list)
     status: ItemStatus = ItemStatus.inbox
-    
-    # 插件私有数据
     metadata_extra: Dict[str, Any] = Field(default_factory=dict)
-
-    class Config:
-        # 允许从字典或 JSON 字符串中加载
-        from_attributes = True
