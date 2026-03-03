@@ -14,6 +14,8 @@ from . import models
 # re‑export a handful of things from models at the package level
 from .models import UniversalItem, ItemIntent, ItemStatus
 from .logger import hub_log, worker_log
+from .init_db import init_db
+from .llm.service import LLMManager, LLMService, EmbeddingService
 
 __all__ = [
     "models",
@@ -22,4 +24,8 @@ __all__ = [
     "ItemStatus",
     "hub_log",
     "worker_log",
+    "init_db",
+    "LLMManager",
+    "LLMService",
+    "EmbeddingService",
 ]

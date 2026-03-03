@@ -15,6 +15,10 @@ class ItemStatus(str, Enum):
     watch_later = "watch_later"
     archived = "archived"
 
+class ItemRetention(str, Enum):
+    PERMANENT = "permanent"
+    TRANSIENT = "transient" # 临时
+
 class UniversalItem(BaseModel):
     """
     Pekno 万能信息实体类 - Iris 的核心数据结构
@@ -28,9 +32,8 @@ class UniversalItem(BaseModel):
     created_at: datetime = Field(default_factory=datetime.now)
     raw_link: HttpUrl
     intent: ItemIntent
-    # 增加这个字段，因为 pipeline 里用到了
     cover_url: Optional[str] = None 
-    
+    retention_days: int = -1 # -1 代表永久，正整数代表保留天数
     capabilities: List[str] = Field(default_factory=list)
     content_text: Optional[str] = None
     summary: Optional[str] = None

@@ -13,6 +13,8 @@ or just ``import hub`` and access ``hub.core``.
 from . import core
 from .core.models import UniversalItem, ItemIntent, ItemStatus
 from .core.logger import hub_log, worker_log
+from .core.init_db import init_db
+from .core.llm.service import LLMManager, LLMService, EmbeddingService
 
 __all__ = [
     "core",
@@ -21,4 +23,8 @@ __all__ = [
     "ItemStatus",
     "hub_log",
     "worker_log",
+    "init_db",
+    "LLMManager",
+    "LLMService",
+    "EmbeddingService",
 ]
