@@ -16,6 +16,7 @@ from .models import UniversalItem, ItemIntent, ItemStatus
 from .logger import hub_log, worker_log
 from .init_db import init_db
 from .llm.service import LLMManager, LLMService, EmbeddingService
+from .search import SearchService
 
 __all__ = [
     "models",
@@ -28,4 +29,5 @@ __all__ = [
     "LLMManager",
     "LLMService",
     "EmbeddingService",
+    "SearchService"
 ]
