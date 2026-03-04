@@ -1,20 +1,33 @@
 import asyncio
+import sys
+import os
+
+# 确保能找到 hub 包
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 from hub.core.search import SearchService
 
 async def test_search():
     search = SearchService()
-    
-    # 尝试一些模糊的意图词
-    queries = ["照片管理工具", "舆情分析助手", "二次元图片放大"]
+    queries = ["照片管理", "BettaFish", "二次元", "immich"]
     
     for q in queries:
-        print(f"\n👉 搜索意图: {q}")
-        results = await search.vector_search(q, limit=2)
+        print(f"\n🔎 搜索词: 【{q}】")
         
-        for item, score in results:
-            print(f"🎯 [得分: {score:.4f}] {item.title}")
-            print(f"📝 摘要预览: {item.summary[:60]}...")
-            print("-" * 20)
+        # 测试纯向量搜索
+        print("--- 纯向量搜索 (语义理解) ---")
+        v_results = await search.vector_search(q, limit=2)
+        for item, score in v_results:
+            print(f"[{score:.4f}] {item.title}")
+            
+        # 测试混合搜索
+        print("--- 混合搜索 (精确匹配+语义) ---")
+        h_results = await search.hybrid_search(q, limit=2)
+        if not h_results:
+            print("  (未匹配到关键词)")
+        for item, v_score, t_score in h_results:
+            print(f"[{v_score:.4f} + {t_score:.4f} = {v_score + t_score:.4f}] {item.title}")
+        print("-" * 30)
 
 if __name__ == "__main__":
     asyncio.run(test_search())

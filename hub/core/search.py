@@ -1,51 +1,57 @@
-from sqlalchemy import select, text, or_
+import asyncio
+from typing import List
+from sqlalchemy import select, text, case, cast, Float
 from hub.core.database import AsyncSessionLocal
 from hub.core.database_models import ItemORM
 from hub.core.llm.service import EmbeddingService
+from hub.core.logger import hub_log
 
 class SearchService:
     def __init__(self):
         self.embed_service = EmbeddingService()
 
-    async def hybrid_search(self, query_text: str, limit: int = 10):
-        # 1. 准备向量
+    async def vector_search(self, query_text: str, limit: int = 5):
+        """纯向量搜索"""
         query_vector = await self.embed_service.get_vector(query_text)
-
         async with AsyncSessionLocal() as session:
-            # 2. 构建混合查询语句
-            # - cosine_distance 处理语义相似度
-            # - ts_rank_cd 处理文本匹配相似度 (Postgres 内置全文检索)
-            
-            sql = text("""
-                SELECT 
-                    id, title, summary, tags,
-                    (1 - (embedding <=> :vector)) as vector_score,
-                    ts_rank_cd(
-                        to_tsvector('chinese', title || ' ' || content_text || ' ' || summary), 
-                        plainto_tsquery('chinese', :query)
-                    ) as text_score
-                FROM items
-                ORDER BY (vector_score * 0.7 + text_score * 0.3) DESC
-                LIMIT :limit
-            """)
-            
-            # 注意：'chinese' 分词器需要你的 Postgres 安装了 zhparser，
-            # 如果是默认环境，我们可以先用 'simple' 或者是直接在 Python 层做权重融合。
-            
-            # 为了兼容性，我们先用 SQLAlchemy 的逻辑实现一个基础版的融合：
-            vector_stmt = (
+            # 使用 pgvector 的余弦距离
+            stmt = (
                 select(
                     ItemORM,
-                    (1 - ItemORM.embedding.cosine_distance(query_vector)).label("v_score")
+                    (1 - ItemORM.embedding.cosine_distance(query_vector)).label("score")
                 )
-                .where(or_(
-                    ItemORM.title.icontains(query_text),
-                    ItemORM.summary.icontains(query_text),
-                    ItemORM.tags.any(query_text)
-                )) # 这里加上基础关键词过滤
-                .order_by(text("v_score DESC"))
+                .order_by(text("score DESC"))
                 .limit(limit)
             )
+            result = await session.execute(stmt)
+            return result.all()
 
-            result = await session.execute(vector_stmt)
+    async def hybrid_search(self, query_text: str, limit: int = 5):
+        """混合搜索 2.0：修复 label 报错，使用原生 case 表达式"""
+        query_vector = await self.embed_service.get_vector(query_text)
+        
+        async with AsyncSessionLocal() as session:
+            # 使用 SQLAlchemy 的 case 构造加分权重
+            # 如果标题包含关键词，权重分给 0.5，摘要包含给 0.2
+            search_pattern = f"%{query_text}%"
+            
+            t_score = case(
+                (ItemORM.title.ilike(search_pattern), 0.5),
+                (ItemORM.summary.ilike(search_pattern), 0.2),
+                else_=0.0
+            ).label("t_score")
+
+            v_score = (1 - ItemORM.embedding.cosine_distance(query_vector)).label("v_score")
+
+            stmt = (
+                select(
+                    ItemORM,
+                    v_score,
+                    t_score
+                )
+                .order_by((v_score + t_score).desc())
+                .limit(limit)
+            )
+            
+            result = await session.execute(stmt)
             return result.all()
