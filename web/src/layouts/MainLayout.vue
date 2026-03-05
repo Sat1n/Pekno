@@ -1,16 +1,144 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 import { useColorMode } from '@vueuse/core'
-import { Search, Activity, Clock, Github, Tv, Settings, Sun, Moon, Monitor, LayoutList, LayoutGrid, Rows3 } from 'lucide-vue-next'
+import { Search, Activity, Clock, Github, Tv, Settings, Sun, Moon, Monitor, LayoutList, LayoutGrid, Rows3, Puzzle, Bell, X, Check, Loader2, Trash2 } from 'lucide-vue-next'
 import { Sidebar, SidebarContent, SidebarGroup, SidebarGroupLabel, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import SettingsDialog from '@/components/SettingsDialog.vue'
+import GitHubSettingsDialog from '@/components/GitHubSettingsDialog.vue'
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
+import { deleteGitHubConfig } from '@/lib/api'
+import { useToast } from '@/components/ui/toast/use-toast'
+import { usePluginStore } from '@/store/usePluginStore'
+
+const { toast } = useToast()
+const { loadGitHubConfig } = usePluginStore()
+
+// 通知类型
+export interface AppNotification {
+  id: string
+  title: string
+  description: string
+  type: 'success' | 'error' | 'info' | 'warning'
+  timestamp: Date
+  read: boolean
+}
+
+// 通知列表
+const notifications = ref<AppNotification[]>([])
+const unreadCount = ref(0)
+
+// 添加通知的方法（供子组件调用）
+function addNotification(notification: Omit<AppNotification, 'id' | 'timestamp' | 'read'>) {
+  const newNotification: AppNotification = {
+    ...notification,
+    id: Date.now().toString(),
+    timestamp: new Date(),
+    read: false,
+  }
+  notifications.value.unshift(newNotification)
+  unreadCount.value++
+  
+  // 3秒后自动标记为已读
+  setTimeout(() => {
+    markAsRead(newNotification.id)
+  }, 5000)
+}
+
+// 标记为已读
+function markAsRead(id: string) {
+  const notification = notifications.value.find(n => n.id === id)
+  if (notification && !notification.read) {
+    notification.read = true
+    unreadCount.value = Math.max(0, unreadCount.value - 1)
+  }
+}
+
+// 全部标记为已读
+function markAllAsRead() {
+  notifications.value.forEach(n => n.read = true)
+  unreadCount.value = 0
+}
+
+// 清除所有通知
+function clearAll() {
+  notifications.value = []
+  unreadCount.value = 0
+}
+
+// 格式化时间
+function formatTime(date: Date): string {
+  const now = new Date()
+  const diff = now.getTime() - date.getTime()
+  const minutes = Math.floor(diff / 60000)
+  
+  if (minutes < 1) return '刚刚'
+  if (minutes < 60) return `${minutes}分钟前`
+  if (minutes < 1440) return `${Math.floor(minutes / 60)}小时前`
+  return `${Math.floor(minutes / 1440)}天前`
+}
 
 const mode = useColorMode()
 
 // 布局模式 v-model
 const layoutMode = defineModel<'list' | 'grid' | 'compact'>('layout', { default: 'list' })
+
+// 搜索关键词 v-model
+const searchQuery = defineModel<string>('searchQuery', { default: '' })
+
+// 系统设置弹窗状态
+const isSettingsOpen = ref(false)
+
+// GitHub 设置弹窗状态
+const isGitHubSettingsOpen = ref(false)
+
+// 删除确认对话框状态
+const isDeleteDialogOpen = ref(false)
+const isDeleting = ref(false)
+
+// 打开删除确认对话框
+function openDeleteDialog() {
+  isDeleteDialogOpen.value = true
+}
+
+// 删除配置
+async function handleDelete() {
+  isDeleting.value = true
+  try {
+    const success = await deleteGitHubConfig()
+    if (success) {
+      // ✨ 1. 强制刷新全局 Store，让小灯变灰
+      await loadGitHubConfig() 
+      
+      // ✨ 2. 既然配置都删了，直接把配置窗口也关掉
+      isGitHubSettingsOpen.value = false 
+      
+      isDeleteDialogOpen.value = false
+      toast({
+        title: '删除成功',
+        description: 'GitHub 配置已清除',
+      })
+    }
+  } catch (error) {
+    console.error('删除配置失败:', error)
+    toast({
+      title: '删除失败',
+      description: '无法清除 GitHub 配置',
+      variant: 'destructive',
+    })
+  } finally {
+    isDeleting.value = false
+  }
+}
+
+// 暴露方法给子组件
+defineExpose({
+  addNotification,
+  openDeleteDialog,
+})
 
 const navMain = [
   { title: '探索 (Explore)', icon: Search },
@@ -42,8 +170,10 @@ const plugins = [
         <div class="flex-1 max-w-xl relative group mx-4">
           <Search class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <Input 
-            placeholder="搜索..." 
+            v-model="searchQuery"
+            placeholder="搜索 GitHub 项目..." 
             class="w-full pl-9 bg-muted/50 border-transparent focus:bg-background rounded-md h-9 transition-all"
+            @keyup.enter="$emit('search')"
           />
         </div>
 
@@ -87,6 +217,77 @@ const plugins = [
             </DropdownMenuContent>
           </DropdownMenu>
 
+          <!-- 通知铃铛 -->
+          <DropdownMenu>
+            <DropdownMenuTrigger as-child>
+              <Button variant="ghost" size="icon" class="h-9 w-9 relative">
+                <Bell class="h-4 w-4" />
+                <span 
+                  v-if="unreadCount > 0" 
+                  class="absolute -top-1 -right-1 h-4 w-4 bg-destructive text-destructive-foreground text-[10px] font-bold rounded-full flex items-center justify-center"
+                >
+                  {{ unreadCount > 9 ? '9+' : unreadCount }}
+                </span>
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" class="w-80">
+              <div class="flex items-center justify-between px-3 py-2 border-b">
+                <span class="font-semibold">通知</span>
+                <div class="flex gap-1">
+                  <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    class="h-6 text-xs"
+                    @click="markAllAsRead"
+                  >
+                    全部已读
+                  </Button>
+                  <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    class="h-6 text-xs text-muted-foreground"
+                    @click="clearAll"
+                  >
+                    清除
+                  </Button>
+                </div>
+              </div>
+              
+              <!-- 通知列表 -->
+              <div class="max-h-80 overflow-y-auto">
+                <div v-if="notifications.length === 0" class="p-4 text-center text-muted-foreground text-sm">
+                  暂无通知
+                </div>
+                <div 
+                  v-for="notification in notifications" 
+                  :key="notification.id"
+                  class="px-3 py-2 border-b last:border-0 hover:bg-muted/50 cursor-pointer transition-colors"
+                  :class="{ 'bg-muted/30': !notification.read }"
+                  @click="markAsRead(notification.id)"
+                >
+                  <div class="flex gap-2">
+                    <div 
+                      class="w-2 h-2 rounded-full mt-2 flex-shrink-0"
+                      :class="{
+                        'bg-green-500': notification.type === 'success',
+                        'bg-red-500': notification.type === 'error',
+                        'bg-blue-500': notification.type === 'info',
+                        'bg-yellow-500': notification.type === 'warning',
+                      }"
+                    ></div>
+                    <div class="flex-1 min-w-0">
+                      <div class="flex items-center justify-between">
+                        <span class="font-medium text-sm truncate">{{ notification.title }}</span>
+                        <span class="text-xs text-muted-foreground ml-2">{{ formatTime(notification.timestamp) }}</span>
+                      </div>
+                      <p class="text-xs text-muted-foreground truncate">{{ notification.description }}</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
           <Avatar class="h-8 w-8 cursor-pointer border">
             <AvatarImage src="https://github.com/shadcn.png" />
             <AvatarFallback>NT</AvatarFallback>
@@ -108,8 +309,11 @@ const plugins = [
               </SidebarMenu>
             </SidebarGroup>
           </SidebarContent>
-          <div class="mt-auto p-4 border-t border-border">
-            <SidebarMenuButton class="w-full justify-start hover:bg-muted/50">
+          <div class="mt-auto p-4 border-t border-border space-y-2">
+            <SidebarMenuButton 
+              class="w-full justify-start hover:bg-muted/50"
+              @click="isSettingsOpen = true"
+            >
               <Settings class="w-4 h-4 mr-2" />
               <span>系统设置</span>
             </SidebarMenuButton>
@@ -123,6 +327,38 @@ const plugins = [
         </main>
       </div>
     </div>
+
+    <!-- 系统设置弹窗 -->
+    <SettingsDialog 
+      :open="isSettingsOpen" 
+      @close="isSettingsOpen = false"
+      @open-github-settings="isGitHubSettingsOpen = true"
+    />
+    
+    <!-- GitHub 设置弹窗 -->
+    <GitHubSettingsDialog 
+      v-model:open="isGitHubSettingsOpen" 
+      @open-delete-dialog="openDeleteDialog"
+    />
+
+    <!-- 删除确认对话框 -->
+    <AlertDialog :open="isDeleteDialogOpen" @update:open="isDeleteDialogOpen = $event">
+      <AlertDialogContent class="max-w-[425px]">
+        <AlertDialogHeader>
+          <AlertDialogTitle>确认删除</AlertDialogTitle>
+          <AlertDialogDescription>
+            确定要删除 GitHub 配置吗？这将清除所有相关的 Token 和设置。
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <div class="flex gap-3 justify-end">
+          <AlertDialogCancel>取消</AlertDialogCancel>
+          <AlertDialogAction @click="handleDelete">
+            <Loader2 v-if="isDeleting" class="w-4 h-4 mr-2 animate-spin" />
+            {{ isDeleting ? '删除中...' : '删除' }}
+          </AlertDialogAction>
+        </div>
+      </AlertDialogContent>
+    </AlertDialog>
   </SidebarProvider>
 </template>
 

@@ -26,7 +26,7 @@ class ItemORM(Base):
     # 保留策略：-1 代表永久，正整数代表保留天数
     retention_days: Mapped[int] = mapped_column(Integer, default=-1) 
     
-    # 标记：是否已“收藏” (如果收藏了，即便过了天数也不删)
+    # 标记：是否已"收藏" (如果收藏了，即便过了天数也不删)
     is_pinned: Mapped[bool] = mapped_column(default=False)
     
     # 扩展字段
@@ -36,3 +36,24 @@ class ItemORM(Base):
     
     # 插件私有数据
     metadata_extra: Mapped[dict] = mapped_column(JSON, default={})
+
+
+class ConfigORM(Base):
+    """用户配置存储表（加密存储敏感信息）"""
+    __tablename__ = "configs"
+
+    # 配置键，如 "github_token", "sync_limit" 等
+    key: Mapped[str] = mapped_column(String, primary_key=True)
+    
+    # 加密后的值
+    value: Mapped[str] = mapped_column(Text)
+    
+    # 配置描述
+    description: Mapped[Optional[str]] = mapped_column(Text, default="")
+    
+    # 创建和更新时间
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
+    
+    # 是否启用
+    is_enabled: Mapped[bool] = mapped_column(default=True)

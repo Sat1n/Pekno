@@ -27,7 +27,7 @@ class SearchResponse(ItemResponse):
 
 class SyncRequest(BaseModel):
     """同步请求模型"""
-    token: str
+    token: Optional[str] = None
     limit: Optional[int] = 10
 
 
