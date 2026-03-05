@@ -112,3 +112,6 @@ class ConfigKeys:
     GITHUB_TOKEN = "github_token"
     GITHUB_SYNC_LIMIT = "github_sync_limit"
     GITHUB_AUTO_SYNC = "github_auto_sync"
+    GITHUB_AUTO_SYNC_INTERVAL = "github_auto_sync_interval"
+    GITHUB_SYNC_STATUS = "github_sync_status"
+    GITHUB_LAST_SYNC_TIME = "github_last_sync_time"

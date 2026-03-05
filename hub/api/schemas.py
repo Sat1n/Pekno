@@ -42,6 +42,7 @@ class FrontendSearchItem(BaseModel):
     """前端搜索接口返回的数据格式"""
     title: str
     summary: Optional[str] = None
+    cover_url: Optional[str] = None
     score: float
     source: str
     tags: List[str] = []

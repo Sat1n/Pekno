@@ -71,6 +71,7 @@ async def hybrid_search_api(
                 
                 summary = item.summary or item.content_text or "暂无描述"
                 time_str = format_github_time(pushed_at) if pushed_at else format_time_ago(item.created_at)
+                cover_url = metadata.get("cover_url")
                 
                 source_map = {
                     "github_star": "github",
@@ -85,6 +86,7 @@ async def hybrid_search_api(
                 search_results.append(FrontendSearchItem(
                     title=item.title,
                     summary=summary,
+                    cover_url=cover_url,
                     score=round(score, 2),
                     source=source,
                     tags=tags[:5],
@@ -115,6 +117,9 @@ async def hybrid_search_api(
         # time：使用 pushed_at 或 created_at
         time_str = format_github_time(pushed_at) if pushed_at else format_time_ago(item.created_at)
         
+        # cover_url: 获取封面图链接
+        cover_url = metadata.get("cover_url")
+        
         # source：根据 source_type 映射
         source_map = {
             "github_star": "github",
@@ -129,6 +134,7 @@ async def hybrid_search_api(
         search_results.append(FrontendSearchItem(
             title=item.title,
             summary=summary,
+            cover_url=cover_url,
             score=round(score, 2),
             source=source,
             tags=tags[:5],
@@ -191,12 +197,16 @@ async def search_github_items(
             # time：使用 pushed_at（仓库最后更新时间）
             time_str = format_github_time(pushed_at) if pushed_at else "未知时间"
             
+            # cover_url: 提取封面图链接
+            cover_url = metadata.get("cover_url")
+            
             # score：基于 stars 数量计算（最多 1.0，最少 0.5）
             score = min(1.0, max(0.5, 0.5 + (stars / 10000)))
             
             search_results.append({
                 "title": item.title,
                 "summary": summary,
+                "cover_url": cover_url,
                 "score": round(score, 2),
                 "source": "github",
                 "tags": tags[:5],  # 最多显示 5 个标签
@@ -277,13 +287,19 @@ class GitHubConfigRequest(BaseModel):
     token: Optional[str] = None
     sync_limit: int = 100
     auto_sync: bool = False
+    auto_sync_interval: int = 60  # 分钟
 
 
 class GitHubConfigResponse(BaseModel):
     has_token: bool
     sync_limit: int
     auto_sync: bool
+    auto_sync_interval: int
     token_preview: Optional[str] = None
+
+class GitHubSyncStatusResponse(BaseModel):
+    status: str  # "idle" or "running"
+    last_sync_time: Optional[str] = None
 
 
 @app.get("/api/config/github", response_model=GitHubConfigResponse)
@@ -296,6 +312,7 @@ async def get_github_config():
     token = await ConfigManager.get_config(ConfigKeys.GITHUB_TOKEN)
     sync_limit = await ConfigManager.get_config(ConfigKeys.GITHUB_SYNC_LIMIT)
     auto_sync = await ConfigManager.get_config(ConfigKeys.GITHUB_AUTO_SYNC)
+    auto_sync_interval = await ConfigManager.get_config(ConfigKeys.GITHUB_AUTO_SYNC_INTERVAL)
     
     # Token 预览：只显示前 4 位
     token_preview = None
@@ -306,6 +323,7 @@ async def get_github_config():
         has_token=bool(token),
         sync_limit=int(sync_limit) if sync_limit else 100,
         auto_sync=auto_sync == "true" if auto_sync else False,
+        auto_sync_interval=int(auto_sync_interval) if auto_sync_interval else 60,
         token_preview=token_preview
     )
 
@@ -343,10 +361,32 @@ async def save_github_config(config: GitHubConfigRequest):
         description="是否自动同步 GitHub Star"
     )
     
+    # 保存自动同步时间间隔
+    await ConfigManager.set_config(
+        ConfigKeys.GITHUB_AUTO_SYNC_INTERVAL,
+        str(config.auto_sync_interval),
+        description="GitHub 自动同步间隔时间 (分钟)"
+    )
+    
+    # 若保存了配置且开启自动同步，可以尝试立即出发一次
+    if config.auto_sync and config.token:
+        from worker.plugins.github.task import sync_github_stars_task
+        await sync_github_stars_task.kiq(limit=config.sync_limit)
+    
     return {
         "status": "success",
         "message": "GitHub 配置已保存"
     }
+
+@app.get("/api/config/github/status", response_model=GitHubSyncStatusResponse)
+async def get_github_sync_status():
+    """获取当前 GitHub Sync 状态"""
+    status = await ConfigManager.get_config(ConfigKeys.GITHUB_SYNC_STATUS)
+    last_sync = await ConfigManager.get_config(ConfigKeys.GITHUB_LAST_SYNC_TIME)
+    return GitHubSyncStatusResponse(
+        status=status if status else "idle",
+        last_sync_time=last_sync
+    )
 
 
 @app.post("/api/config/github/test")

@@ -294,7 +294,15 @@ function isCardActive(item: LocalSearchResult) {
         
         <!-- 封面图区域 -->
         <div v-if="layoutMode !== 'compact'" class="aspect-video bg-muted/30 flex items-center justify-center relative overflow-hidden border-b border-border/40 flex-shrink-0">
-          <component :is="getSourceIcon(item.source)" class="w-16 h-16 text-muted-foreground/10 group-hover:scale-105 transition-transform duration-500" />
+          <!-- 显示抓取的封面图或回退到图标/源图标 -->
+          <img 
+            v-if="item.cover_url" 
+            :src="item.cover_url" 
+            alt="Cover" 
+            class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+            @error="(e) => (e.target as HTMLImageElement).style.display = 'none'"
+          />
+          <component v-else :is="getSourceIcon(item.source)" class="w-16 h-16 text-muted-foreground/10 group-hover:scale-105 transition-transform duration-500" />
           
           <!-- 百分数 Badge -->
           <div class="absolute bottom-3 right-3">
@@ -310,10 +318,13 @@ function isCardActive(item: LocalSearchResult) {
           <component v-if="layoutMode === 'compact'" :is="getSourceIcon(item.source)" class="w-4 h-4 text-primary shrink-0" />
           
           <div class="min-w-0 flex-1">
-            <CardTitle :class="[
-              'font-bold tracking-tight group-hover:text-primary transition-colors',
-              layoutMode === 'compact' ? 'text-sm truncate' : 'text-xl'
-            ]">
+            <CardTitle 
+              :class="[
+                'font-bold tracking-tight group-hover:text-primary transition-colors',
+                layoutMode === 'compact' ? 'text-sm truncate' : 'text-xl line-clamp-2 break-all'
+              ]"
+              :title="item.title"
+            >
               {{ item.title }}
             </CardTitle>
             

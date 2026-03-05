@@ -1,4 +1,4 @@
-import { ref, reactive } from 'vue'
+import { ref } from 'vue'
 import { getGitHubConfig, type GitHubConfig } from '@/lib/api'
 
 // 创建全局状态
@@ -6,6 +6,7 @@ const githubConfig = ref<GitHubConfig>({
   has_token: false,
   sync_limit: 100,
   auto_sync: false,
+  auto_sync_interval: 60,
 })
 
 const isLoading = ref(false)

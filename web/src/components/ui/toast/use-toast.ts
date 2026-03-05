@@ -10,8 +10,11 @@ export interface Toast {
   duration?: number
 }
 
-function createToastManager(toastsRef) {
-  const toasts = toastsRef || ref([])
+// Global state
+const globalToasts = ref<Toast[]>([])
+
+function createToastManager(toastsRef: any) {
+  const toasts = toastsRef || globalToasts
 
   const addToast = (toast: Omit<Toast, 'id'>) => {
     const id = crypto.randomUUID()
@@ -21,21 +24,29 @@ function createToastManager(toastsRef) {
       duration: toast.duration || 3000,
     }
     toasts.value.push(newToast)
+
+    // Auto remove after duration
+    if (newToast.duration > 0) {
+      setTimeout(() => {
+        removeToast(id)
+      }, newToast.duration)
+    }
+
     return id
   }
 
   const removeToast = (id: string) => {
-    toasts.value = toasts.value.filter((toast) => toast.id !== id)
+    toasts.value = toasts.value.filter((toast: Toast) => toast.id !== id)
   }
 
   return {
     toasts,
     addToast,
     removeToast,
+    toast: addToast, // alias for addToast
   }
 }
 
 export function useToast() {
-  const toasts = ref([])
-  return createToastManager(toasts)
+  return createToastManager(globalToasts)
 }

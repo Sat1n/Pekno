@@ -14,13 +14,14 @@ provide('toast', {
 </script>
 
 <template>
-  <div class="fixed inset-0 z-50 flex items-end justify-center pointer-events-none">
+  <div class="fixed inset-0 z-[100] flex items-end justify-center pointer-events-none">
     <div class="flex flex-col space-y-2 p-4">
       <Toast
         v-for="toast in toasts"
         :key="toast.id"
         :toast="toast"
         @close="removeToast(toast.id)"
+        class="pointer-events-auto"
       />
     </div>
   </div>

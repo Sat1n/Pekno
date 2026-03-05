@@ -7,8 +7,8 @@ import { Switch } from '@/components/ui/switch'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
-import { Github, Check, AlertCircle, Loader2, Trash2, Save } from 'lucide-vue-next'
-import { getGitHubConfig, saveGitHubConfig, testGitHubToken, deleteGitHubConfig, type GitHubConfig } from '@/lib/api'
+import { Github, Check, AlertCircle, Loader2, Trash2, Save, RefreshCw } from 'lucide-vue-next'
+import { getGitHubConfig, saveGitHubConfig, testGitHubToken, deleteGitHubConfig, triggerGitHubSync, getGitHubSyncStatus, type GitHubConfig } from '@/lib/api'
 import { useToast } from '@/components/ui/toast/use-toast'
 
 const { toast } = useToast()
@@ -18,18 +18,22 @@ const config = ref<GitHubConfig>({
   has_token: false,
   sync_limit: 100,
   auto_sync: false,
+  auto_sync_interval: 60,
 })
 
 // 表单状态
 const token = ref('')
 const syncLimit = ref(100)
 const autoSync = ref(false)
+const autoSyncInterval = ref(60)
 
 // 加载状态
 const isLoading = ref(false)
 const isSaving = ref(false)
 const isTesting = ref(false)
 const isDeleting = ref(false)
+const isSyncing = ref(false)
+let syncIntervalTimer: number | null = null
 
 // 加载配置
 async function loadConfig() {
@@ -39,6 +43,14 @@ async function loadConfig() {
     config.value = data
     syncLimit.value = data.sync_limit
     autoSync.value = data.auto_sync
+    autoSyncInterval.value = data.auto_sync_interval || 60
+    
+    // 打开时主动查询一次同步状态
+    const { status } = await getGitHubSyncStatus()
+    if (status === 'running') {
+      isSyncing.value = true
+      pollSyncStatus()
+    }
   } catch (error) {
     console.error('加载配置失败:', error)
     toast({
@@ -69,6 +81,7 @@ async function handleSave() {
     const saveData: any = {
       sync_limit: syncLimit.value,
       auto_sync: autoSync.value,
+      auto_sync_interval: autoSyncInterval.value
     }
     
     // 只有输入了新token才传递token字段
@@ -120,6 +133,36 @@ async function handleTest() {
     })
   } finally {
     isTesting.value = false
+  }
+}
+
+// 轮询同步状态
+function pollSyncStatus() {
+  if (syncIntervalTimer) clearInterval(syncIntervalTimer)
+  syncIntervalTimer = window.setInterval(async () => {
+    try {
+      const { status } = await getGitHubSyncStatus()
+      if (status === 'idle' && isSyncing.value) {
+        toast({ title: '同步完成', description: 'GitHub Stars 同步已完成。' })
+        isSyncing.value = false
+        if (syncIntervalTimer) clearInterval(syncIntervalTimer)
+      }
+    } catch(e) { /* ignore */ }
+  }, 3000)
+}
+
+// 立即同步
+async function handleSyncNow() {
+  if (isSyncing.value) return
+  isSyncing.value = true
+  toast({ title: '同步开始', description: '正在抓取最新的 GitHub Stars...' })
+  try {
+    await triggerGitHubSync(syncLimit.value)
+    pollSyncStatus()
+  } catch (err: any) {
+    console.error('立即同步失败', err)
+    toast({ title: '同步失败', description: '无法启动同步请求', variant: 'destructive' })
+    isSyncing.value = false
   }
 }
 
@@ -252,6 +295,22 @@ onMounted(() => {
               :disabled="isLoading"
             />
           </div>
+
+          <!-- 自动同步间隔 -->
+          <div class="space-y-2" v-if="autoSync">
+            <Label for="auto-sync-interval">自动同步间隔 (分钟)</Label>
+            <Input
+              id="auto-sync-interval"
+              v-model.number="autoSyncInterval"
+              type="number"
+              min="1"
+              max="43200"
+              :disabled="isLoading"
+            />
+            <p class="text-sm text-muted-foreground">
+              默认 60 分钟。最大支持 43200 分钟 (30天)。
+            </p>
+          </div>
         </div>
       </CardContent>
 
@@ -276,6 +335,16 @@ onMounted(() => {
             <Loader2 v-if="isTesting" class="w-4 h-4 mr-2 animate-spin" />
             <Check v-else class="w-4 h-4 mr-2" />
             {{ isTesting ? '测试中...' : '测试连接' }}
+          </Button>
+
+          <Button
+            variant="outline"
+            :disabled="isLoading || isSyncing || !config.has_token"
+            @click="handleSyncNow"
+          >
+            <Loader2 v-if="isSyncing" class="w-4 h-4 mr-2 animate-spin" />
+            <RefreshCw v-else class="w-4 h-4 mr-2" />
+            {{ isSyncing ? '同步中...' : '立即同步' }}
           </Button>
         </div>
 

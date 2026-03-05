@@ -14,8 +14,8 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog'
-import { Github, Check, AlertCircle, Loader2, Trash2, Save, ExternalLink } from 'lucide-vue-next'
-import { getGitHubConfig, saveGitHubConfig, testGitHubToken, type GitHubConfig } from '@/lib/api'
+import { Github, Check, AlertCircle, Loader2, Trash2, Save, ExternalLink, RefreshCw } from 'lucide-vue-next'
+import { getGitHubConfig, saveGitHubConfig, testGitHubToken, triggerGitHubSync, getGitHubSyncStatus, type GitHubConfig } from '@/lib/api'
 import { useToast } from '@/components/ui/toast/use-toast'
 import { usePluginStore } from '@/store/usePluginStore'
 
@@ -38,16 +38,20 @@ const config = githubConfig
 const token = ref('')
 const syncLimit = ref(100)
 const autoSync = ref(false)
+const autoSyncInterval = ref(60)
 
 // 加载状态
 const isSaving = ref(false)
 const isTesting = ref(false)
+const isSyncing = ref(false)
+let syncIntervalTimer: number | null = null
 
 // 加载配置
 async function loadConfig() {
   await loadGitHubConfig()
   syncLimit.value = config.value.sync_limit
   autoSync.value = config.value.auto_sync
+  autoSyncInterval.value = config.value.auto_sync_interval || 60
 }
 
 // 保存配置
@@ -69,6 +73,7 @@ async function handleSave() {
     const saveData: any = {
       sync_limit: syncLimit.value,
       auto_sync: autoSync.value,
+      auto_sync_interval: autoSyncInterval.value
     }
     if (token.value) {
       saveData.token = token.value
@@ -121,6 +126,36 @@ async function handleTest() {
   }
 }
 
+// 轮询同步状态
+function pollSyncStatus() {
+  if (syncIntervalTimer) clearInterval(syncIntervalTimer)
+  syncIntervalTimer = window.setInterval(async () => {
+    try {
+      const { status } = await getGitHubSyncStatus()
+      if (status === 'idle' && isSyncing.value) {
+        toast({ title: '同步完成', description: 'GitHub Stars 同步已完成。' })
+        isSyncing.value = false
+        if (syncIntervalTimer) clearInterval(syncIntervalTimer)
+      }
+    } catch(e) { /* ignore */ }
+  }, 3000)
+}
+
+// 立即同步
+async function handleSyncNow() {
+  if (isSyncing.value) return
+  isSyncing.value = true
+  toast({ title: '同步开始', description: '正在抓取最新的 GitHub Stars...' })
+  try {
+    await triggerGitHubSync(syncLimit.value)
+    pollSyncStatus()
+  } catch (err: any) {
+    console.error('立即同步失败', err)
+    toast({ title: '同步失败', description: '无法启动同步请求', variant: 'destructive' })
+    isSyncing.value = false
+  }
+}
+
 // 打开删除确认对话框
 function openDeleteDialog() {
   emit('open-delete-dialog')
@@ -134,6 +169,15 @@ watch(() => props.open, (newVal) => {
       // 这里的 loadConfig() 如果你原来有，可以保留，但核心是要把 store 的值赋给表单
       syncLimit.value = githubConfig.value.sync_limit
       autoSync.value = githubConfig.value.auto_sync
+      autoSyncInterval.value = githubConfig.value.auto_sync_interval || 60
+      
+      // 打开时主动查询一次同步状态
+      getGitHubSyncStatus().then(({ status }) => {
+        if (status === 'running') {
+          isSyncing.value = true
+          pollSyncStatus()
+        }
+      })
     })
   }
 })
@@ -227,6 +271,21 @@ watch(() => props.open, (newVal) => {
               :disabled="false"
             />
           </div>
+
+          <!-- 自动同步间隔 -->
+          <div class="space-y-2" v-if="autoSync">
+            <Label for="auto-sync-interval">自动同步间隔 (分钟)</Label>
+            <Input
+              id="auto-sync-interval"
+              v-model.number="autoSyncInterval"
+              type="number"
+              min="1"
+              max="43200"
+            />
+            <p class="text-sm text-muted-foreground">
+              默认 60 分钟。最大支持 43200 分钟 (30天)。
+            </p>
+          </div>
         </div>
 
         <Separator />
@@ -276,6 +335,16 @@ watch(() => props.open, (newVal) => {
             <Loader2 v-if="isTesting" class="w-4 h-4 mr-2 animate-spin" />
             <Check v-else class="w-4 h-4 mr-2" />
             {{ isTesting ? '测试中...' : '测试' }}
+          </Button>
+
+          <Button
+            variant="outline"
+            :disabled="isSyncing || !config.has_token"
+            @click="handleSyncNow"
+          >
+            <Loader2 v-if="isSyncing" class="w-4 h-4 mr-2 animate-spin" />
+            <RefreshCw v-else class="w-4 h-4 mr-2" />
+            {{ isSyncing ? '同步中...' : '立即同步' }}
           </Button>
         </div>
 
