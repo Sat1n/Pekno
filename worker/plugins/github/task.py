@@ -39,9 +39,94 @@ async def sync_github_stars_task(limit: int = None):
             worker_log.warning("⚠️ 未找到任何 Star 仓库，请检查 Token 权限。")
             return
 
+        from hub.core.database import AsyncSessionLocal
+        from hub.core.database_models import ItemORM
+        from sqlalchemy import select
+
         for repo in repos:
             repo_name = repo['full_name']
-            # 构造通用模型
+            owner = repo['owner']['login']
+            repo_name_only = repo['name']
+            
+            item_id = f"gh_{repo['id']}"
+            
+            # --- 去重检查 ---
+            async with AsyncSessionLocal() as session:
+                existing_item = await session.execute(
+                    select(ItemORM.id).where(ItemORM.id == item_id)
+                )
+                if existing_item.scalar_one_or_none():
+                    worker_log.info(f"⏭️ 仓库已存在，跳过处理: {repo_name}")
+                    continue
+            
+            # Fetch README to extract cover image sequentially to respect rate limits
+            cover_url = None
+            readme_content = None
+            try:
+                readme_content = await client.get_repo_readme(owner, repo_name_only)
+            except Exception as e:
+                pass
+                
+            if readme_content:
+                def to_absolute(url):
+                    if not url: return None
+                    url = url.split()[0]
+                    if url.startswith(("http://", "https://")): return url
+                    url = url.lstrip("./")
+                    return f"https://raw.githubusercontent.com/{owner}/{repo_name_only}/HEAD/{url}"
+                    
+                def is_valid_img(url):
+                    if not url: return False
+                    lower_url = url.lower()
+                    if any(b in lower_url for b in ["shields.io", "badge", "action", "sonarcloud", "codecov", "travis"]): return False
+                    return True
+
+                import re
+                picture_blocks = re.findall(r'<picture\b[^>]*>(.*?)</picture>', readme_content, re.IGNORECASE | re.DOTALL)
+                for block in picture_blocks:
+                    sources = re.findall(r'<source\b([^>]+)>', block, re.IGNORECASE)
+                    best_candidate = None
+                    any_candidate = None
+                    for source_attrs in sources:
+                        srcset_match = re.search(r'srcset=["\']([^"\']+)["\']', source_attrs, re.IGNORECASE)
+                        media_match = re.search(r'media=["\']([^"\']+)["\']', source_attrs, re.IGNORECASE)
+                        if srcset_match:
+                            url = srcset_match.group(1)
+                            any_candidate = url
+                            if media_match and ('light' in media_match.group(1).lower() or 'no-preference' in media_match.group(1).lower()):
+                                best_candidate = url
+                                break
+                    
+                    url = best_candidate or any_candidate
+                    if not url:
+                        img_match = re.search(r'<img\b[^>]*src=["\']([^"\']+)["\']', block, re.IGNORECASE)
+                        if img_match: url = img_match.group(1)
+                    
+                    abs_url = to_absolute(url)
+                    if is_valid_img(abs_url):
+                        cover_url = abs_url
+                        break
+                
+                if not cover_url:
+                    img_urls = re.findall(r'!\[.*?\]\((.*?)\)|<img\b[^>]*src=["\'](.*?)["\']', readme_content, re.IGNORECASE)
+                    for md_url, html_url in img_urls:
+                        url = md_url or html_url
+                        if url:
+                            match = re.match(r'([^\s]+)', url)
+                            if match:
+                                abs_url = to_absolute(match.group(1))
+                                if is_valid_img(abs_url):
+                                    cover_url = abs_url
+                                    break
+            
+            metadata_extra = {
+                "lang": repo.get("language"),
+                "stars": repo.get("stargazers_count"),
+                "pushed_at": repo.get("pushed_at")
+            }
+            if cover_url:
+                metadata_extra["cover_url"] = cover_url
+
             item = UniversalItem(
                 id=f"gh_{repo['id']}",
                 title=repo_name,
@@ -49,16 +134,9 @@ async def sync_github_stars_task(limit: int = None):
                 raw_link=repo['html_url'],
                 content_text=repo['description'] or "",
                 intent=ItemIntent.article,
-                # --- 你的冷热分离策略 ---
-                retention_days=-1,  # GitHub Star 默认永久保存
-                # --- 智能开关：只有当 description 不为空时才值得 AI 总结 ---
+                retention_days=-1,
                 capabilities=["summarize"] if repo['description'] else [],
-                metadata_extra={
-                    "lang": repo.get("language"),
-                    "stars": repo.get("stargazers_count"),
-                    "pushed_at": repo.get("pushed_at"),
-                    "cover_url": f"https://github.com/{repo_name}.png"  # GitHub OpenGraph URL
-                }
+                metadata_extra=metadata_extra
             )
             
             # 丢进 Redis 队列
@@ -138,43 +216,17 @@ async def summarize_repo_task(item_id: str, task_id: str):
                 readme_content = content_text or "暂无描述"
             
             # 4. 调用 LLM 进行总结
-            worker_log.info(f"🤖 调用 LLM 总结 {repo_name}")
+            worker_log.info(f"🤖 调用 LLM 总结 {repo_name} (长格式)")
             
-            # 简化版本：使用模拟总结
-            # 实际生产中应该调用真实的 LLM API
-            summary = f"# {repo_name} 项目总结\n\n" \
-                    f"这是一个 GitHub 开源项目。\n\n" \
-                    f"## 项目概览\n\n" \
-                    f"{readme_content[:200]}...\n\n" \
-                    f"## 核心功能\n\n" \
-                    f"- 功能 1\n- 功能 2\n- 功能 3\n\n" \
-                    f"## 技术栈\n\n" \
-                    f"- 主要语言: {metadata_extra.get('lang', '未知')}\n" \
-                    f"- Star 数量: {metadata_extra.get('stars', 0)}\n\n" \
-                    f"## 总结\n\n" \
-                    f"这是一个值得关注的开源项目，具有良好的发展潜力。"
+            from hub.core.llm.service import LLMManager
+            ai = LLMManager()
             
-            # 5. 提取 README 中的第一张图片作为封面（如果原生 cover_url 无效或需要更好的图）
-            # 我们先尝试找 README 里的图
-            cover_url = metadata_extra.get("cover_url", f"https://github.com/{repo_name}.png")
-            
-            # 一个简单的正则表达式查找 markdown 格式或 HTML 格式的图片
-            import re
-            img_urls = re.findall(r'!\[.*?\]\((.*?)\)|<img[^>]+src=["\'](.*?)["\']', readme_content)
-            for md_url, html_url in img_urls:
-                url = md_url or html_url
-                # 过滤掉常见的徽章（badges）和非图片链接
-                if url and not any(badge in url for badge in ["shields.io", "badge", "action"]):
-                    # 如果找到的是相对路径，需要拼上 GitHub 原始内容路径（简单处理，优先完整的 http 链接）
-                    if url.startswith("http"):
-                        cover_url = url
-                        break
-            
-            # 更新 metadata
-            metadata_extra["cover_url"] = cover_url
+            text_to_summarize = readme_content if readme_content else content_text
+            # 这里调用长文本总结 Prompt
+            summary = await ai.llm.provider.generate_summary(text_to_summarize, length="long")
 
             # 6. 将结果存回数据库
-            worker_log.info(f"💾 保存 AI 总结结果到数据库")
+            worker_log.info(f"💾 保存 AI 最终汇总结果到数据库")
             
             if item:
                 await session.execute(
@@ -184,25 +236,8 @@ async def summarize_repo_task(item_id: str, task_id: str):
                 )
                 await session.commit()
             else:
-                # 如果项目不存在，创建一个新的记录
-                worker_log.info(f"📝 创建新的项目记录: {repo_name}")
-                from hub.core.models import UniversalItem, ItemIntent
+                worker_log.error(f"❌ 错误：在数据库中未找到目标记录 {item_id}。放弃更新...")
                 
-                new_item = UniversalItem(
-                    id=item_id,
-                    title=repo_name,
-                    source_type="github_star",
-                    raw_link=repo_url,
-                    content_text=content_text,
-                    intent=ItemIntent.article,
-                    retention_days=-1,  # 永久保存
-                    capabilities=["summarize"],
-                    metadata_extra=metadata_extra
-                )
-                
-                from worker.ingestion.pipeline import process_new_item_task
-                await process_new_item_task.kiq(new_item.model_dump())
-            
             worker_log.info(f"✅ AI 总结任务完成: {task_id}")
             
     except Exception as e:

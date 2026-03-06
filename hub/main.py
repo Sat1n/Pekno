@@ -22,6 +22,9 @@ app.add_middleware(
 
 search_service = SearchService()
 
+# 注册路由
+from hub.api import data
+app.include_router(data.router, prefix="/api")
 
 @app.get("/api/items")
 async def get_items(limit: int = 20, offset: int = 0):
@@ -84,6 +87,7 @@ async def hybrid_search_api(
                 score = max(0.5, 1.0 - (idx * 0.05))
                 
                 search_results.append(FrontendSearchItem(
+                    id=item.id,
                     title=item.title,
                     summary=summary,
                     cover_url=cover_url,
@@ -132,6 +136,7 @@ async def hybrid_search_api(
         score = float(v_score + t_score)
         
         search_results.append(FrontendSearchItem(
+            id=item.id,
             title=item.title,
             summary=summary,
             cover_url=cover_url,
@@ -204,6 +209,7 @@ async def search_github_items(
             score = min(1.0, max(0.5, 0.5 + (stars / 10000)))
             
             search_results.append({
+                "id": item.id,
                 "title": item.title,
                 "summary": summary,
                 "cover_url": cover_url,

@@ -71,7 +71,7 @@ class IngestionPipeline:
     async def _generate_summary(self, item: UniversalItem):
         model = self.ai.model_name
         self.logger.info(f"🤖 [LLM] 正在请求模型 [{model}] 生成摘要...")
-        return await self.ai.llm.provider.generate_summary(item.content_text or item.title)
+        return await self.ai.llm.provider.generate_summary(item.content_text or item.title, length="short")
 
     async def _auto_tagging(self, item: UniversalItem):
         model = self.ai.model_name

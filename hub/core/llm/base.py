@@ -3,8 +3,8 @@ from typing import List, Optional
 
 class BaseLLMProvider(ABC):
     @abstractmethod
-    async def generate_summary(self, text: str) -> str:
-        """生成摘要"""
+    async def generate_summary(self, text: str, length: str = "short") -> str:
+        """生成摘要 (short: 简明摘要，long: 详细报告)"""
         pass
 
     @abstractmethod

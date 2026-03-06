@@ -185,7 +185,7 @@ watch(() => props.open, (newVal) => {
 
 <template>
   <Dialog :open="open" @update:open="emit('update:open', $event)">
-    <DialogContent class="max-w-lg max-h-[90vh] overflow-y-auto">
+    <DialogContent class="max-w-lg max-h-[90vh] overflow-y-auto z-[60]">
       <DialogHeader>
         <div class="flex items-center gap-3">
           <div class="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">

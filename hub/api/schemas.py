@@ -40,6 +40,7 @@ class StatsResponse(BaseModel):
 # 前端搜索响应 Schema
 class FrontendSearchItem(BaseModel):
     """前端搜索接口返回的数据格式"""
+    id: str  # 必须暴露数据库真实 ID 给前端
     title: str
     summary: Optional[str] = None
     cover_url: Optional[str] = None

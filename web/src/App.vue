@@ -18,10 +18,9 @@ import {
   SheetContent,
   SheetDescription,
   SheetHeader,
-  SheetTitle,
-  SheetClose,
+  SheetTitle
 } from '@/components/ui/sheet'
-import { Github, Tv, FileText, MoreVertical, Sparkles, Bookmark, ExternalLink, X, Trash2, Star, Loader2 } from 'lucide-vue-next'
+import { Github, Tv, FileText, MoreVertical, Sparkles, Bookmark, ExternalLink, Trash2, Star, Loader2 } from 'lucide-vue-next'
 import { search, summarizeItem, getTaskStatus, type SearchResult } from '@/lib/api'
 import { useToast } from '@/components/ui/toast/use-toast'
 import { Toaster } from '@/components/ui/toast'
@@ -41,10 +40,9 @@ const isLoading = ref(false)
 const isSheetOpen = ref(false)
 const selectedItem = ref<LocalSearchResult | null>(null)
 
-// AI 总结相关状态
 const isSummarizing = ref(false)
 const currentTaskId = ref<string | null>(null)
-const pollInterval = ref<number | null>(null)
+const pollInterval = ref<number | undefined>(undefined)
 
 // Toast 通知
 const { toast } = useToast()
@@ -131,8 +129,8 @@ async function handleGenerateSummary() {
   try {
     isSummarizing.value = true
     
-    // 生成 itemId（简化处理，实际应该从后端获取）
-    const itemId = `gh_${selectedItem.value.title.replace('/', '_')}`
+    // 从后端返回的真实 ID 取得
+    const itemId = selectedItem.value.id
     
     // 调用后端 API 触发总结任务
     const response = await summarizeItem(itemId)
@@ -162,7 +160,7 @@ async function handleGenerateSummary() {
 // 开始轮询任务状态
 function startPollingTaskStatus(taskId: string) {
   // 清除之前的轮询
-  if (pollInterval.value) {
+  if (pollInterval.value !== undefined) {
     clearInterval(pollInterval.value)
   }
   
@@ -178,7 +176,7 @@ function startPollingTaskStatus(taskId: string) {
         // 清除轮询
         if (pollInterval.value) {
           clearInterval(pollInterval.value)
-          pollInterval.value = null
+          pollInterval.value = undefined
         }
         
         // 显示成功消息
@@ -189,8 +187,10 @@ function startPollingTaskStatus(taskId: string) {
         
       } else if (status.status === 'failed') {
         // 任务失败
-        clearInterval(pollInterval.value)
-        pollInterval.value = null
+        if (pollInterval.value !== undefined) {
+          clearInterval(pollInterval.value)
+          pollInterval.value = undefined
+        }
         toast({
           title: '❌ AI 总结失败',
           description: '请稍后重试，或检查 GitHub Token 配置',
@@ -207,6 +207,13 @@ function startPollingTaskStatus(taskId: string) {
 // 判断卡片是否处于 Active 状态
 function isCardActive(item: LocalSearchResult) {
   return selectedItem.value?.title === item.title && isSheetOpen.value
+}
+
+// 打开外部链接
+function openExternalLink(url?: string) {
+  if (url && url !== '#') {
+    window.open(url, '_blank')
+  }
 }
 </script>
 
@@ -292,24 +299,14 @@ function isCardActive(item: LocalSearchResult) {
           </DropdownMenu>
         </div>
         
-        <!-- 封面图区域 -->
-        <div v-if="layoutMode !== 'compact'" class="aspect-video bg-muted/30 flex items-center justify-center relative overflow-hidden border-b border-border/40 flex-shrink-0">
-          <!-- 显示抓取的封面图或回退到图标/源图标 -->
+        <!-- 封面图区域：当没有提供 cover_url 时彻底隐藏该模块 -->
+        <div v-if="layoutMode !== 'compact' && item.cover_url" class="aspect-video flex items-center justify-center relative overflow-hidden border-b border-border/40 flex-shrink-0">
           <img 
-            v-if="item.cover_url" 
             :src="item.cover_url" 
             alt="Cover" 
             class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-            @error="(e) => (e.target as HTMLImageElement).style.display = 'none'"
+            @error="(e) => { (e.target as HTMLImageElement).parentElement!.style.display = 'none'; item.cover_url = undefined }"
           />
-          <component v-else :is="getSourceIcon(item.source)" class="w-16 h-16 text-muted-foreground/10 group-hover:scale-105 transition-transform duration-500" />
-          
-          <!-- 百分数 Badge -->
-          <div class="absolute bottom-3 right-3">
-            <Badge class="bg-primary text-primary-foreground font-mono shadow-lg border-none px-2 py-0.5">
-              {{ Math.floor(item.score * 100) }}%
-            </Badge>
-          </div>
         </div>
 
         <!-- 卡片头部 -->
@@ -348,8 +345,11 @@ function isCardActive(item: LocalSearchResult) {
               </Badge>
             </div>
 
-            <!-- 来源图标与时间整合 -->
+            <!-- 来源图标与时间整合，加入匹配度分数 -->
             <div class="flex items-center gap-2 text-muted-foreground flex-shrink-0">
+              <Badge variant="outline" class="font-mono px-1.5 py-0 text-[10px] h-5 border-primary/20 bg-primary/5 text-primary">
+                {{ Math.floor(item.score * 100) }}%
+              </Badge>
               <component :is="getSourceIcon(item.source)" class="w-4 h-4" title="来源" />
               <span class="text-xs font-medium whitespace-nowrap">{{ item.time }}</span>
             </div>
@@ -387,7 +387,7 @@ function isCardActive(item: LocalSearchResult) {
             variant="ghost"
             size="sm"
             class="ml-2"
-            @click="window.open(selectedItem.raw_link, '_blank')"
+            @click="openExternalLink(selectedItem.raw_link)"
           >
             <ExternalLink class="w-4 h-4 mr-1" />
             访问
