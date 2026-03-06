@@ -3,7 +3,7 @@ import { cn } from '@/lib/utils'
 import { computed } from 'vue'
 
 const props = defineProps({
-  checked: {
+  modelValue: {
     type: Boolean,
     default: false,
   },
@@ -17,13 +17,13 @@ const props = defineProps({
   },
 })
 
-const emit = defineEmits(['update:checked', 'change'])
+const emit = defineEmits(['update:modelValue', 'change'])
 
-const handleChange = (event: Event) => {
-  const target = event.target as HTMLInputElement
-  const checked = target.checked
-  emit('update:checked', checked)
-  emit('change', checked)
+const toggle = () => {
+  if (props.disabled) return
+  const newValue = !props.modelValue
+  emit('update:modelValue', newValue)
+  emit('change', newValue)
 }
 
 const switchClass = computed(() => {
@@ -41,14 +41,15 @@ const thumbClass = computed(() => {
 </script>
 
 <template>
-  <div :class="switchClass" :data-state="checked ? 'checked' : 'unchecked'">
-    <input
-      type="checkbox"
-      :checked="checked"
-      :disabled="disabled"
-      @change="handleChange"
-      class="peer sr-only"
-    />
-    <span :class="thumbClass"></span>
-  </div>
+  <button
+    type="button"
+    role="switch"
+    :aria-checked="modelValue"
+    :disabled="disabled"
+    :class="switchClass"
+    :data-state="modelValue ? 'checked' : 'unchecked'"
+    @click="toggle"
+  >
+    <span :class="thumbClass" :data-state="modelValue ? 'checked' : 'unchecked'"></span>
+  </button>
 </template>

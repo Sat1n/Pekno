@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, watch, computed } from 'vue'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -12,15 +12,14 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-  DialogFooter,
 } from '@/components/ui/dialog'
 import { Github, Check, AlertCircle, Loader2, Trash2, Save, ExternalLink, RefreshCw } from 'lucide-vue-next'
-import { getGitHubConfig, saveGitHubConfig, testGitHubToken, triggerGitHubSync, getGitHubSyncStatus, type GitHubConfig } from '@/lib/api'
+import { saveGitHubConfig, testGitHubToken, triggerGitHubSync, getGitHubSyncStatus } from '@/lib/api'
 import { useToast } from '@/components/ui/toast/use-toast'
 import { usePluginStore } from '@/store/usePluginStore'
 
 const { toast } = useToast()
-const { githubConfig, loadGitHubConfig, updateGitHubConfig } = usePluginStore()
+const { githubConfig, loadGitHubConfig } = usePluginStore()
 
 const props = defineProps<{
   open: boolean
@@ -39,6 +38,7 @@ const token = ref('')
 const syncLimit = ref(100)
 const autoSync = ref(false)
 const autoSyncInterval = ref(60)
+const autoSummarize = ref(false)
 
 // 加载状态
 const isSaving = ref(false)
@@ -46,12 +46,23 @@ const isTesting = ref(false)
 const isSyncing = ref(false)
 let syncIntervalTimer: number | null = null
 
+// 判断配置是否有变更
+const isDirty = computed(() => {
+  if (token.value !== '') return true
+  if (syncLimit.value !== (config.value.sync_limit || 100)) return true
+  if (autoSync.value !== (config.value.auto_sync || false)) return true
+  if (autoSyncInterval.value !== (config.value.auto_sync_interval || 60)) return true
+  if (autoSummarize.value !== (config.value.auto_summarize || false)) return true
+  return false
+})
+
 // 加载配置
 async function loadConfig() {
   await loadGitHubConfig()
   syncLimit.value = config.value.sync_limit
   autoSync.value = config.value.auto_sync
   autoSyncInterval.value = config.value.auto_sync_interval || 60
+  autoSummarize.value = config.value.auto_summarize || false
 }
 
 // 保存配置
@@ -73,7 +84,8 @@ async function handleSave() {
     const saveData: any = {
       sync_limit: syncLimit.value,
       auto_sync: autoSync.value,
-      auto_sync_interval: autoSyncInterval.value
+      auto_sync_interval: autoSyncInterval.value,
+      auto_summarize: autoSummarize.value
     }
     if (token.value) {
       saveData.token = token.value
@@ -170,6 +182,7 @@ watch(() => props.open, (newVal) => {
       syncLimit.value = githubConfig.value.sync_limit
       autoSync.value = githubConfig.value.auto_sync
       autoSyncInterval.value = githubConfig.value.auto_sync_interval || 60
+      autoSummarize.value = githubConfig.value.auto_summarize || false
       
       // 打开时主动查询一次同步状态
       getGitHubSyncStatus().then(({ status }) => {
@@ -286,6 +299,21 @@ watch(() => props.open, (newVal) => {
               默认 60 分钟。最大支持 43200 分钟 (30天)。
             </p>
           </div>
+
+          <!-- 自动生成短摘要 -->
+          <div class="flex items-center justify-between mt-4">
+            <div class="space-y-0.5">
+              <Label for="auto-summarize">自动生成短摘要 (耗时)</Label>
+              <p class="text-sm text-muted-foreground">
+                同步完成后自动触发大模型，为每个仓库提取 50 字精简摘要。
+              </p>
+            </div>
+            <Switch
+              id="auto-summarize"
+              v-model="autoSummarize"
+              :disabled="false"
+            />
+          </div>
         </div>
 
         <Separator />
@@ -319,7 +347,7 @@ watch(() => props.open, (newVal) => {
         <div class="flex gap-3 w-full">
           <Button
             class="flex-1"
-            :disabled="isSaving || (!token && !config.has_token)"
+            :disabled="isSaving || (!token && !config.has_token) || (!isDirty && config.has_token)"
             @click="handleSave"
           >
             <Loader2 v-if="isSaving" class="w-4 h-4 mr-2 animate-spin" />

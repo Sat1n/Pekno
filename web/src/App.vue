@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
+import { marked } from 'marked'
 import MainLayout from '@/layouts/MainLayout.vue'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -21,7 +22,7 @@ import {
   SheetTitle
 } from '@/components/ui/sheet'
 import { Github, Tv, FileText, MoreVertical, Sparkles, Bookmark, ExternalLink, Trash2, Star, Loader2 } from 'lucide-vue-next'
-import { search, summarizeItem, getTaskStatus, type SearchResult } from '@/lib/api'
+import { search, summarizeItem, getItemSummaryStatus, type SearchResult } from '@/lib/api'
 import { useToast } from '@/components/ui/toast/use-toast'
 import { Toaster } from '@/components/ui/toast'
 
@@ -31,7 +32,9 @@ interface LocalSearchResult extends SearchResult {
   raw_link?: string
 }
 
-const layoutMode = ref<'list' | 'grid' | 'compact'>('list')
+const savedLayout = (localStorage.getItem('pekno-layout') as 'list' | 'grid' | 'compact') || 'list'
+const layoutMode = ref<'list' | 'grid' | 'compact'>(savedLayout)
+watch(layoutMode, (val) => localStorage.setItem('pekno-layout', val))
 const searchQuery = ref('')
 const searchResults = ref<LocalSearchResult[]>([])
 const isLoading = ref(false)
@@ -44,6 +47,15 @@ const isSummarizing = ref(false)
 const currentTaskId = ref<string | null>(null)
 const pollInterval = ref<number | undefined>(undefined)
 
+// Markdown 渲染
+const renderedSummary = computed(() => {
+  const raw = selectedItem.value?.long_summary || selectedItem.value?.summary || ''
+  if (!raw) return '<p class="text-muted-foreground">暂无 AI 总结，点击生成按钮开始总结...</p>'
+  // 预处理：将数据库中的字面 \n 转换为真实换行符，以保证 marked 能正确解析代码块
+  const normalized = raw.replace(/\\n/g, '\n')
+  return marked.parse(normalized) as string
+})
+
 // Toast 通知
 const { toast } = useToast()
 
@@ -52,10 +64,9 @@ async function loadData(query: string = '') {
   isLoading.value = true
   try {
     const results = await search({ q: query })
-    // 添加模拟的 hasSummary 和 raw_link 状态
+    // 添加模拟的 raw_link 状态
     searchResults.value = results.map(item => ({
       ...item,
-      hasSummary: Math.random() > 0.7, // 随机模拟是否有总结
       raw_link: item.source === 'github' 
         ? `https://github.com/${item.title}` 
         : '#'
@@ -107,6 +118,14 @@ function handleCardClick(item: LocalSearchResult) {
 function handleAISummary(item: LocalSearchResult) {
   selectedItem.value = item
   isSheetOpen.value = true
+  
+  // 自动化逻辑：如果此记录尚未生成长文摘要，则在滑开面板时自动触发后端生成
+  if (!item.has_long_summary) {
+    // 使用 setTimeout 保证抽屉打开动画先执行，体验更顺滑
+    setTimeout(() => {
+      handleGenerateSummary()
+    }, 300)
+  }
 }
 
 // 点击菜单项 - 添加到稍后再看
@@ -124,7 +143,7 @@ function handleClearRecord() {
 
 // 生成 AI 总结
 async function handleGenerateSummary() {
-  if (!selectedItem.value) return
+  if (!selectedItem.value || isSummarizing.value) return
   
   try {
     isSummarizing.value = true
@@ -142,67 +161,76 @@ async function handleGenerateSummary() {
       description: '请稍候，正在抓取并分析仓库内容...',
     })
     
-    // 开始轮询任务状态
-    startPollingTaskStatus(response.task_id)
+    // 开始轮询数据库状态（不在这里重置 isSummarizing！）
+    startPollingSummaryStatus(itemId)
     
   } catch (error) {
     console.error('生成 AI 总结失败:', error)
+    isSummarizing.value = false
     toast({
       title: '❌ 生成失败',
       description: '无法启动 AI 总结，请检查网络连接',
       variant: 'destructive',
     })
-  } finally {
-    isSummarizing.value = false
   }
 }
 
-// 开始轮询任务状态
-function startPollingTaskStatus(taskId: string) {
+// 开始轮询数据库中的总结状态
+function startPollingSummaryStatus(itemId: string) {
   // 清除之前的轮询
   if (pollInterval.value !== undefined) {
     clearInterval(pollInterval.value)
   }
   
-  // 每 2 秒查询一次
+  // 每 3 秒查询一次数据库
   pollInterval.value = window.setInterval(async () => {
     try {
-      const status = await getTaskStatus(taskId)
+      const status = await getItemSummaryStatus(itemId)
       
       if (status.status === 'completed') {
-        // 任务完成，重新加载数据
-        await loadData(searchQuery.value)
-        
-        // 清除轮询
-        if (pollInterval.value) {
+        // 任务完成，清除轮询
+        if (pollInterval.value !== undefined) {
           clearInterval(pollInterval.value)
           pollInterval.value = undefined
+        }
+        isSummarizing.value = false
+        
+        // 重新加载数据以刷新列表和侧边栏
+        await loadData(searchQuery.value)
+        
+        // 如果面板还开着，更新 selectedItem 的内容
+        if (selectedItem.value && selectedItem.value.id === itemId) {
+          const updatedItem = searchResults.value.find(r => r.id === itemId)
+          if (updatedItem) {
+            selectedItem.value = updatedItem
+          }
         }
         
         // 显示成功消息
         toast({
           title: '✨ AI 总结完成',
-          description: '已为仓库生成 AI 总结，点击查看详情',
-        })
-        
-      } else if (status.status === 'failed') {
-        // 任务失败
-        if (pollInterval.value !== undefined) {
-          clearInterval(pollInterval.value)
-          pollInterval.value = undefined
-        }
-        toast({
-          title: '❌ AI 总结失败',
-          description: '请稍后重试，或检查 GitHub Token 配置',
-          variant: 'destructive',
+          description: '已为仓库生成 AI 总结',
         })
       }
+      // 如果状态是 pending，继续轮询
       
     } catch (error) {
-      console.error('查询任务状态失败:', error)
+      console.error('查询总结状态失败:', error)
     }
-  }, 2000)
+  }, 3000)
 }
+
+// 监听侧面板关闭时清理轮询
+watch(isSheetOpen, (newVal) => {
+  if (!newVal) {
+    // 面板关闭时，清理轮询但保留 isSummarizing 状态
+    if (pollInterval.value !== undefined) {
+      clearInterval(pollInterval.value)
+      pollInterval.value = undefined
+    }
+    isSummarizing.value = false
+  }
+})
 
 // 判断卡片是否处于 Active 状态
 function isCardActive(item: LocalSearchResult) {
@@ -267,7 +295,7 @@ function openExternalLink(url?: string) {
       >
         <!-- 已总结标识 - 星星动画 -->
         <div 
-          v-if="item.hasSummary" 
+          v-if="item.has_long_summary" 
           class="absolute top-2 left-2 z-10"
           title="已有 AI 总结"
         >
@@ -367,7 +395,7 @@ function openExternalLink(url?: string) {
 
   <!-- AI 详情侧边栏 -->
   <Sheet v-model:open="isSheetOpen">
-    <SheetContent class="w-full sm:max-w-lg p-0 flex flex-col" side="right">
+    <SheetContent class="w-full sm:max-w-xl p-0 flex flex-col" side="right">
       <!-- 顶部：标题和关闭按钮 -->
       <SheetHeader class="p-6 border-b border-border">
         <div class="flex items-start justify-between">
@@ -404,10 +432,8 @@ function openExternalLink(url?: string) {
               <Sparkles class="w-5 h-5 text-primary" />
               <h3 class="font-semibold text-lg">AI 智能总结</h3>
             </div>
-            <div class="bg-muted/50 rounded-lg p-4 space-y-3">
-              <p class="text-sm leading-relaxed">
-                {{ selectedItem?.summary || '暂无 AI 总结，点击生成按钮开始总结...' }}
-              </p>
+            <div class="bg-muted/50 rounded-lg p-4 max-h-[50vh] overflow-y-auto markdown-body">
+              <div v-html="renderedSummary"></div>
             </div>
           </div>
 
@@ -500,5 +526,137 @@ function openExternalLink(url?: string) {
 
 .star-breathe {
   animation: star-pulse 2s ease-in-out infinite;
+}
+
+/* Markdown 渲染样式 — 用 :deep() 穿透 v-html 动态内容 */
+:deep(.markdown-body) {
+  font-size: 0.875rem;
+  line-height: 1.7;
+  color: hsl(var(--foreground));
+}
+
+:deep(.markdown-body h1),
+:deep(.markdown-body h2),
+:deep(.markdown-body h3),
+:deep(.markdown-body h4) {
+  font-weight: 700;
+  margin-bottom: 0.6em;
+  color: hsl(var(--foreground));
+  line-height: 1.3;
+}
+
+:deep(.markdown-body h1) {
+  font-size: 1.5em;
+  margin-top: 0.5em;
+  padding: 0.4em 0.6em;
+  background: hsl(var(--primary) / 0.1);
+  border-left: 4px solid hsl(var(--primary));
+  border-radius: 4px;
+}
+
+:deep(.markdown-body h2) {
+  font-size: 1.25em;
+  margin-top: 1.4em;
+  padding: 0.3em 0.6em;
+  border-left: 3px solid hsl(var(--primary) / 0.6);
+}
+
+:deep(.markdown-body h3) {
+  font-size: 1.1em;
+  margin-top: 1.2em;
+  padding-left: 0.6em;
+  border-left: 2px solid hsl(var(--primary) / 0.3);
+}
+
+:deep(.markdown-body h4) {
+  font-size: 1em;
+  margin-top: 1em;
+  color: hsl(var(--muted-foreground));
+}
+
+:deep(.markdown-body p) {
+  margin-bottom: 0.75em;
+}
+
+:deep(.markdown-body ul),
+:deep(.markdown-body ol) {
+  padding-left: 1.5em;
+  margin-bottom: 0.75em;
+}
+
+:deep(.markdown-body li) {
+  margin-bottom: 0.25em;
+}
+
+:deep(.markdown-body strong) {
+  font-weight: 600;
+  color: hsl(var(--foreground));
+}
+
+:deep(.markdown-body code) {
+  background: hsl(var(--muted));
+  padding: 0.15em 0.4em;
+  border-radius: 4px;
+  font-size: 0.85em;
+  font-family: 'Cascadia Code', 'Fira Code', 'JetBrains Mono', 'Consolas', monospace;
+}
+
+:deep(.markdown-body pre) {
+  background: hsl(var(--muted));
+  border: 1px solid hsl(var(--primary) / 0.3);
+  padding: 0.85em 1em;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin-bottom: 0.85em;
+}
+
+:deep(.markdown-body pre code) {
+  background: none;
+  padding: 0;
+  font-size: 0.82em;
+  line-height: 1.6;
+}
+
+:deep(.markdown-body blockquote) {
+  border-left: 3px solid hsl(var(--primary));
+  padding-left: 1em;
+  margin-left: 0;
+  margin-bottom: 0.75em;
+  color: hsl(var(--muted-foreground));
+}
+
+:deep(.markdown-body a) {
+  color: hsl(var(--primary));
+  text-decoration: underline;
+}
+
+:deep(.markdown-body table) {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 1em;
+  font-size: 0.85em;
+}
+
+:deep(.markdown-body thead th) {
+  background: hsl(var(--muted));
+  font-weight: 600;
+  text-align: left;
+  padding: 0.5em 0.75em;
+  border: 1px solid hsl(var(--border));
+}
+
+:deep(.markdown-body tbody td) {
+  padding: 0.45em 0.75em;
+  border: 1px solid hsl(var(--border));
+}
+
+:deep(.markdown-body tbody tr:nth-child(even)) {
+  background: hsl(var(--muted) / 0.4);
+}
+
+:deep(.markdown-body hr) {
+  border: none;
+  border-top: 1px solid hsl(var(--border));
+  margin: 1.2em 0;
 }
 </style>

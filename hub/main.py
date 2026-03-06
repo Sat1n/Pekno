@@ -75,6 +75,8 @@ async def hybrid_search_api(
                 summary = item.summary or item.content_text or "暂无描述"
                 time_str = format_github_time(pushed_at) if pushed_at else format_time_ago(item.created_at)
                 cover_url = metadata.get("cover_url")
+                has_long_summary = metadata.get("has_long_summary", False)
+                long_summary = metadata.get("long_summary")
                 
                 source_map = {
                     "github_star": "github",
@@ -90,6 +92,8 @@ async def hybrid_search_api(
                     id=item.id,
                     title=item.title,
                     summary=summary,
+                    long_summary=long_summary,
+                    has_long_summary=has_long_summary,
                     cover_url=cover_url,
                     score=round(score, 2),
                     source=source,
@@ -124,6 +128,10 @@ async def hybrid_search_api(
         # cover_url: 获取封面图链接
         cover_url = metadata.get("cover_url")
         
+        # has_long_summary: 获取 AI 长摘要缓存标识
+        has_long_summary = metadata.get("has_long_summary", False)
+        long_summary = metadata.get("long_summary")
+        
         # source：根据 source_type 映射
         source_map = {
             "github_star": "github",
@@ -139,6 +147,8 @@ async def hybrid_search_api(
             id=item.id,
             title=item.title,
             summary=summary,
+            long_summary=long_summary,
+            has_long_summary=has_long_summary,
             cover_url=cover_url,
             score=round(score, 2),
             source=source,
@@ -208,10 +218,16 @@ async def search_github_items(
             # score：基于 stars 数量计算（最多 1.0，最少 0.5）
             score = min(1.0, max(0.5, 0.5 + (stars / 10000)))
             
+            # has_long_summary: 获取 AI 长摘要缓存标识
+            has_long_summary = metadata.get("has_long_summary", False)
+            long_summary = metadata.get("long_summary")
+
             search_results.append({
                 "id": item.id,
                 "title": item.title,
                 "summary": summary,
+                "long_summary": long_summary,
+                "has_long_summary": has_long_summary,
                 "cover_url": cover_url,
                 "score": round(score, 2),
                 "source": "github",
@@ -269,22 +285,36 @@ async def summarize_item(item_id: str):
     }
 
 
-@app.get("/api/tasks/{task_id}/status")
-async def get_task_status(task_id: str):
+@app.get("/api/items/{item_id}/summary_status")
+async def get_item_summary_status(item_id: str):
     """
-    查询任务状态
+    查询某条目的 AI 总结状态
     
-    返回任务的当前状态和结果
+    直接从数据库读取 has_long_summary 标识来判断是否完成
     """
-    # 这里简化处理，实际应该从 Redis 或数据库中查询任务状态
-    # 目前返回模拟状态
-    return {
-        "task_id": task_id,
-        "status": "completed",  # 模拟已完成
-        "result": {
-            "message": "AI 总结完成"
-        }
-    }
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            ItemORM.__table__.select().where(ItemORM.id == item_id)
+        )
+        item = result.fetchone()
+        
+        if not item:
+            return {"item_id": item_id, "status": "not_found"}
+        
+        metadata = item.metadata_extra or {}
+        has_long_summary = metadata.get("has_long_summary", False)
+        
+        if has_long_summary:
+            return {
+                "item_id": item_id,
+                "status": "completed",
+                "summary": item.summary
+            }
+        else:
+            return {
+                "item_id": item_id,
+                "status": "pending"
+            }
 
 
 # ========== 配置管理 API ==========
@@ -294,6 +324,7 @@ class GitHubConfigRequest(BaseModel):
     sync_limit: int = 100
     auto_sync: bool = False
     auto_sync_interval: int = 60  # 分钟
+    auto_summarize: bool = False
 
 
 class GitHubConfigResponse(BaseModel):
@@ -301,6 +332,7 @@ class GitHubConfigResponse(BaseModel):
     sync_limit: int
     auto_sync: bool
     auto_sync_interval: int
+    auto_summarize: bool
     token_preview: Optional[str] = None
 
 class GitHubSyncStatusResponse(BaseModel):
@@ -319,6 +351,7 @@ async def get_github_config():
     sync_limit = await ConfigManager.get_config(ConfigKeys.GITHUB_SYNC_LIMIT)
     auto_sync = await ConfigManager.get_config(ConfigKeys.GITHUB_AUTO_SYNC)
     auto_sync_interval = await ConfigManager.get_config(ConfigKeys.GITHUB_AUTO_SYNC_INTERVAL)
+    auto_summarize = await ConfigManager.get_config(ConfigKeys.GITHUB_AUTO_SUMMARIZE)
     
     # Token 预览：只显示前 4 位
     token_preview = None
@@ -330,6 +363,7 @@ async def get_github_config():
         sync_limit=int(sync_limit) if sync_limit else 100,
         auto_sync=auto_sync == "true" if auto_sync else False,
         auto_sync_interval=int(auto_sync_interval) if auto_sync_interval else 60,
+        auto_summarize=auto_summarize == "true" if auto_summarize else False,
         token_preview=token_preview
     )
 
@@ -372,6 +406,13 @@ async def save_github_config(config: GitHubConfigRequest):
         ConfigKeys.GITHUB_AUTO_SYNC_INTERVAL,
         str(config.auto_sync_interval),
         description="GitHub 自动同步间隔时间 (分钟)"
+    )
+    
+    # 保存是否自动生成 AI 短摘要
+    await ConfigManager.set_config(
+        ConfigKeys.GITHUB_AUTO_SUMMARIZE,
+        "true" if config.auto_summarize else "false",
+        description="是否自动生成 AI 短摘要"
     )
     
     # 若保存了配置且开启自动同步，可以尝试立即出发一次
@@ -433,6 +474,8 @@ async def delete_github_config():
     await ConfigManager.delete_config(ConfigKeys.GITHUB_TOKEN)
     await ConfigManager.delete_config(ConfigKeys.GITHUB_SYNC_LIMIT)
     await ConfigManager.delete_config(ConfigKeys.GITHUB_AUTO_SYNC)
+    await ConfigManager.delete_config(ConfigKeys.GITHUB_AUTO_SYNC_INTERVAL)
+    await ConfigManager.delete_config(ConfigKeys.GITHUB_AUTO_SUMMARIZE)
     
     return {
         "status": "success",

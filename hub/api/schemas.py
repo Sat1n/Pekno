@@ -43,6 +43,8 @@ class FrontendSearchItem(BaseModel):
     id: str  # 必须暴露数据库真实 ID 给前端
     title: str
     summary: Optional[str] = None
+    long_summary: Optional[str] = None
+    has_long_summary: bool = False
     cover_url: Optional[str] = None
     score: float
     source: str

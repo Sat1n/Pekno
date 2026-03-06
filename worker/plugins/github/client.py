@@ -58,7 +58,7 @@ class GitHubClient:
                 worker_log.error(f"❌ GitHub API 请求失败: {e}")
                 return []
 
-    async def get_repo_readme(self, owner: str, repo: str) -> str:
+    async def get_repo_readme(self, owner: str, repo: str) -> tuple[str, str]:
         """
         获取仓库的 README 内容
         
@@ -67,7 +67,7 @@ class GitHubClient:
             repo: 仓库名称
             
         Returns:
-            README 内容（字符串）
+            (README 内容, SHA 值)
         """
         url = f"{self.base_url}/repos/{owner}/{repo}/readme"
         
@@ -77,11 +77,14 @@ class GitHubClient:
                 response.raise_for_status()
                 
                 import base64
-                content = response.json().get("content", "")
+                data = response.json()
+                content = data.get("content", "")
+                sha = data.get("sha", "")
+                
                 if content:
                     # 解码 base64 内容
-                    return base64.b64decode(content).decode('utf-8')
-                return ""
+                    return base64.b64decode(content).decode('utf-8'), sha
+                return "", sha
             except Exception as e:
                 worker_log.warning(f"❌ 获取 README 失败: {e}")
-                return ""
+                return "", ""

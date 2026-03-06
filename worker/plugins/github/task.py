@@ -50,23 +50,41 @@ async def sync_github_stars_task(limit: int = None):
             
             item_id = f"gh_{repo['id']}"
             
-            # --- 去重检查 ---
-            async with AsyncSessionLocal() as session:
-                existing_item = await session.execute(
-                    select(ItemORM.id).where(ItemORM.id == item_id)
-                )
-                if existing_item.scalar_one_or_none():
-                    worker_log.info(f"⏭️ 仓库已存在，跳过处理: {repo_name}")
-                    continue
-            
-            # Fetch README to extract cover image sequentially to respect rate limits
+            # --- 前置：获取线上 README 原文及其 SHA ---
             cover_url = None
-            readme_content = None
+            readme_content = ""
+            readme_sha = ""
             try:
-                readme_content = await client.get_repo_readme(owner, repo_name_only)
+                readme_content, readme_sha = await client.get_repo_readme(owner, repo_name_only)
             except Exception as e:
                 pass
                 
+            # --- 去重检查：对比存储的 sha ---
+            # 为了能够对比，我们需要获取之前存入的 metadata_extra
+            async with AsyncSessionLocal() as session:
+                existing_item = await session.execute(
+                    select(ItemORM.metadata_extra).where(ItemORM.id == item_id)
+                )
+                record = existing_item.scalar_one_or_none()
+                
+                # record 是个字典记录 metadata_extra
+                metadata_extra = record if record is not None else {}
+                
+                # 如果存在的记录包含一模一样的 readme_sha，彻底跳过！
+                if record is not None and metadata_extra.get('readme_sha') == readme_sha:
+                    worker_log.info(f"⏭️ 仓库 README 无更新，触发 Cache Hit 直接跳过: {repo_name}")
+                    continue
+            
+            # 由于我们进入了这里，说明文件有更新或者以前没有。我们覆盖基础的信息
+            metadata_extra["lang"] = repo.get("language")
+            metadata_extra["stars"] = repo.get("stargazers_count")
+            metadata_extra["pushed_at"] = repo.get("pushed_at")
+            if readme_sha:
+                metadata_extra["readme_sha"] = readme_sha
+            
+            # 如果内容发生了改变，这就意味着以前的 AI 总结可能过期了，我们需要抹除掉 has_long_summary
+            metadata_extra["has_long_summary"] = False
+
             if readme_content:
                 def to_absolute(url):
                     if not url: return None
@@ -209,7 +227,7 @@ async def summarize_repo_task(item_id: str, task_id: str):
             # 从数据库读取 Token（如果配置了的话）
             token = await ConfigManager.get_config(ConfigKeys.GITHUB_TOKEN)
             client = GitHubClient(token)  # 使用 Token 访问 API，避免限流
-            readme_content = await client.get_repo_readme(owner, repo)
+            readme_content, readme_sha = await client.get_repo_readme(owner, repo)
             
             if not readme_content:
                 worker_log.warning(f"⚠️ 未找到 {repo_name} 的 README")
@@ -229,10 +247,17 @@ async def summarize_repo_task(item_id: str, task_id: str):
             worker_log.info(f"💾 保存 AI 最终汇总结果到数据库")
             
             if item:
+                # 重新构建 metadata_extra
+                new_metadata_extra = dict(metadata_extra)
+                new_metadata_extra["has_long_summary"] = True
+                
                 await session.execute(
                     ItemORM.__table__.update()
                     .where(ItemORM.id == item_id)
-                    .values(summary=summary)
+                    .values(
+                        summary=summary,
+                        metadata_extra=new_metadata_extra
+                    )
                 )
                 await session.commit()
             else:
