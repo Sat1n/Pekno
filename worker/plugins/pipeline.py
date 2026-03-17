@@ -1,0 +1,171 @@
+from shared.plugins.base import PluginContext
+from shared.plugins.manager import plugin_manager
+from shared.entities import UniversalItem, ItemIntent
+from worker.ingestion.pipeline import process_new_item_task
+from shared.logger import worker_log
+from worker.broker import broker
+from shared.config import ConfigManager, ConfigKeys
+from shared.database import AsyncSessionLocal
+from shared.models import ItemORM
+from sqlalchemy import select
+import datetime
+import re
+
+@broker.task(task_name="run_plugin_pipeline")
+async def run_plugin_pipeline_task(plugin_id: str, limit: int = None):
+    """
+    通用化：运行指定插件的同步流水线
+    """
+    plugin = plugin_manager.get_plugin(plugin_id)
+    if not plugin:
+        worker_log.error(f"❌ 找不到插件: {plugin_id}")
+        return
+
+    # 状态锁检查
+    status = await ConfigManager.get_config(plugin_id, ConfigKeys.SYNC_STATUS)
+    if status == "running":
+        worker_log.warning(f"⚠️ [{plugin_id}] 同步任务已经在运行中，跳过本次执行")
+        return
+
+    await ConfigManager.set_config(plugin_id, ConfigKeys.SYNC_STATUS, "running")
+
+    try:
+        # 获取基础配置字典
+        config_dict = {}
+        for key, schema in plugin.manifest.get("settings_schema", {}).items():
+            val = await ConfigManager.get_config(plugin_id, key)
+            if val is not None:
+                config_dict[key] = int(val) if schema.get("type") == "integer" else (val == "true" if schema.get("type") == "boolean" else val)
+            else:
+                config_dict[key] = schema.get("default")
+
+        # 覆写 limit
+        if limit is not None:
+            config_dict["sync_limit"] = limit
+
+        # 为兼容性，特判注入 GitHubClient (未来应使用统一 HTTP 客户端沙箱)
+        http_client = None
+        if plugin_id == "github_stars":
+            from worker.plugins.github.client import GitHubClient
+            token = config_dict.get("token")
+            if not token:
+                worker_log.error(f"❌ [{plugin_id}] 未配置 Token，停止提取")
+                return
+            http_client = GitHubClient(token)
+
+        ctx = PluginContext(
+            config=config_dict,
+            http_client=http_client,
+            logger=worker_log
+        )
+
+        # 1. 抓取原始数据
+        raw_items = await plugin.fetch_data(ctx)
+        if not raw_items:
+            return
+
+        # 2. 遍历处理入库流水线
+        for raw_item in raw_items:
+            normalized = plugin.normalize_item(raw_item)
+            item_id = normalized["id"]
+            
+            # 3. 为 AI 摘要获取附加文本 + 连带获取 SHA 缓存更新凭证
+            ai_text = await plugin.extract_text_for_ai(ctx, raw_item)
+            metadata_extra = raw_item.get('metadata_extra', {})
+            new_sha = metadata_extra.get('readme_sha')
+            
+            # 去重检查：对比存储的 sha
+            async with AsyncSessionLocal() as session:
+                existing_item = await session.execute(
+                    select(ItemORM.metadata_extra).where(ItemORM.id == item_id)
+                )
+                record = existing_item.scalar_one_or_none()
+                db_metadata = record if record is not None else {}
+                
+                if record is not None and db_metadata.get('readme_sha') == new_sha and new_sha is not None:
+                    worker_log.info(f"⏭️ [{plugin_id}] 数据无更新，触发表级别 Cache Hit 跳过: {normalized['title']}")
+                    continue
+            
+            final_metadata = normalized.get("metadata_extra", {})
+            final_metadata.update(metadata_extra)
+            final_metadata["has_long_summary"] = False
+            
+            item = UniversalItem(
+                id=normalized["id"],
+                title=normalized["title"],
+                source_type=normalized["source_type"],
+                raw_link=normalized["raw_link"],
+                content_text=normalized.get("content_text", ""),
+                intent=ItemIntent.article,
+                retention_days=-1,
+                capabilities=["summarize"] if normalized.get("content_text") or ai_text else [],
+                metadata_extra=final_metadata
+            )
+            
+            worker_log.info(f"📤 [{plugin_id}] 发送至 Pipeline 处理: {item.title}")
+            await process_new_item_task.kiq(item.model_dump())
+
+        worker_log.info(f"✅ [{plugin_id}] 同步指令下发完毕，共处理 {len(raw_items)} 条记录。")
+
+    except Exception as e:
+        worker_log.error(f"❌ [{plugin_id}] 任务执行出错: {e}")
+    finally:
+        await ConfigManager.set_config(plugin_id, ConfigKeys.SYNC_STATUS, "idle")
+        await ConfigManager.set_config(plugin_id, ConfigKeys.LAST_SYNC_TIME, datetime.datetime.now().isoformat())
+
+
+@broker.task(task_name="summarize_repo")
+async def summarize_repo_task(item_id: str, task_id: str):
+    """
+    临时预留：AI 补总结调度任务（依然由前端原样调用，所以暂时保留名字，内部改用 plugin manager 取）
+    """
+    plugin_id = "github_stars"
+    worker_log.info(f"🚀 开始 AI 总结任务: {task_id} for item {item_id}")
+    
+    try:
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(ItemORM.__table__.select().where(ItemORM.id == item_id))
+            item = result.fetchone()
+            if not item: return
+                
+        plugin = plugin_manager.get_plugin(plugin_id)
+        if not plugin: return
+
+        token = await ConfigManager.get_config(plugin_id, ConfigKeys.TOKEN)
+        from worker.plugins.github.client import GitHubClient
+        ctx = PluginContext(
+            config={},
+            http_client=GitHubClient(token) if token else None,
+            logger=worker_log
+        )
+        
+        raw_data = {
+            "name": re.search(r'github\.com/[^/]+/([^/]+)', item.raw_link).group(1) if item.raw_link else item.title,
+            "owner": {"login": re.search(r'github\.com/([^/]+)/[^/]+', item.raw_link).group(1) if item.raw_link else ""},
+            "description": item.content_text,
+            "metadata_extra": item.metadata_extra or {}
+        }
+        
+        text_to_summarize = await plugin.extract_text_for_ai(ctx, raw_data)
+        
+        from hub.core.llm.service import LLMManager
+        ai = LLMManager()
+        summary = await ai.llm.provider.generate_summary(text_to_summarize, length="long")
+
+        async with AsyncSessionLocal() as session:
+            new_metadata_extra = dict(item.metadata_extra) if item.metadata_extra else {}
+            new_metadata_extra["has_long_summary"] = True
+            
+            await session.execute(
+                ItemORM.__table__.update()
+                .where(ItemORM.id == item_id)
+                .values(
+                    summary=summary,
+                    metadata_extra=new_metadata_extra
+                )
+            )
+            await session.commit()
+            
+    except Exception as e:
+        worker_log.error(f"❌ AI 总结任务失败: {e}")
+        raise

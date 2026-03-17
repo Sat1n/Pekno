@@ -1,6 +1,6 @@
 import pytest
 from datetime import datetime
-from hub.core.models import UniversalItem, ItemIntent
+from shared.entities import UniversalItem, ItemIntent
 
 def test_bilibili_ingestion():
     # 模拟插件抓取的原始数据

@@ -1,8 +1,8 @@
-from hub.core.models import UniversalItem
-from hub.core.logger import worker_log
+from shared.entities import UniversalItem
+from shared.logger import worker_log
 from worker.broker import broker
-from hub.core.database import AsyncSessionLocal  # 导入会话工厂
-from hub.core.database_models import ItemORM     # 导入数据库模型
+from shared.database import AsyncSessionLocal  # 导入会话工厂
+from shared.models import ItemORM     # 导入数据库模型
 from sqlalchemy.dialects.postgresql import insert
 from hub.core.llm.service import LLMManager
 

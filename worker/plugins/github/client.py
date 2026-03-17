@@ -1,6 +1,6 @@
 import httpx
 from typing import List, Dict, Any
-from hub.core.logger import worker_log
+from shared.logger import worker_log
 
 class GitHubClient:
     def __init__(self, token: str = None):

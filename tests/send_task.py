@@ -1,6 +1,6 @@
 import asyncio
 from worker.broker import broker
-from hub.core.models import UniversalItem, ItemIntent
+from shared.entities import UniversalItem, ItemIntent
 
 async def send_mock_task():
     # 模拟 Hub 发送一个任务

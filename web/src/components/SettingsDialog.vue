@@ -1,18 +1,18 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Github, Blocks, Settings, User, ChevronRight, Database, Trash2, Loader2, HardDrive } from 'lucide-vue-next'
+import { Github, Blocks, Settings, User, ChevronRight, Database, Trash2, Loader2, HardDrive, Puzzle } from 'lucide-vue-next'
 import { usePluginStore } from '@/store/usePluginStore'
 import { getDataSources, clearDataSource, type DataSourceStat } from '@/lib/api'
 import { useToast } from '@/components/ui/toast/use-toast' 
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 
 const props = defineProps<{ open: boolean }>()
-defineEmits(['close', 'open-github-settings'])
+defineEmits(['close', 'open-plugin-settings'])
 
-const { githubConfig, loadGitHubConfig } = usePluginStore()
+const { pluginsManifests, loadAllPlugins } = usePluginStore()
 
 const activeTab = ref('plugins')
 
@@ -73,11 +73,10 @@ const sourceNames: Record<string, string> = {
 
 // 页面加载时加载配置
 onMounted(async () => {
-  await loadGitHubConfig()
+  await loadAllPlugins()
 })
 
 // 监听 Tab 切换
-import { watch } from 'vue'
 watch(activeTab, (newTab) => {
   if (newTab === 'data') {
     loadDataSources()
@@ -126,22 +125,26 @@ const menuItems = [
 
                 <div class="grid gap-3">
                   <div 
+                    v-for="plugin in pluginsManifests"
+                    :key="plugin.manifest.id"
                     class="group border rounded-xl p-4 flex items-center justify-between hover:border-primary/50 hover:bg-muted/30 transition-all cursor-pointer"
-                    @click="$emit('open-github-settings')"
+                    @click="$emit('open-plugin-settings', plugin.manifest.id)"
                   >
                     <div class="flex items-center gap-4">
                       <div class="p-2.5 bg-muted rounded-xl group-hover:bg-background transition-colors shadow-sm">
-                        <Github class="w-6 h-6" />
+                        <!-- 可以根据插件ID或其它标识渲染不同的图标，默认用 Puzzle -->
+                        <Github v-if="plugin.manifest.id === 'github'" class="w-6 h-6" />
+                        <Puzzle v-else class="w-6 h-6" />
                       </div>
                       <div>
                         <div class="flex items-center gap-2">
-                          <span class="font-bold text-sm">GitHub Stars</span>
+                          <span class="font-bold text-sm">{{ plugin.manifest.name }}</span>
                           <div 
                             class="w-1.5 h-1.5 rounded-full"
-                            :class="githubConfig.has_token ? 'bg-green-500' : 'bg-gray-400'"
+                            :class="plugin.has_token ? 'bg-green-500' : 'bg-gray-400'"
                           ></div>
                         </div>
-                        <p class="text-xs text-muted-foreground mt-0.5 leading-relaxed">同步 GitHub 仓库并使用 AI 生成 README 摘要。</p>
+                        <p class="text-xs text-muted-foreground mt-0.5 leading-relaxed">{{ plugin.manifest.description }}</p>
                       </div>
                     </div>
                     <ChevronRight class="w-4 h-4 text-muted-foreground group-hover:translate-x-1 transition-transform" />

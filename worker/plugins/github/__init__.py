@@ -1,6 +1,5 @@
-from .task import summarize_repo_task, sync_github_stars_task
+from .plugin import GitHubStarsPlugin
 
 __all__ = [
-    "summarize_repo_task",
-    "sync_github_stars_task"
+    "GitHubStarsPlugin"
 ]

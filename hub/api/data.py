@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from typing import List, Dict, Any
-from hub.core.database import AsyncSessionLocal
-from hub.core.database_models import ItemORM
+from shared.database import AsyncSessionLocal
+from shared.models import ItemORM
 from sqlalchemy import select, func, delete
 from pydantic import BaseModel
 

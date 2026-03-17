@@ -8,14 +8,12 @@ import { Button } from '@/components/ui/button'
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import SettingsDialog from '@/components/SettingsDialog.vue'
-import GitHubSettingsDialog from '@/components/GitHubSettingsDialog.vue'
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
-import { deleteGitHubConfig } from '@/lib/api'
+import PluginSettingsDialog from '@/components/PluginSettingsDialog.vue'
 import { useToast } from '@/components/ui/toast/use-toast'
 import { usePluginStore } from '@/store/usePluginStore'
 
 const { toast } = useToast()
-const { loadGitHubConfig } = usePluginStore()
+const { loadAllPlugins } = usePluginStore()
 
 // 通知类型
 export interface AppNotification {
@@ -92,52 +90,18 @@ const searchQuery = defineModel<string>('searchQuery', { default: '' })
 // 系统设置弹窗状态
 const isSettingsOpen = ref(false)
 
-// GitHub 设置弹窗状态
-const isGitHubSettingsOpen = ref(false)
+// 插件设置弹窗状态
+const isPluginSettingsOpen = ref(false)
+const activePluginId = ref('')
 
-// 删除确认对话框状态
-const isDeleteDialogOpen = ref(false)
-const isDeleting = ref(false)
-
-// 打开删除确认对话框
-function openDeleteDialog() {
-  isDeleteDialogOpen.value = true
-}
-
-// 删除配置
-async function handleDelete() {
-  isDeleting.value = true
-  try {
-    const success = await deleteGitHubConfig()
-    if (success) {
-      // ✨ 1. 强制刷新全局 Store，让小灯变灰
-      await loadGitHubConfig() 
-      
-      // ✨ 2. 既然配置都删了，直接把配置窗口也关掉
-      isGitHubSettingsOpen.value = false 
-      
-      isDeleteDialogOpen.value = false
-      toast({
-        title: '删除成功',
-        description: 'GitHub 配置已清除',
-      })
-    }
-  } catch (error) {
-    console.error('删除配置失败:', error)
-    toast({
-      title: '删除失败',
-      description: '无法清除 GitHub 配置',
-      variant: 'destructive',
-    })
-  } finally {
-    isDeleting.value = false
-  }
+function openPluginSettings(pluginId: string) {
+  activePluginId.value = pluginId
+  isPluginSettingsOpen.value = true
 }
 
 // 暴露方法给子组件
 defineExpose({
   addNotification,
-  openDeleteDialog,
 })
 
 const navMain = [
@@ -332,33 +296,14 @@ const plugins = [
     <SettingsDialog 
       :open="isSettingsOpen" 
       @close="isSettingsOpen = false"
-      @open-github-settings="isGitHubSettingsOpen = true"
+      @open-plugin-settings="openPluginSettings"
     />
     
-    <!-- GitHub 设置弹窗 -->
-    <GitHubSettingsDialog 
-      v-model:open="isGitHubSettingsOpen" 
-      @open-delete-dialog="openDeleteDialog"
+    <!-- 插件设置弹窗 -->
+    <PluginSettingsDialog 
+      v-model:open="isPluginSettingsOpen" 
+      :plugin-id="activePluginId"
     />
-
-    <!-- 删除确认对话框 -->
-    <AlertDialog :open="isDeleteDialogOpen" @update:open="isDeleteDialogOpen = $event">
-      <AlertDialogContent class="max-w-[425px]">
-        <AlertDialogHeader>
-          <AlertDialogTitle>确认删除</AlertDialogTitle>
-          <AlertDialogDescription>
-            确定要删除 GitHub 配置吗？这将清除所有相关的 Token 和设置。
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <div class="flex gap-3 justify-end">
-          <AlertDialogCancel>取消</AlertDialogCancel>
-          <AlertDialogAction @click="handleDelete">
-            <Loader2 v-if="isDeleting" class="w-4 h-4 mr-2 animate-spin" />
-            {{ isDeleting ? '删除中...' : '删除' }}
-          </AlertDialogAction>
-        </div>
-      </AlertDialogContent>
-    </AlertDialog>
   </SidebarProvider>
 </template>
 

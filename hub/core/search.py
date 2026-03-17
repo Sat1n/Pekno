@@ -1,10 +1,10 @@
 import asyncio
 from typing import List
 from sqlalchemy import select, text, case, cast, Float
-from hub.core.database import AsyncSessionLocal
-from hub.core.database_models import ItemORM
+from shared.database import AsyncSessionLocal
+from shared.models import ItemORM
 from hub.core.llm.service import EmbeddingService
-from hub.core.logger import hub_log
+from shared.logger import hub_log
 
 class SearchService:
     def __init__(self):

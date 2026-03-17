@@ -1,7 +1,7 @@
 from pydantic import BaseModel, HttpUrl
 from typing import List, Optional, Any
 from datetime import datetime
-from hub.core.models import ItemIntent
+from shared.entities import ItemIntent
 
 
 class ItemResponse(BaseModel):

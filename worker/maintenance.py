@@ -1,6 +1,6 @@
 from sqlalchemy import delete
-from hub.core.database import AsyncSessionLocal
-from hub.core.database_models import ItemORM
+from shared.database import AsyncSessionLocal
+from shared.models import ItemORM
 from datetime import datetime, timedelta
 
 async def cleanup_expired_items():

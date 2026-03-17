@@ -1,40 +1,50 @@
 import { ref } from 'vue'
-import { getGitHubConfig, type GitHubConfig } from '@/lib/api'
+import { getAllPlugins, savePluginConfigApi, triggerPluginSyncApi, type PluginInfo } from '@/lib/api'
 
 // 创建全局状态
-const githubConfig = ref<GitHubConfig>({
-  has_token: false,
-  sync_limit: 100,
-  auto_sync: false,
-  auto_sync_interval: 60,
-})
-
+const pluginsManifests = ref<PluginInfo[]>([])
 const isLoading = ref(false)
 
-// 加载GitHub配置
-async function loadGitHubConfig() {
+// 加载所有插件配置
+async function loadAllPlugins() {
   isLoading.value = true
   try {
-    const data = await getGitHubConfig()
-    githubConfig.value = data
+    const data = await getAllPlugins()
+    pluginsManifests.value = data
   } catch (error) {
-    console.error('加载GitHub配置失败:', error)
+    console.error('加载插件配置失败:', error)
   } finally {
     isLoading.value = false
   }
 }
 
-// 更新GitHub配置
-function updateGitHubConfig(config: Partial<GitHubConfig>) {
-  githubConfig.value = { ...githubConfig.value, ...config }
+// 保存插件配置
+async function savePluginConfig(pluginId: string, configData: Record<string, any>) {
+  try {
+    await savePluginConfigApi(pluginId, configData)
+  } catch (error) {
+    console.error(`保存插件 ${pluginId} 配置失败:`, error)
+    throw error
+  }
+}
+
+// 触发插件同步
+async function triggerPluginSync(pluginId: string) {
+  try {
+    await triggerPluginSyncApi(pluginId)
+  } catch (error) {
+    console.error(`触发插件 ${pluginId} 同步失败:`, error)
+    throw error
+  }
 }
 
 // 导出状态和方法
 export function usePluginStore() {
   return {
-    githubConfig,
+    pluginsManifests,
     isLoading,
-    loadGitHubConfig,
-    updateGitHubConfig,
+    loadAllPlugins,
+    savePluginConfig,
+    triggerPluginSync,
   }
 }

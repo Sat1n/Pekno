@@ -3,21 +3,31 @@
 支持加密存储敏感信息
 """
 from typing import Optional
-from hub.core.database import AsyncSessionLocal
-from hub.core.database_models import ConfigORM
-from hub.core.crypto import encrypt_value, decrypt_value
-from hub.core.logger import worker_log
+from shared.database import AsyncSessionLocal
+from shared.models import ConfigORM
+from shared.crypto import encrypt_value, decrypt_value
+from shared.logger import worker_log
+
+
+class ConfigKeys:
+    TOKEN = "token"
+    SYNC_LIMIT = "sync_limit"
+    AUTO_SYNC = "auto_sync"
+    AUTO_SYNC_INTERVAL = "auto_sync_interval"
+    LAST_SYNC_TIME = "last_sync_time"
+    SYNC_STATUS = "sync_status"
 
 
 class ConfigManager:
     """配置管理器"""
     
     @staticmethod
-    async def get_config(key: str, default: Optional[str] = None) -> Optional[str]:
+    async def get_config(plugin_id: str, key: str, default: Optional[str] = None) -> Optional[str]:
         """
         获取配置值
         
         Args:
+            plugin_id: 插件命名空间标识
             key: 配置键
             default: 默认值
             
@@ -26,7 +36,9 @@ class ConfigManager:
         """
         async with AsyncSessionLocal() as session:
             result = await session.execute(
-                ConfigORM.__table__.select().where(ConfigORM.key == key)
+                ConfigORM.__table__.select().where(
+                    (ConfigORM.plugin_id == plugin_id) & (ConfigORM.key == key)
+                )
             )
             config = result.fetchone()
             
@@ -38,11 +50,12 @@ class ConfigManager:
             return decrypted if decrypted is not None else default
     
     @staticmethod
-    async def set_config(key: str, value: str, description: str = "") -> bool:
+    async def set_config(plugin_id: str, key: str, value: str, description: str = "") -> bool:
         """
         设置配置值
         
         Args:
+            plugin_id: 插件命名空间标识
             key: 配置键
             value: 配置值（会被加密）
             description: 配置描述
@@ -59,11 +72,12 @@ class ConfigManager:
                     from sqlalchemy.dialects.postgresql import insert
                     
                     stmt = insert(ConfigORM).values(
+                        plugin_id=plugin_id,
                         key=key,
                         value=encrypted_value,
                         description=description
                     ).on_conflict_do_update(
-                        index_elements=['key'],
+                        index_elements=['plugin_id', 'key'],
                         set_={
                             'value': encrypted_value,
                             'description': description
@@ -72,19 +86,20 @@ class ConfigManager:
                     
                     await session.execute(stmt)
                 
-                worker_log.info(f"✅ 配置已保存: {key}")
+                worker_log.info(f"✅ 配置已保存 [{plugin_id}]: {key}")
                 return True
                 
         except Exception as e:
-            worker_log.error(f"❌ 保存配置失败 {key}: {e}")
+            worker_log.error(f"❌ 保存配置失败 [{plugin_id}] {key}: {e}")
             return False
     
     @staticmethod
-    async def delete_config(key: str) -> bool:
+    async def delete_config(plugin_id: str, key: str) -> bool:
         """
         删除配置
         
         Args:
+            plugin_id: 插件命名空间标识
             key: 配置键
             
         Returns:
@@ -94,25 +109,14 @@ class ConfigManager:
             async with AsyncSessionLocal() as session:
                 async with session.begin():
                     from sqlalchemy import delete
-                    await session.execute(
-                        delete(ConfigORM).where(ConfigORM.key == key)
+                    stmt = delete(ConfigORM).where(
+                        (ConfigORM.plugin_id == plugin_id) & (ConfigORM.key == key)
                     )
-                
-                worker_log.info(f"✅ 配置已删除: {key}")
-                return True
-                
+                    result = await session.execute(stmt)
+                    if result.rowcount > 0:
+                        worker_log.info(f"🗑️ 配置已删除 [{plugin_id}]: {key}")
+                        return True
+                    return False
         except Exception as e:
-            worker_log.error(f"❌ 删除配置失败 {key}: {e}")
+            worker_log.error(f"❌ 删除配置失败 [{plugin_id}] {key}: {e}")
             return False
-
-
-# 预定义的配置键
-class ConfigKeys:
-    """配置键常量"""
-    GITHUB_TOKEN = "github_token"
-    GITHUB_SYNC_LIMIT = "github_sync_limit"
-    GITHUB_AUTO_SYNC = "github_auto_sync"
-    GITHUB_AUTO_SYNC_INTERVAL = "github_auto_sync_interval"
-    GITHUB_AUTO_SUMMARIZE = "github_auto_summarize"
-    GITHUB_SYNC_STATUS = "github_sync_status"
-    GITHUB_LAST_SYNC_TIME = "github_last_sync_time"

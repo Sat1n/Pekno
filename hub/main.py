@@ -3,10 +3,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Optional
 from datetime import datetime
 from hub.core.search import SearchService
-from hub.core.database import AsyncSessionLocal
-from hub.core.database_models import ItemORM
+from shared.database import AsyncSessionLocal
+from shared.models import ItemORM
 from hub.api.schemas import ItemResponse, SearchResponse, SyncRequest, FrontendSearchItem
-from hub.core.config import ConfigManager, ConfigKeys
+from shared.config import ConfigManager, ConfigKeys
 from sqlalchemy import select, delete
 from pydantic import BaseModel
 
@@ -24,7 +24,18 @@ search_service = SearchService()
 
 # 注册路由
 from hub.api import data
+from hub.api.routers import plugins
+from shared.plugins.manager import plugin_manager
+from shared.database import AsyncSessionLocal
+
 app.include_router(data.router, prefix="/api")
+app.include_router(plugins.router)
+
+@app.on_event("startup")
+async def startup_event():
+    """系统启动时动态加载插件"""
+    async with AsyncSessionLocal() as session:
+        await plugin_manager.load_enabled_plugins(session)
 
 @app.get("/api/items")
 async def get_items(limit: int = 20, offset: int = 0):
@@ -317,170 +328,7 @@ async def get_item_summary_status(item_id: str):
             }
 
 
-# ========== 配置管理 API ==========
-
-class GitHubConfigRequest(BaseModel):
-    token: Optional[str] = None
-    sync_limit: int = 100
-    auto_sync: bool = False
-    auto_sync_interval: int = 60  # 分钟
-    auto_summarize: bool = False
-
-
-class GitHubConfigResponse(BaseModel):
-    has_token: bool
-    sync_limit: int
-    auto_sync: bool
-    auto_sync_interval: int
-    auto_summarize: bool
-    token_preview: Optional[str] = None
-
-class GitHubSyncStatusResponse(BaseModel):
-    status: str  # "idle" or "running"
-    last_sync_time: Optional[str] = None
-
-
-@app.get("/api/config/github", response_model=GitHubConfigResponse)
-async def get_github_config():
-    """
-    获取 GitHub 配置
-    
-    返回当前 GitHub 配置（Token 会隐藏）
-    """
-    token = await ConfigManager.get_config(ConfigKeys.GITHUB_TOKEN)
-    sync_limit = await ConfigManager.get_config(ConfigKeys.GITHUB_SYNC_LIMIT)
-    auto_sync = await ConfigManager.get_config(ConfigKeys.GITHUB_AUTO_SYNC)
-    auto_sync_interval = await ConfigManager.get_config(ConfigKeys.GITHUB_AUTO_SYNC_INTERVAL)
-    auto_summarize = await ConfigManager.get_config(ConfigKeys.GITHUB_AUTO_SUMMARIZE)
-    
-    # Token 预览：只显示前 4 位
-    token_preview = None
-    if token and len(token) > 4:
-        token_preview = token[:4] + "****"
-    
-    return GitHubConfigResponse(
-        has_token=bool(token),
-        sync_limit=int(sync_limit) if sync_limit else 100,
-        auto_sync=auto_sync == "true" if auto_sync else False,
-        auto_sync_interval=int(auto_sync_interval) if auto_sync_interval else 60,
-        auto_summarize=auto_summarize == "true" if auto_summarize else False,
-        token_preview=token_preview
-    )
-
-
-@app.post("/api/config/github")
-async def save_github_config(config: GitHubConfigRequest):
-    """
-    保存 GitHub 配置
-    
-    保存 GitHub Token 和相关设置
-    如果提供了新token则更新，否则保留原有token
-    """
-    # 如果提供了新token，则保存
-    if config.token:
-        success = await ConfigManager.set_config(
-            ConfigKeys.GITHUB_TOKEN,
-            config.token,
-            description="GitHub Personal Access Token"
-        )
-        
-        if not success:
-            raise HTTPException(status_code=500, detail="保存 Token 失败")
-    
-    # 保存同步限制
-    await ConfigManager.set_config(
-        ConfigKeys.GITHUB_SYNC_LIMIT,
-        str(config.sync_limit),
-        description="GitHub 同步仓库数量限制"
-    )
-    
-    # 保存自动同步设置
-    await ConfigManager.set_config(
-        ConfigKeys.GITHUB_AUTO_SYNC,
-        "true" if config.auto_sync else "false",
-        description="是否自动同步 GitHub Star"
-    )
-    
-    # 保存自动同步时间间隔
-    await ConfigManager.set_config(
-        ConfigKeys.GITHUB_AUTO_SYNC_INTERVAL,
-        str(config.auto_sync_interval),
-        description="GitHub 自动同步间隔时间 (分钟)"
-    )
-    
-    # 保存是否自动生成 AI 短摘要
-    await ConfigManager.set_config(
-        ConfigKeys.GITHUB_AUTO_SUMMARIZE,
-        "true" if config.auto_summarize else "false",
-        description="是否自动生成 AI 短摘要"
-    )
-    
-    # 若保存了配置且开启自动同步，可以尝试立即出发一次
-    if config.auto_sync and config.token:
-        from worker.plugins.github.task import sync_github_stars_task
-        await sync_github_stars_task.kiq(limit=config.sync_limit)
-    
-    return {
-        "status": "success",
-        "message": "GitHub 配置已保存"
-    }
-
-@app.get("/api/config/github/status", response_model=GitHubSyncStatusResponse)
-async def get_github_sync_status():
-    """获取当前 GitHub Sync 状态"""
-    status = await ConfigManager.get_config(ConfigKeys.GITHUB_SYNC_STATUS)
-    last_sync = await ConfigManager.get_config(ConfigKeys.GITHUB_LAST_SYNC_TIME)
-    return GitHubSyncStatusResponse(
-        status=status if status else "idle",
-        last_sync_time=last_sync
-    )
-
-
-@app.post("/api/config/github/test")
-async def test_github_token():
-    """
-    测试 GitHub Token 是否有效（轻量级，只获取用户信息）
-    
-    返回测试结果
-    """
-    # 使用已保存的token进行测试
-    token = await ConfigManager.get_config(ConfigKeys.GITHUB_TOKEN)
-    
-    if not token:
-        raise HTTPException(status_code=400, detail="未配置 GitHub Token")
-    
-    from worker.plugins.github.client import GitHubClient
-    client = GitHubClient(token)
-    
-    result = await client.test_connection()
-    
-    if not result.get("valid"):
-        raise HTTPException(status_code=401, detail=f"Token 无效: {result.get('error', 'Unknown error')}")
-    
-    return {
-        "status": "success",
-        "message": f"连接成功！欢迎，{result.get('name') or result.get('username')}",
-        "username": result.get("username"),
-    }
-
-
-@app.delete("/api/config/github")
-async def delete_github_config():
-    """
-    删除 GitHub 配置
-    
-    清除所有 GitHub 相关配置
-    """
-    await ConfigManager.delete_config(ConfigKeys.GITHUB_TOKEN)
-    await ConfigManager.delete_config(ConfigKeys.GITHUB_SYNC_LIMIT)
-    await ConfigManager.delete_config(ConfigKeys.GITHUB_AUTO_SYNC)
-    await ConfigManager.delete_config(ConfigKeys.GITHUB_AUTO_SYNC_INTERVAL)
-    await ConfigManager.delete_config(ConfigKeys.GITHUB_AUTO_SUMMARIZE)
-    
-    return {
-        "status": "success",
-        "message": "GitHub 配置已清除"
-    }
+# ========== 配置管理 API: 由通用插件引擎 (/api/plugins) 接管 ==========
 
 
 def format_time_ago(dt: datetime) -> str:

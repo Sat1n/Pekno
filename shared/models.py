@@ -1,5 +1,5 @@
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
-from sqlalchemy import String, DateTime, JSON, Text, Integer
+from sqlalchemy import String, DateTime, JSON, Text, Integer, Boolean
 from sqlalchemy.dialects.postgresql import ARRAY
 from pgvector.sqlalchemy import Vector # 处理向量的核心
 from datetime import datetime, timedelta
@@ -20,7 +20,6 @@ class ItemORM(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     raw_link: Mapped[str] = mapped_column(String)
     intent: Mapped[str] = mapped_column(String)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
 
     # 保留策略：-1 代表永久，正整数代表保留天数
@@ -42,7 +41,10 @@ class ConfigORM(Base):
     """用户配置存储表（加密存储敏感信息）"""
     __tablename__ = "configs"
 
-    # 配置键，如 "github_token", "sync_limit" 等
+    # 插件标识，如 "github_stars"
+    plugin_id: Mapped[str] = mapped_column(String, primary_key=True)
+    
+    # 配置键，如 "token", "sync_limit" 等
     key: Mapped[str] = mapped_column(String, primary_key=True)
     
     # 加密后的值
@@ -57,3 +59,25 @@ class ConfigORM(Base):
     
     # 是否启用
     is_enabled: Mapped[bool] = mapped_column(default=True)
+
+class PluginRegistryORM(Base):
+    """插件物理注册表"""
+    __tablename__ = "plugins"
+
+    # 插件标识，如 "github_stars"
+    plugin_id: Mapped[str] = mapped_column(String, primary_key=True)
+
+    # 插件展示名
+    name: Mapped[str] = mapped_column(String)
+
+    # 核心字段：模块路径，如 "worker.plugins.github.plugin"
+    module_path: Mapped[str] = mapped_column(String)
+
+    # 是否启用
+    is_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    # 版本
+    version: Mapped[str] = mapped_column(String, default="1.0.0")
+
+    # 安装时间
+    installed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
