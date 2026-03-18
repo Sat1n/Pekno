@@ -13,9 +13,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { Settings, Save, RefreshCw, Loader2, AlertCircle, Check } from 'lucide-vue-next'
+import { Settings, Save, RefreshCw, Loader2, AlertCircle, Check, Trash2 } from 'lucide-vue-next'
 import { useToast } from '@/components/ui/toast/use-toast'
 import { usePluginStore } from '@/store/usePluginStore'
+import { uninstallPluginApi } from '@/lib/api'
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 
 const props = defineProps<{
   open: boolean
@@ -32,12 +34,42 @@ const pluginStore = usePluginStore()
 // 状态
 const isSaving = ref(false)
 const isSyncing = ref(false)
+const isUninstalling = ref(false)
+const isUninstallDialogOpen = ref(false)
 const formData = ref<Record<string, any>>({})
 
 // 获取当前插件信息
 const currentPlugin = computed(() => {
   return pluginStore.pluginsManifests.value.find(p => p.manifest.id === props.pluginId)
 })
+
+// 卸载插件
+async function handleUninstall() {
+  if (!currentPlugin.value) return
+  
+  isUninstalling.value = true
+  try {
+    await uninstallPluginApi(props.pluginId)
+    toast({
+      title: '卸载成功',
+      description: `${currentPlugin.value.manifest.name} 已移除`,
+    })
+    
+    // 刷新列表并关闭所有弹窗
+    await pluginStore.loadAllPlugins()
+    isUninstallDialogOpen.value = false
+    emit('update:open', false)
+  } catch (error: any) {
+    toast({
+      title: '卸载失败',
+      description: error.response?.data?.detail || '无法完成卸载',
+      variant: 'destructive',
+    })
+  } finally {
+    isUninstalling.value = false
+  }
+}
+
 
 const schema = computed(() => currentPlugin.value?.manifest.settings_schema || {})
 
@@ -231,15 +263,28 @@ async function handleSync() {
       </div>
 
       <div class="p-6 bg-muted/30 border-t flex justify-between items-center mt-auto">
-        <Button 
-          variant="outline" 
-          @click="handleSync" 
-          :disabled="isSyncing || !currentPlugin.has_token"
-        >
-          <Loader2 v-if="isSyncing" class="w-4 h-4 mr-2 animate-spin" />
-          <RefreshCw v-else class="w-4 h-4 mr-2" />
-          手动同步
-        </Button>
+        <div class="flex gap-2">
+          <!-- 卸载按钮（仅对第三方插件显示，假设非 github_stars 为第三方，或者简单起见都显示） -->
+          <Button 
+            v-if="currentPlugin.manifest.id !== 'github_stars'"
+            variant="ghost" 
+            class="text-destructive hover:text-destructive hover:bg-destructive/10"
+            @click="isUninstallDialogOpen = true"
+          >
+            <Trash2 class="w-4 h-4 mr-2" />
+            卸载
+          </Button>
+
+          <Button 
+            variant="outline" 
+            @click="handleSync" 
+            :disabled="isSyncing || !currentPlugin.has_token"
+          >
+            <Loader2 v-if="isSyncing" class="w-4 h-4 mr-2 animate-spin" />
+            <RefreshCw v-else class="w-4 h-4 mr-2" />
+            手动同步
+          </Button>
+        </div>
 
         <div class="flex gap-2">
           <Button variant="ghost" @click="$emit('update:open', false)">取消</Button>
@@ -252,4 +297,26 @@ async function handleSync() {
       </div>
     </DialogContent>
   </Dialog>
+
+  <!-- 卸载确认对话框 -->
+  <AlertDialog :open="isUninstallDialogOpen" @update:open="isUninstallDialogOpen = $event">
+    <AlertDialogContent>
+      <AlertDialogHeader>
+        <AlertDialogTitle>确认卸载插件？</AlertDialogTitle>
+        <AlertDialogDescription>
+          这将删除插件文件及其所有配置数据。此操作不可撤销。
+        </AlertDialogDescription>
+      </AlertDialogHeader>
+      <div class="flex gap-3 justify-end">
+        <AlertDialogCancel>取消</AlertDialogCancel>
+        <AlertDialogAction 
+          class="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+          @click="handleUninstall"
+        >
+          <Loader2 v-if="isUninstalling" class="w-4 h-4 mr-2 animate-spin" />
+          {{ isUninstalling ? '卸载中...' : '确认卸载' }}
+        </AlertDialogAction>
+      </div>
+    </AlertDialogContent>
+  </AlertDialog>
 </template>

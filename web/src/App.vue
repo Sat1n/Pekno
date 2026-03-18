@@ -354,7 +354,7 @@ function openExternalLink(url?: string) {
             </CardTitle>
             
             <!-- 列表模式：完整摘要 -->
-            <p v-if="layoutMode === 'list'" class="text-muted-foreground leading-relaxed text-base mt-3">
+            <p v-if="layoutMode === 'list'" class="text-muted-foreground leading-relaxed text-base mt-3 line-clamp-3">
               {{ item.summary }}
             </p>
             <!-- 网格模式：两行摘要 -->
@@ -395,9 +395,9 @@ function openExternalLink(url?: string) {
 
   <!-- AI 详情侧边栏 -->
   <Sheet v-model:open="isSheetOpen">
-    <SheetContent class="w-full sm:max-w-xl p-0 flex flex-col" side="right">
+    <SheetContent class="w-full sm:max-w-xl p-0 flex flex-col h-full max-h-screen" side="right">
       <!-- 顶部：标题和关闭按钮 -->
-      <SheetHeader class="p-6 border-b border-border">
+      <SheetHeader class="p-6 border-b border-border shrink-0">
         <div class="flex items-start justify-between">
           <div class="flex-1 min-w-0">
             <SheetTitle class="text-xl font-bold truncate">
@@ -424,7 +424,7 @@ function openExternalLink(url?: string) {
       </SheetHeader>
 
       <!-- 中部：AI 总结内容 -->
-      <ScrollArea class="flex-1 p-6">
+      <ScrollArea class="flex-1 overflow-y-auto p-4">
         <div class="space-y-6">
           <!-- AI 智能总结 -->
           <div>
@@ -468,7 +468,7 @@ function openExternalLink(url?: string) {
       </ScrollArea>
 
       <!-- 底部：操作按钮 -->
-      <div class="p-6 border-t border-border space-y-3">
+      <div class="shrink-0 p-4 border-t bg-background mt-auto sticky bottom-0 space-y-3">
         <Button 
           class="w-full" 
           variant="default"

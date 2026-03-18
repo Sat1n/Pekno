@@ -3,11 +3,12 @@ import { ref, onMounted, watch } from 'vue'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Github, Blocks, Settings, User, ChevronRight, Database, Trash2, Loader2, HardDrive, Puzzle } from 'lucide-vue-next'
+import { Github, Blocks, Settings, User, ChevronRight, Database, Trash2, Loader2, HardDrive, Puzzle, Plus } from 'lucide-vue-next'
 import { usePluginStore } from '@/store/usePluginStore'
 import { getDataSources, clearDataSource, type DataSourceStat } from '@/lib/api'
 import { useToast } from '@/components/ui/toast/use-toast' 
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
+import PluginInstallDialog from './PluginInstallDialog.vue'
 
 const props = defineProps<{ open: boolean }>()
 defineEmits(['close', 'open-plugin-settings'])
@@ -15,6 +16,7 @@ defineEmits(['close', 'open-plugin-settings'])
 const { pluginsManifests, loadAllPlugins } = usePluginStore()
 
 const activeTab = ref('plugins')
+const isInstallDialogOpen = ref(false)
 
 // 数据管理相关状态
 const { toast } = useToast()
@@ -118,9 +120,15 @@ const menuItems = [
           <ScrollArea class="flex-1">
             <div class="p-8">
               <div v-if="activeTab === 'plugins'" class="space-y-8 animate-in fade-in slide-in-from-right-4 duration-300">
-                <div>
-                  <h3 class="text-2xl font-bold tracking-tight">插件管理</h3>
-                  <p class="text-muted-foreground text-sm mt-1 text-balance">连接并配置第三方服务，让 Iris 自动同步并分析你的数字内容。</p>
+                <div class="flex items-center justify-between">
+                  <div>
+                    <h3 class="text-2xl font-bold tracking-tight">插件管理</h3>
+                    <p class="text-muted-foreground text-sm mt-1 text-balance">连接并配置第三方服务，让 Iris 自动同步并分析你的数字内容。</p>
+                  </div>
+                  <Button size="sm" variant="outline" @click="isInstallDialogOpen = true">
+                    <Plus class="w-4 h-4 mr-2" />
+                    安装插件
+                  </Button>
                 </div>
 
                 <div class="grid gap-3">
@@ -229,5 +237,11 @@ const menuItems = [
       </div>
     </AlertDialogContent>
   </AlertDialog>
+
+  <!-- 插件安装弹窗 -->
+  <PluginInstallDialog 
+    v-model:open="isInstallDialogOpen"
+    @install-success="loadAllPlugins"
+  />
 
 </template>
