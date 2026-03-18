@@ -63,11 +63,34 @@ class PluginManager:
                         # 实例化插件
                         plugin_instance = obj()
                         
-                        # 验证 plugin_id 是否匹配
-                        if plugin_instance.manifest.get("id") == plugin_record.plugin_id:
-                            self.register(plugin_instance)
-                            found = True
-                            break
+                        # ✨ 核心：Iris 框架执行依赖注入
+                        import json
+                        from pathlib import Path
+                        
+                        # 尝试从模块同级目录读取 manifest.json
+                        module_file = getattr(module, '__file__', None)
+                        manifest_data = {
+                            "id": plugin_record.plugin_id,
+                            "name": plugin_record.name,
+                            "version": plugin_record.version
+                        }
+                        
+                        if module_file:
+                            manifest_path = Path(module_file).parent / "manifest.json"
+                            if manifest_path.exists():
+                                try:
+                                    with open(manifest_path, "r", encoding="utf-8") as f:
+                                        file_manifest = json.load(f)
+                                        # 合并文件配置（文件中的 schema 等更详细）
+                                        manifest_data.update(file_manifest)
+                                except Exception as e:
+                                    hub_log.error(f"读取 manifest.json 失败: {e}")
+                                    
+                        plugin_instance._manifest = manifest_data
+                        
+                        self.register(plugin_instance)
+                        found = True
+                        break
                 
                 if not found:
                     hub_log.warning(f"⚠️ 在模块 {module_path} 中未找到匹配的插件类")

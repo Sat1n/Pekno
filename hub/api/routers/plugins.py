@@ -1,10 +1,199 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, UploadFile, File
 from typing import Dict, Any, List
+import shutil
+import os
+import json
+import tempfile
+from datetime import datetime
+from pathlib import Path
 from shared.plugins.manager import plugin_manager
 from shared.config import ConfigManager
-from worker.plugins.pipeline import run_plugin_pipeline_task
+from shared.models import PluginRegistryORM
+from shared.database import AsyncSessionLocal
+from shared.utils.zip_utils import safe_extract_zip
+from worker.plugins.pipeline import reload_system_plugins_task, run_plugin_pipeline_task
+from sqlalchemy import select, delete
 
 router = APIRouter(prefix="/api/plugins", tags=["Plugins"])
+
+# 插件安装相关配置
+PLUGIN_INSTALL_DIR = Path("worker/plugins/third_party").resolve()
+TEMP_PREVIEW_DIR = Path(tempfile.gettempdir()) / "iris_plugins"
+
+@router.post("/upload_preview")
+async def upload_plugin_preview(file: UploadFile = File(...)):
+    """
+    步骤1：上传并预检插件
+    解压到临时目录，读取 manifest 和源码供审查
+    """
+    # 确保临时目录存在
+    if TEMP_PREVIEW_DIR.exists():
+        shutil.rmtree(TEMP_PREVIEW_DIR)
+    TEMP_PREVIEW_DIR.mkdir(parents=True, exist_ok=True)
+    
+    temp_zip_path = TEMP_PREVIEW_DIR / file.filename
+    
+    try:
+        # 1. 保存 ZIP
+        with open(temp_zip_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+            
+        # 2. 安全解压
+        # 为每个插件创建一个随机子目录，避免冲突
+        import uuid
+        extract_dir_name = str(uuid.uuid4())
+        extract_path = TEMP_PREVIEW_DIR / extract_dir_name
+        extract_path.mkdir()
+        
+        safe_extract_zip(str(temp_zip_path), str(extract_path))
+        
+        # 3. 寻找 manifest.json (假设在根目录)
+        manifest_path = extract_path / "manifest.json"
+        if not manifest_path.exists():
+            # 尝试在子目录找（有些压缩包会多一层文件夹）
+            subdirs = [d for d in extract_path.iterdir() if d.is_dir()]
+            if len(subdirs) == 1:
+                extract_path = subdirs[0]
+                manifest_path = extract_path / "manifest.json"
+        
+        if not manifest_path.exists():
+            raise HTTPException(status_code=400, detail="未找到 manifest.json 描述文件")
+            
+        # 4. 读取清单 (纯文本解析，不加载代码)
+        with open(manifest_path, "r", encoding="utf-8") as f:
+            manifest = json.load(f)
+            
+        # 5. 读取主入口源码 (仅预览)
+        # 假设入口文件通常是 plugin.py 或 __init__.py
+        source_code = ""
+        main_py = extract_path / "plugin.py"
+        if not main_py.exists():
+            main_py = extract_path / "__init__.py"
+            
+        if main_py.exists():
+            with open(main_py, "r", encoding="utf-8") as f:
+                source_code = f.read()
+        else:
+            source_code = "# 未找到标准入口文件 (plugin.py 或 __init__.py)"
+            
+        return {
+            "temp_token": extract_dir_name, # 用于下一步确认安装
+            "manifest": manifest,
+            "source_code": source_code,
+            "file_structure": [p.name for p in extract_path.iterdir()]
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"预检失败: {str(e)}")
+
+@router.post("/confirm_install")
+async def confirm_install_plugin(token: str):
+    """
+    步骤2：确认安装
+    将临时目录移动到插件目录，写入数据库，触发热重载
+    """
+    source_path = TEMP_PREVIEW_DIR / token
+    if not source_path.exists():
+        raise HTTPException(status_code=404, detail="安装会话已过期，请重新上传")
+        
+    try:
+        # 1. 读取 Manifest 获取 ID
+        manifest_path = source_path / "manifest.json"
+        # 再次检查子目录逻辑
+        if not manifest_path.exists():
+            subdirs = [d for d in source_path.iterdir() if d.is_dir()]
+            if len(subdirs) == 1:
+                source_path = subdirs[0]
+                manifest_path = source_path / "manifest.json"
+        
+        with open(manifest_path, "r", encoding="utf-8") as f:
+            manifest = json.load(f)
+            
+        plugin_id = manifest.get("id")
+        if not plugin_id:
+            raise HTTPException(status_code=400, detail="Manifest 缺少插件 ID")
+            
+        # 2. 移动文件到正式目录
+        target_path = PLUGIN_INSTALL_DIR / plugin_id
+        if target_path.exists():
+            shutil.rmtree(target_path) # 覆盖安装
+            
+        shutil.move(str(source_path), str(target_path))
+        
+        # 3. 写入数据库注册表
+        module_path = f"worker.plugins.third_party.{plugin_id}.plugin"
+        # 尝试猜测入口模块，如果 plugin.py 存在则用 .plugin，否则用包名
+        if not (target_path / "plugin.py").exists():
+            module_path = f"worker.plugins.third_party.{plugin_id}"
+
+        async with AsyncSessionLocal() as session:
+            from sqlalchemy.dialects.postgresql import insert
+            stmt = insert(PluginRegistryORM).values(
+                plugin_id=plugin_id,
+                name=manifest.get("name", "Unknown"),
+                module_path=module_path,
+                version=manifest.get("version", "1.0.0"),
+                is_enabled=True
+            ).on_conflict_do_update(
+                index_elements=['plugin_id'],
+                set_={
+                    "name": manifest.get("name"),
+                    "module_path": module_path,
+                    "version": manifest.get("version"),
+                    "is_enabled": True,
+                    "installed_at": datetime.now()
+                }
+            )
+            await session.execute(stmt)
+            await session.commit()
+            
+            # 4. 触发双端热重载
+            # Hub 端
+            await plugin_manager.load_enabled_plugins(session)
+            
+        # Worker 端
+        await reload_system_plugins_task.kiq()
+        
+        return {"status": "success", "message": f"插件 {plugin_id} 安装成功！"}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"安装失败: {str(e)}")
+
+@router.delete("/{plugin_id}")
+async def uninstall_plugin(plugin_id: str):
+    """
+    卸载插件
+    """
+    try:
+        # 1. 从数据库移除
+        async with AsyncSessionLocal() as session:
+            # 1.1 删除插件注册记录
+            stmt_registry = delete(PluginRegistryORM).where(PluginRegistryORM.plugin_id == plugin_id)
+            await session.execute(stmt_registry)
+            
+            # 1.2 删除插件相关配置 (Fix: 卸载时清理配置)
+            from shared.models import ConfigORM
+            stmt_config = delete(ConfigORM).where(ConfigORM.plugin_id == plugin_id)
+            await session.execute(stmt_config)
+            
+            await session.commit()
+            
+            # 触发 Hub 重载 (从内存移除)
+            if plugin_id in plugin_manager.plugins:
+                del plugin_manager.plugins[plugin_id]
+        
+        # 2. 删除物理文件
+        plugin_dir = PLUGIN_INSTALL_DIR / plugin_id
+        if plugin_dir.exists():
+            shutil.rmtree(plugin_dir)
+            
+        # 3. 触发 Worker 重载
+        await reload_system_plugins_task.kiq()
+        
+        return {"status": "success", "message": f"插件 {plugin_id} 已卸载"}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"卸载失败: {str(e)}")
 
 @router.get("")
 async def get_plugins():
@@ -27,22 +216,33 @@ async def get_plugins():
                 elif schema.get("type") == "boolean":
                     val = (val == "true")
                     
-                if schema.get("secret"):
+                if schema.get("secret") or schema.get("required"):
+                    # 只要有任何关键配置被设置了，就认为有 token
                     has_token = True
-                    token_preview = val[:4] + "****" if len(val) > 4 else None
-                    # 不返回真实敏感数据
-                    continue
-                else:
-                    config_values[key] = val
+                    if schema.get("secret"):
+                        token_preview = val[:4] + "****" if len(val) > 4 else None
+                        # 不返回真实敏感数据
+                        continue
+                
+                config_values[key] = val
             else:
                 config_values[key] = schema.get("default")
-                if schema.get("secret"):
-                    has_token = False
+                # 如果是 secret 且没有值，确保 has_token 为 False (除非前面已经置为 True)
+                # 但这里的逻辑是针对单个 key 循环，所以 has_token 应该是“该插件是否配置就绪”的标志
                 
+        # 修正 has_token 逻辑：检查所有 required 字段是否有值
+        is_configured = True
+        for key, schema in settings_schema.items():
+            if schema.get("required"):
+                val = await ConfigManager.get_config(plugin_id, key)
+                if not val:
+                    is_configured = False
+                    break
+        
         result.append({
             "manifest": manifest,
             "config": config_values,
-            "has_token": has_token,
+            "has_token": is_configured, # 用 is_configured 替代单纯的 has_token
             "token_preview": token_preview
         })
         

@@ -22,6 +22,8 @@ var/
 .tox/
 .venv/
 venv/
+plugins_dev/
+dev.txt
 
 # Node.js
 node_modules/

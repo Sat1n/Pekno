@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Optional
@@ -9,8 +10,16 @@ from hub.api.schemas import ItemResponse, SearchResponse, SyncRequest, FrontendS
 from shared.config import ConfigManager, ConfigKeys
 from sqlalchemy import select, delete
 from pydantic import BaseModel
+from shared.plugins.manager import plugin_manager
 
-app = FastAPI(title="Iris Intelligence Hub")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """系统启动时动态加载插件"""
+    async with AsyncSessionLocal() as session:
+        await plugin_manager.load_enabled_plugins(session)
+    yield
+
+app = FastAPI(title="Iris Intelligence Hub", lifespan=lifespan)
 
 # 跨域配置（开发前端 Vue/React 时必开）
 app.add_middleware(
@@ -25,17 +34,9 @@ search_service = SearchService()
 # 注册路由
 from hub.api import data
 from hub.api.routers import plugins
-from shared.plugins.manager import plugin_manager
-from shared.database import AsyncSessionLocal
 
 app.include_router(data.router, prefix="/api")
 app.include_router(plugins.router)
-
-@app.on_event("startup")
-async def startup_event():
-    """系统启动时动态加载插件"""
-    async with AsyncSessionLocal() as session:
-        await plugin_manager.load_enabled_plugins(session)
 
 @app.get("/api/items")
 async def get_items(limit: int = 20, offset: int = 0):
@@ -83,11 +84,13 @@ async def hybrid_search_api(
                 if not tags:
                     tags = ["未分类"]
                 
-                summary = item.summary or item.content_text or "暂无描述"
+                # 强制卡片的 summary 只使用原始短描述
+                summary = item.content_text or "暂无描述"
                 time_str = format_github_time(pushed_at) if pushed_at else format_time_ago(item.created_at)
                 cover_url = metadata.get("cover_url")
                 has_long_summary = metadata.get("has_long_summary", False)
-                long_summary = metadata.get("long_summary")
+                # 长总结独立赋值 (item.summary 里面存的才是大模型生成的 Markdown)
+                long_summary = item.summary if has_long_summary else None
                 
                 source_map = {
                     "github_star": "github",
@@ -130,8 +133,8 @@ async def hybrid_search_api(
         if not tags:
             tags = ["未分类"]
         
-        # summary：优先使用 AI 生成的摘要，否则使用原始描述
-        summary = item.summary or item.content_text or "暂无描述"
+        # 强制卡片的 summary 只使用原始短描述
+        summary = item.content_text or "暂无描述"
         
         # time：使用 pushed_at 或 created_at
         time_str = format_github_time(pushed_at) if pushed_at else format_time_ago(item.created_at)
@@ -141,7 +144,8 @@ async def hybrid_search_api(
         
         # has_long_summary: 获取 AI 长摘要缓存标识
         has_long_summary = metadata.get("has_long_summary", False)
-        long_summary = metadata.get("long_summary")
+        # 长总结独立赋值 (item.summary 里面存的才是大模型生成的 Markdown)
+        long_summary = item.summary if has_long_summary else None
         
         # source：根据 source_type 映射
         source_map = {
@@ -217,8 +221,8 @@ async def search_github_items(
             if not tags:
                 tags = ["GitHub"]
             
-            # summary：优先使用 AI 生成的摘要，否则使用原始描述
-            summary = item.summary or item.content_text or "暂无描述"
+            # 强制卡片的 summary 只使用原始短描述
+            summary = item.content_text or "暂无描述"
             
             # time：使用 pushed_at（仓库最后更新时间）
             time_str = format_github_time(pushed_at) if pushed_at else "未知时间"
@@ -231,7 +235,8 @@ async def search_github_items(
             
             # has_long_summary: 获取 AI 长摘要缓存标识
             has_long_summary = metadata.get("has_long_summary", False)
-            long_summary = metadata.get("long_summary")
+            # 长总结独立赋值 (item.summary 里面存的才是大模型生成的 Markdown)
+            long_summary = item.summary if has_long_summary else None
 
             search_results.append({
                 "id": item.id,
@@ -279,7 +284,7 @@ async def summarize_item(item_id: str):
     异步处理，返回 202 Accepted 和 task_id
     """
     # 触发异步任务
-    from worker.plugins.github.task import summarize_repo_task
+    from worker.plugins.pipeline import summarize_repo_task
     
     # 生成 task_id
     import uuid

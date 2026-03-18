@@ -1,0 +1,23 @@
+{
+  "id": "bilibili_sync",
+  "name": "Bilibili 关注动态",
+  "version": "1.0.0",
+  "description": "同步 Bilibili 用户的关注视频动态",
+  "author": "Iris Official",
+  "permissions": ["network"],
+  "settings_schema": {
+    "rsshub_base_url": {
+      "type": "string",
+      "label": "RSSHub 地址",
+      "default": "https://rsshub.app",
+      "description": "推荐使用自建 RSSHub 实例以保证稳定性",
+      "required": true
+    },
+    "uid": {
+      "type": "string",
+      "label": "B站 UID",
+      "description": "填入 B站个人主页 URL 中的数字 ID",
+      "required": true
+    }
+  }
+}

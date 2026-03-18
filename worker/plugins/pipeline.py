@@ -16,9 +16,17 @@ async def run_plugin_pipeline_task(plugin_id: str, limit: int = None):
     """
     通用化：运行指定插件的同步流水线
     """
+    # 先尝试获取，如果不存在可能因为 Worker 刚启动或热重载延迟，尝试重新加载一次
     plugin = plugin_manager.get_plugin(plugin_id)
     if not plugin:
-        worker_log.error(f"❌ 找不到插件: {plugin_id}")
+        worker_log.warning(f"⚠️ 初次未找到插件 {plugin_id}，尝试重新加载注册表...")
+        from shared.database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            await plugin_manager.load_enabled_plugins(session)
+        plugin = plugin_manager.get_plugin(plugin_id)
+        
+    if not plugin:
+        worker_log.error(f"❌ 找不到插件: {plugin_id} (即使重载后)")
         return
 
     # 状态锁检查
@@ -43,7 +51,7 @@ async def run_plugin_pipeline_task(plugin_id: str, limit: int = None):
         if limit is not None:
             config_dict["sync_limit"] = limit
 
-        # 为兼容性，特判注入 GitHubClient (未来应使用统一 HTTP 客户端沙箱)
+        import httpx
         http_client = None
         if plugin_id == "github_stars":
             from worker.plugins.github.client import GitHubClient
@@ -52,6 +60,9 @@ async def run_plugin_pipeline_task(plugin_id: str, limit: int = None):
                 worker_log.error(f"❌ [{plugin_id}] 未配置 Token，停止提取")
                 return
             http_client = GitHubClient(token)
+        else:
+            # ✨ 为其他第三方插件提供通用异步客户端
+            http_client = httpx.AsyncClient(timeout=15.0)
 
         ctx = PluginContext(
             config=config_dict,
@@ -169,3 +180,14 @@ async def summarize_repo_task(item_id: str, task_id: str):
     except Exception as e:
         worker_log.error(f"❌ AI 总结任务失败: {e}")
         raise
+
+@broker.task(task_name="reload_system_plugins")
+async def reload_system_plugins_task():
+    from shared.database import AsyncSessionLocal
+    from shared.plugins.manager import plugin_manager
+    from shared.logger import worker_log
+
+    worker_log.info("🔄 收到热重载指令，正在刷新 Worker 插件内存...")
+    async with AsyncSessionLocal() as session:
+        plugin_manager.plugins.clear() # 物理清空旧实例
+        await plugin_manager.load_enabled_plugins(session)

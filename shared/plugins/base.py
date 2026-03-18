@@ -9,11 +9,13 @@ class PluginContext:
         self.log = logger
 
 class BasePlugin(ABC):
+    def __init__(self):
+        self._manifest = {} # 留空，等待 Iris 框架注入
+
     @property
-    @abstractmethod
     def manifest(self) -> dict:
         """返回插件的 UI 配置清单 (包含 id, name, settings_schema 等)"""
-        pass
+        return self._manifest
 
     @abstractmethod
     async def fetch_data(self, ctx: PluginContext) -> List[Dict[str, Any]]:

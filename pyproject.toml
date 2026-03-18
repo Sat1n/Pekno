@@ -17,6 +17,7 @@ dependencies = [
     "pydantic>=2.12.5",
     "pytest>=9.0.2",
     "pytest-asyncio>=1.3.0",
+    "python-multipart>=0.0.22",
     "sqlalchemy>=2.0.48",
     "taskiq-redis>=1.2.2",
     "uvicorn>=0.41.0",
