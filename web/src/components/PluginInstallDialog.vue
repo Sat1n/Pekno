@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -27,6 +27,8 @@ const isUploading = ref(false)
 const isInstalling = ref(false)
 const showSourceCode = ref(false)
 const riskAccepted = ref(false)
+// 新增一个用于强制刷新 Checkbox DOM 的 Key
+const checkboxKey = ref(0)
 
 // 预览数据
 const previewData = ref<{
@@ -94,11 +96,20 @@ async function handleInstall() {
   }
 }
 
+watch(() => props.open, (newVal) => {
+  if (!newVal) {
+    // 弹窗关闭时，清空所有残留状态！
+    resetState()
+  }
+})
+
 function resetState() {
   step.value = 'upload'
   previewData.value = null
   showSourceCode.value = false
   riskAccepted.value = false
+  // 核心魔法：弹窗关闭时自增，下次打开时 Checkbox 会被强制重新创建为初始的未选中状态
+  checkboxKey.value++
 }
 </script>
 
@@ -211,11 +222,15 @@ function resetState() {
       <div v-if="step === 'review'" class="p-6 border-t bg-muted/20 shrink-0 space-y-4">
         <!-- 风险确认 -->
         <div class="flex items-start gap-2">
-          <Checkbox id="risk" :checked="riskAccepted" @update:checked="riskAccepted = $event" />
+          <Checkbox 
+            :key="checkboxKey"
+            id="risk" 
+            v-model="riskAccepted"
+          />
           <div class="grid gap-1.5 leading-none">
-            <label
+            <label 
               for="risk"
-              class="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 text-destructive"
+              class="text-sm font-medium leading-none text-destructive cursor-pointer peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
             >
               我已知晓此插件来自开源社区，并同意自行承担运行此代码的潜在风险
             </label>
