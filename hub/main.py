@@ -38,13 +38,14 @@ from hub.api.routers import plugins
 app.include_router(data.router, prefix="/api")
 app.include_router(plugins.router)
 
-@app.get("/api/items")
-async def get_items(limit: int = 20, offset: int = 0):
+@app.get("/api/items", response_model=List[ItemResponse])
+async def get_items(limit: Optional[int] = None, offset: int = 0):
     """获取所有已入库的条目列表"""
     async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            select(ItemORM).order_by(ItemORM.created_at.desc()).offset(offset).limit(limit)
-        )
+        stmt = select(ItemORM).order_by(ItemORM.created_at.desc()).offset(offset)
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        result = await session.execute(stmt)
         items = result.scalars().all()
         return items
 
@@ -88,6 +89,7 @@ async def hybrid_search_api(
                 summary = item.content_text or "暂无描述"
                 time_str = format_github_time(pushed_at) if pushed_at else format_time_ago(item.created_at)
                 cover_url = metadata.get("cover_url")
+                author = metadata.get("up_name") or metadata.get("author")
                 has_long_summary = metadata.get("has_long_summary", False)
                 # 长总结独立赋值 (item.summary 里面存的才是大模型生成的 Markdown)
                 long_summary = item.summary if has_long_summary else None
@@ -109,6 +111,7 @@ async def hybrid_search_api(
                     long_summary=long_summary,
                     has_long_summary=has_long_summary,
                     cover_url=cover_url,
+                    author=author,
                     score=round(score, 2),
                     source=source,
                     tags=tags[:5],
@@ -141,6 +144,7 @@ async def hybrid_search_api(
         
         # cover_url: 获取封面图链接
         cover_url = metadata.get("cover_url")
+        author = metadata.get("up_name") or metadata.get("author")
         
         # has_long_summary: 获取 AI 长摘要缓存标识
         has_long_summary = metadata.get("has_long_summary", False)
@@ -165,6 +169,7 @@ async def hybrid_search_api(
             long_summary=long_summary,
             has_long_summary=has_long_summary,
             cover_url=cover_url,
+            author=author,
             score=round(score, 2),
             source=source,
             tags=tags[:5],
@@ -229,6 +234,7 @@ async def search_github_items(
             
             # cover_url: 提取封面图链接
             cover_url = metadata.get("cover_url")
+            author = metadata.get("up_name") or metadata.get("author")
             
             # score：基于 stars 数量计算（最多 1.0，最少 0.5）
             score = min(1.0, max(0.5, 0.5 + (stars / 10000)))
@@ -245,6 +251,7 @@ async def search_github_items(
                 "long_summary": long_summary,
                 "has_long_summary": has_long_summary,
                 "cover_url": cover_url,
+                "author": author,
                 "score": round(score, 2),
                 "source": "github",
                 "tags": tags[:5],  # 最多显示 5 个标签

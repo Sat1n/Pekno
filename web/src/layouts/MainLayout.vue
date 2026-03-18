@@ -1,19 +1,18 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useColorMode } from '@vueuse/core'
-import { Search, Activity, Clock, Github, Tv, Settings, Sun, Moon, Monitor, LayoutList, LayoutGrid, Rows3, Puzzle, Bell, X, Check, Loader2, Trash2 } from 'lucide-vue-next'
-import { Sidebar, SidebarContent, SidebarGroup, SidebarGroupLabel, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar'
+import { Search, Activity, Clock, Settings, Sun, Moon, Monitor, LayoutList, LayoutGrid, Rows3, Bell } from 'lucide-vue-next'
+import { Sidebar, SidebarContent, SidebarGroup, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import SettingsDialog from '@/components/SettingsDialog.vue'
 import PluginSettingsDialog from '@/components/PluginSettingsDialog.vue'
-import { useToast } from '@/components/ui/toast/use-toast'
-import { usePluginStore } from '@/store/usePluginStore'
 
-const { toast } = useToast()
-const { loadAllPlugins } = usePluginStore()
+defineEmits<{
+  search: []
+}>()
 
 // 通知类型
 export interface AppNotification {
@@ -110,10 +109,6 @@ const navMain = [
   { title: '稍后再看', icon: Clock },
 ]
 
-const plugins = [
-  { name: 'GitHub Stars', icon: Github },
-  { name: 'Bilibili', icon: Tv },
-]
 </script>
 
 <template>

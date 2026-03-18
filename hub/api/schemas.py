@@ -10,10 +10,12 @@ class ItemResponse(BaseModel):
     title: str
     source_type: str
     raw_link: str
+    content_text: Optional[str] = None
     summary: Optional[str] = None
     tags: List[str] = []
     intent: ItemIntent
     created_at: datetime
+    metadata_extra: dict = {}
     # 注意：这里坚决不包含 embedding 字段，减少传输压力
     
     class Config:
@@ -46,6 +48,7 @@ class FrontendSearchItem(BaseModel):
     long_summary: Optional[str] = None
     has_long_summary: bool = False
     cover_url: Optional[str] = None
+    author: Optional[str] = None
     score: float
     source: str
     tags: List[str] = []

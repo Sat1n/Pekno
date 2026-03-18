@@ -40,3 +40,4 @@ class UniversalItem(BaseModel):
     tags: List[str] = Field(default_factory=list)
     status: ItemStatus = ItemStatus.inbox
     metadata_extra: Dict[str, Any] = Field(default_factory=dict)
+    auto_ai_processing: bool = True

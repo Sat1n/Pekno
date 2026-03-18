@@ -1,4 +1,4 @@
-import { ref } from 'vue'
+import { ref, type Ref } from 'vue'
 
 export type ToastVariant = 'default' | 'destructive'
 
@@ -10,10 +10,9 @@ export interface Toast {
   duration?: number
 }
 
-// Global state
 const globalToasts = ref<Toast[]>([])
 
-function createToastManager(toastsRef: any) {
+function createToastManager(toastsRef?: Ref<Toast[]>) {
   const toasts = toastsRef || globalToasts
 
   const addToast = (toast: Omit<Toast, 'id'>) => {
@@ -49,4 +48,8 @@ function createToastManager(toastsRef: any) {
 
 export function useToast() {
   return createToastManager(globalToasts)
+}
+
+export function createScopedToastManager(toastsRef: Ref<Toast[]>) {
+  return createToastManager(toastsRef)
 }

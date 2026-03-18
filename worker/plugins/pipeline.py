@@ -20,7 +20,6 @@ async def run_plugin_pipeline_task(plugin_id: str, limit: int = None):
     plugin = plugin_manager.get_plugin(plugin_id)
     if not plugin:
         worker_log.warning(f"⚠️ 初次未找到插件 {plugin_id}，尝试重新加载注册表...")
-        from shared.database import AsyncSessionLocal
         async with AsyncSessionLocal() as session:
             await plugin_manager.load_enabled_plugins(session)
         plugin = plugin_manager.get_plugin(plugin_id)
@@ -110,7 +109,8 @@ async def run_plugin_pipeline_task(plugin_id: str, limit: int = None):
                 intent=ItemIntent.article,
                 retention_days=-1,
                 capabilities=["summarize"] if normalized.get("content_text") or ai_text else [],
-                metadata_extra=final_metadata
+                metadata_extra=final_metadata,
+                auto_ai_processing=normalized.get("auto_ai_processing", normalized.get("source_type") != "bilibili")
             )
             
             worker_log.info(f"📤 [{plugin_id}] 发送至 Pipeline 处理: {item.title}")

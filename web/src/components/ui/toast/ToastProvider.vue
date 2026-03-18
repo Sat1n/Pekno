@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { ref, provide } from 'vue'
-import { useToast as useToastComposable } from './use-toast'
+import { createScopedToastManager, type Toast as ToastOptions } from './use-toast'
 import Toast from './Toast.vue'
 
-const toasts = ref([])
+const toasts = ref<ToastOptions[]>([])
 
-const { addToast, removeToast } = useToastComposable(toasts)
+const { addToast, removeToast } = createScopedToastManager(toasts)
 
 provide('toast', {
   add: addToast,

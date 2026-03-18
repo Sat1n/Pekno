@@ -18,6 +18,20 @@
       "label": "B站 UID",
       "description": "填入 B站个人主页 URL 中的数字 ID",
       "required": true
+    },
+    "retention_hours": {
+      "type": "integer",
+      "label": "保留时间 (小时)",
+      "default": 24,
+      "description": "超过此时长的视频动态将被自动清理",
+      "required": false
+    },
+    "enable_ai_summary": {
+      "type": "boolean",
+      "label": "开启 AI 总结",
+      "default": false,
+      "description": "是否对视频简介进行 AI 总结（消耗 Token）",
+      "required": false
     }
   }
 }

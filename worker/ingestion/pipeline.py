@@ -19,13 +19,21 @@ class IngestionPipeline:
         self.logger.debug(f"DEBUG - [Entry] 插件私有元数据: {item.metadata_extra}")
 
         try:
+            should_generate_ai = (
+                item.auto_ai_processing
+                and item.source_type != "bilibili"
+                and bool(item.capabilities and "summarize" in item.capabilities)
+            )
+
             # 1. 自动分类 (Mock)
             if not item.tags:
                 item.tags = await self._auto_tagging(item)
 
             # 2. 摘要生成 (Mock)
-            if item.capabilities and "summarize" in item.capabilities:
+            if should_generate_ai:
                 item.summary = await self._generate_summary(item)
+            else:
+                self.logger.info(f"⏭️ 跳过 AI 总结: {item.title} (source={item.source_type}, auto_ai_processing={item.auto_ai_processing})")
 
             # 3. 核心：执行数据库持久化
             await self._store_to_vector_db(item)

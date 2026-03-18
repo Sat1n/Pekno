@@ -16,7 +16,7 @@ import {
 import { Settings, Save, RefreshCw, Loader2, AlertCircle, Check, Trash2 } from 'lucide-vue-next'
 import { useToast } from '@/components/ui/toast/use-toast'
 import { usePluginStore } from '@/store/usePluginStore'
-import { uninstallPluginApi } from '@/lib/api'
+import { uninstallPluginApi, type PluginSettingSchema } from '@/lib/api'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 
 const props = defineProps<{
@@ -71,7 +71,7 @@ async function handleUninstall() {
 }
 
 
-const schema = computed(() => currentPlugin.value?.manifest.settings_schema || {})
+const schema = computed<Record<string, PluginSettingSchema>>(() => currentPlugin.value?.manifest.settings_schema || {})
 
 // 初始化表单数据
 function initForm() {
@@ -81,6 +81,7 @@ function initForm() {
   formData.value = {}
   for (const key in schema.value) {
     const fieldConfig = schema.value[key]
+    if (!fieldConfig) continue
     if (fieldConfig.secret) {
       // 密码字段不回填，留空
       formData.value[key] = ''
@@ -104,11 +105,11 @@ watch(() => props.pluginId, () => {
 })
 
 // 动态表单项是否需要必填（若是密码字段，则有token时不必填，否则必填）
-function isRequired(key: string, field: any) {
+function isRequired(field: PluginSettingSchema) {
   if (field.secret && currentPlugin.value?.has_token) {
     return false
   }
-  return field.required
+  return Boolean(field.required)
 }
 
 // 保存配置
@@ -118,7 +119,8 @@ async function handleSave() {
   // 验证必填项
   for (const key in schema.value) {
     const field = schema.value[key]
-    if (isRequired(key, field) && (formData.value[key] === undefined || formData.value[key] === null || formData.value[key] === '')) {
+    if (!field) continue
+    if (isRequired(field) && (formData.value[key] === undefined || formData.value[key] === null || formData.value[key] === '')) {
       toast({
         title: '表单校验失败',
         description: `${field.label || key} 是必填项`,
@@ -134,6 +136,10 @@ async function handleSave() {
     for (const key in formData.value) {
       const val = formData.value[key]
       const field = schema.value[key]
+      if (!field) {
+        savePayload[key] = val
+        continue
+      }
       // 密码字段为空时不提交
       if (field.secret && (val === '' || val === null || val === undefined)) {
         continue

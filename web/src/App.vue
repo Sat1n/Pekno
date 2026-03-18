@@ -22,7 +22,7 @@ import {
   SheetTitle
 } from '@/components/ui/sheet'
 import { Github, Tv, FileText, MoreVertical, Sparkles, Bookmark, ExternalLink, Trash2, Star, Loader2 } from 'lucide-vue-next'
-import { search, summarizeItem, getItemSummaryStatus, type SearchResult } from '@/lib/api'
+import { getItems, search, summarizeItem, getItemSummaryStatus, type RawItem, type SearchResult } from '@/lib/api'
 import { useToast } from '@/components/ui/toast/use-toast'
 import { Toaster } from '@/components/ui/toast'
 
@@ -30,6 +30,8 @@ import { Toaster } from '@/components/ui/toast'
 interface LocalSearchResult extends SearchResult {
   hasSummary?: boolean
   raw_link?: string
+  authorName?: string
+  displayTags?: string[]
 }
 
 const savedLayout = (localStorage.getItem('pekno-layout') as 'list' | 'grid' | 'compact') || 'list'
@@ -60,17 +62,100 @@ const renderedSummary = computed(() => {
 const { toast } = useToast()
 
 // 加载数据函数
+function formatRelativeTime(input?: string) {
+  if (!input) return '未知时间'
+
+  const date = new Date(input)
+  if (Number.isNaN(date.getTime())) return '未知时间'
+
+  const diffMs = Date.now() - date.getTime()
+  const diffMinutes = Math.max(0, Math.floor(diffMs / 60000))
+
+  if (diffMinutes < 1) return '刚刚'
+  if (diffMinutes < 60) return `${diffMinutes}分钟前`
+
+  const diffHours = Math.floor(diffMinutes / 60)
+  if (diffHours < 24) return `${diffHours}小时前`
+  if (diffHours < 48) return '昨天'
+
+  const diffDays = Math.floor(diffHours / 24)
+  if (diffDays < 7) return `${diffDays}天前`
+  if (diffDays < 30) return `${Math.floor(diffDays / 7)}周前`
+  if (diffDays < 365) return `${Math.floor(diffDays / 30)}个月前`
+  return `${Math.floor(diffDays / 365)}年前`
+}
+
+function mapSourceType(sourceType: string) {
+  const sourceMap: Record<string, string> = {
+    github_star: 'github',
+    bilibili: 'bilibili',
+    article: 'article',
+  }
+
+  return sourceMap[sourceType] || sourceType
+}
+
+function normalizeRawItem(item: RawItem, index: number): LocalSearchResult {
+  const metadata = item.metadata_extra || {}
+  const source = mapSourceType(item.source_type)
+  const tags = Array.isArray(item.tags) && item.tags.length > 0 ? [...item.tags] : []
+  const lang = typeof metadata.lang === 'string' ? metadata.lang : ''
+
+  if (lang && !tags.includes(lang)) {
+    tags.unshift(lang)
+  }
+
+  const hasLongSummary = Boolean(metadata.has_long_summary)
+  const authorName = source === 'bilibili'
+    ? (typeof metadata.up_name === 'string' ? metadata.up_name : typeof metadata.author === 'string' ? metadata.author : undefined)
+    : undefined
+  const time = source === 'github' && typeof metadata.pushed_at === 'string'
+    ? formatRelativeTime(metadata.pushed_at)
+    : formatRelativeTime(item.created_at)
+
+  return {
+    id: item.id,
+    title: item.title,
+    summary: item.content_text || '暂无描述',
+    long_summary: hasLongSummary ? item.summary || undefined : undefined,
+    has_long_summary: hasLongSummary,
+    cover_url: typeof metadata.cover_url === 'string' ? metadata.cover_url : undefined,
+    score: Math.max(0.5, 1 - index * 0.03),
+    source,
+    tags: tags.slice(0, 5).length > 0 ? tags.slice(0, 5) : ['未分类'],
+    authorName,
+    displayTags: tags.slice(0, 5).length > 0 ? tags.slice(0, 5) : ['未分类'],
+    time,
+    raw_link: item.raw_link || '#',
+  }
+}
+
+function normalizeSearchResult(item: SearchResult): LocalSearchResult {
+  const authorName = item.source === 'bilibili' ? item.author : undefined
+
+  return {
+    ...item,
+    authorName,
+    displayTags: item.tags.length > 0 ? item.tags : ['未分类'],
+    raw_link: item.raw_link || (item.source === 'github' ? `https://github.com/${item.title}` : '#'),
+  }
+}
+
+function getDisplayTags(item: LocalSearchResult) {
+  return item.displayTags && item.displayTags.length > 0 ? item.displayTags : item.tags
+}
+
 async function loadData(query: string = '') {
   isLoading.value = true
   try {
-    const results = await search({ q: query })
-    // 添加模拟的 raw_link 状态
-    searchResults.value = results.map(item => ({
-      ...item,
-      raw_link: item.source === 'github' 
-        ? `https://github.com/${item.title}` 
-        : '#'
-    }))
+    if (query.trim()) {
+      const results = await search({ q: query })
+      searchResults.value = results.map(normalizeSearchResult)
+      return
+    }
+
+    const items = await getItems(undefined, 0)
+    searchResults.value = items.map((item, index) => normalizeRawItem(item, index))
   } catch (error) {
     console.error('搜索失败:', error)
     searchResults.value = []
@@ -234,7 +319,7 @@ watch(isSheetOpen, (newVal) => {
 
 // 判断卡片是否处于 Active 状态
 function isCardActive(item: LocalSearchResult) {
-  return selectedItem.value?.title === item.title && isSheetOpen.value
+  return selectedItem.value?.id === item.id && isSheetOpen.value
 }
 
 // 打开外部链接
@@ -284,9 +369,9 @@ function openExternalLink(url?: string) {
 
     <!-- 实际内容 -->
     <div v-else :class="['grid transition-all duration-300', gridClass]">
-      <Card 
+        <Card 
         v-for="item in searchResults" 
-        :key="item.title" 
+        :key="item.id" 
         :class="[
           'bg-card text-card-foreground border-border transition-all cursor-pointer overflow-hidden group shadow-md flex flex-col relative',
           isCardActive(item) ? 'border-primary ring-2 ring-primary/20' : 'hover:border-primary/20'
@@ -328,7 +413,7 @@ function openExternalLink(url?: string) {
         </div>
         
         <!-- 封面图区域：当没有提供 cover_url 时彻底隐藏该模块 -->
-        <div v-if="layoutMode !== 'compact' && item.cover_url" class="aspect-video flex items-center justify-center relative overflow-hidden border-b border-border/40 flex-shrink-0">
+        <div v-if="layoutMode !== 'compact' && item.cover_url" class="h-44 flex items-center justify-center relative overflow-hidden border-b border-border/40 flex-shrink-0 rounded-t-xl">
           <img 
             :src="item.cover_url" 
             alt="Cover" 
@@ -352,6 +437,11 @@ function openExternalLink(url?: string) {
             >
               {{ item.title }}
             </CardTitle>
+
+            <div v-if="item.source === 'bilibili' && item.authorName && layoutMode !== 'compact'" class="mt-2 flex items-center gap-2 text-sm text-sky-700 dark:text-sky-300">
+              <Tv class="w-3.5 h-3.5 shrink-0" />
+              <span class="truncate font-medium">{{ item.authorName }}</span>
+            </div>
             
             <!-- 列表模式：完整摘要 -->
             <p v-if="layoutMode === 'list'" class="text-muted-foreground leading-relaxed text-base mt-3 line-clamp-3">
@@ -368,7 +458,12 @@ function openExternalLink(url?: string) {
         <CardContent v-if="layoutMode !== 'compact'" class="px-5 pb-5 pt-0 mt-auto">
           <div class="flex items-center justify-between border-t border-border/40 pt-4 gap-3">
             <div class="flex gap-2 flex-wrap flex-1">
-              <Badge v-for="tag in item.tags" :key="tag" variant="secondary" class="bg-muted hover:bg-muted/80 text-xs font-normal">
+              <Badge
+                v-for="tag in getDisplayTags(item)"
+                :key="tag"
+                variant="secondary"
+                class="bg-muted hover:bg-muted/80 text-xs font-normal"
+              >
                 {{ tag }}
               </Badge>
             </div>
