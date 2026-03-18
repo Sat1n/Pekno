@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field, HttpUrl, ConfigDict
 class ItemIntent(str, Enum):
     video = "video"
     article = "article"
+    dynamic = "dynamic"
     code = "code"
     image = "image"
     social_post = "social_post"
@@ -31,13 +32,13 @@ class UniversalItem(BaseModel):
     source_type: str
     created_at: datetime = Field(default_factory=datetime.now)
     raw_link: HttpUrl
-    intent: ItemIntent
+    intent: str
     cover_url: Optional[str] = None 
-    retention_days: int = -1 # -1 代表永久，正整数代表保留天数
+    retention_hours: int = 168
     capabilities: List[str] = Field(default_factory=list)
     content_text: Optional[str] = None
     summary: Optional[str] = None
     tags: List[str] = Field(default_factory=list)
     status: ItemStatus = ItemStatus.inbox
     metadata_extra: Dict[str, Any] = Field(default_factory=dict)
-    auto_ai_processing: bool = True
+    auto_short_summary: bool = False

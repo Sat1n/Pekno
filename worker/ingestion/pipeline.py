@@ -19,24 +19,18 @@ class IngestionPipeline:
         self.logger.debug(f"DEBUG - [Entry] 插件私有元数据: {item.metadata_extra}")
 
         try:
-            should_generate_ai = (
-                item.auto_ai_processing
-                and item.source_type != "bilibili"
-                and bool(item.capabilities and "summarize" in item.capabilities)
-            )
+            core_text = self._build_core_text(item)
 
-            # 1. 自动分类 (Mock)
-            if not item.tags:
-                item.tags = await self._auto_tagging(item)
-
-            # 2. 摘要生成 (Mock)
-            if should_generate_ai:
-                item.summary = await self._generate_summary(item)
+            if item.auto_short_summary and item.capabilities and "summarize" in item.capabilities:
+                item.summary = await self._generate_summary(core_text)
             else:
-                self.logger.info(f"⏭️ 跳过 AI 总结: {item.title} (source={item.source_type}, auto_ai_processing={item.auto_ai_processing})")
+                item.summary = item.content_text or item.title
+                self.logger.info(f"⏭️ 跳过 AI 短总结: {item.title} (source={item.source_type}, auto_short_summary={item.auto_short_summary})")
+
+            item.tags = await self._auto_tagging(core_text)
 
             # 3. 核心：执行数据库持久化
-            await self._store_to_vector_db(item)
+            await self._store_to_vector_db(item, core_text)
             
             self.logger.info(f"✅ 成功同步至 Postgres: {item.id}")
             return item
@@ -44,9 +38,11 @@ class IngestionPipeline:
             self.logger.error(f"❌ 入库失败 {item.id}: {str(e)}", exc_info=True)
             raise e
     
-    async def _store_to_vector_db(self, item: UniversalItem):
-        # 1. 生成特征文本：把标题、摘要、标签揉在一起，这就是搜索的“依据”
-        feature_text = f"{item.title}\n{item.summary}\n{' '.join(item.tags)}"
+    def _build_core_text(self, item: UniversalItem) -> str:
+        return f"{item.title}\n{item.content_text or ''}".strip()
+
+    async def _store_to_vector_db(self, item: UniversalItem, core_text: str):
+        feature_text = "\n".join(part for part in (core_text, " ".join(item.tags)) if part)
         
         # 2. 调用 Embedding 服务
         self.logger.info(f"🧠 [Embed] 正在使用 [{self.ai.embed_model_name}] 计算向量...")
@@ -60,7 +56,8 @@ class IngestionPipeline:
                     "title": item.title,
                     "source_type": item.source_type,
                     "raw_link": str(item.raw_link),
-                    "intent": item.intent.value,
+                    "intent": item.intent,
+                    "retention_days": item.retention_hours,
                     "content_text": item.content_text,
                     "summary": item.summary,
                     "tags": item.tags,
@@ -76,15 +73,15 @@ class IngestionPipeline:
                 await session.execute(stmt)
         self.logger.info(f"✨ 向量数据已成功持久化: {item.id} (Vector Dim: {len(vector)})")
 
-    async def _generate_summary(self, item: UniversalItem):
+    async def _generate_summary(self, core_text: str):
         model = self.ai.model_name
         self.logger.info(f"🤖 [LLM] 正在请求模型 [{model}] 生成摘要...")
-        return await self.ai.llm.provider.generate_summary(item.content_text or item.title, length="short")
+        return await self.ai.llm.provider.generate_summary(core_text, length="short")
 
-    async def _auto_tagging(self, item: UniversalItem):
+    async def _auto_tagging(self, core_text: str):
         model = self.ai.model_name
         self.logger.debug(f"DEBUG - [LLM] 正在使用 [{model}] 提取标签...")
-        return await self.ai.llm.provider.extract_tags(item.title)
+        return await self.ai.llm.provider.extract_tags(core_text)
 
 @broker.task(task_name="process_new_item")
 async def process_new_item_task(item_dict: dict):

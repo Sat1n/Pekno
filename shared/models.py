@@ -22,7 +22,7 @@ class ItemORM(Base):
     intent: Mapped[str] = mapped_column(String)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
 
-    # 保留策略：-1 代表永久，正整数代表保留天数
+    # 保留策略：-1 代表永久，正整数按“小时”解释（沿用旧列名避免额外迁移）
     retention_days: Mapped[int] = mapped_column(Integer, default=-1) 
     
     # 标记：是否已"收藏" (如果收藏了，即便过了天数也不删)

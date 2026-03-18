@@ -205,8 +205,8 @@ async def get_plugins():
         plugin_id = manifest["id"]
         settings_schema = manifest.get("settings_schema", {})
         config_values = {}
-        has_token = False
         token_preview = None
+        secret_configured = False
         
         for key, schema in settings_schema.items():
             val = await ConfigManager.get_config(plugin_id, key)
@@ -216,28 +216,29 @@ async def get_plugins():
                 elif schema.get("type") == "boolean":
                     val = (val == "true")
                     
-                if schema.get("secret") or schema.get("required"):
-                    # 只要有任何关键配置被设置了，就认为有 token
-                    has_token = True
-                    if schema.get("secret"):
-                        token_preview = val[:4] + "****" if len(val) > 4 else None
-                        # 不返回真实敏感数据
-                        continue
+                if schema.get("secret"):
+                    secret_configured = True
+                    token_preview = f"{val[:4]}..." if len(val) > 4 else val
+                    # 不返回真实敏感数据
+                    continue
                 
                 config_values[key] = val
             else:
                 config_values[key] = schema.get("default")
-                # 如果是 secret 且没有值，确保 has_token 为 False (除非前面已经置为 True)
-                # 但这里的逻辑是针对单个 key 循环，所以 has_token 应该是“该插件是否配置就绪”的标志
-                
-        # 修正 has_token 逻辑：检查所有 required 字段是否有值
-        is_configured = True
-        for key, schema in settings_schema.items():
-            if schema.get("required"):
-                val = await ConfigManager.get_config(plugin_id, key)
-                if not val:
-                    is_configured = False
-                    break
+
+        has_secret_field = any(schema.get("secret") for schema in settings_schema.values())
+        required_keys = [key for key, schema in settings_schema.items() if schema.get("required")]
+
+        required_configured = True
+        for key in required_keys:
+            val = await ConfigManager.get_config(plugin_id, key)
+            if val in (None, ""):
+                required_configured = False
+                break
+
+        is_configured = secret_configured if has_secret_field else required_configured
+        if has_secret_field and required_keys:
+            is_configured = secret_configured and required_configured
         
         result.append({
             "manifest": manifest,

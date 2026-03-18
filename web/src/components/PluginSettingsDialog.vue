@@ -240,7 +240,7 @@ async function handleSync() {
             <p v-if="fieldConfig.description" class="text-xs text-muted-foreground">{{ fieldConfig.description }}</p>
             <p v-if="currentPlugin.token_preview" class="text-xs text-muted-foreground mt-1 flex items-center gap-1">
               <Check class="w-3 h-3 text-green-500" />
-              当前 Token: <code class="bg-muted px-1.5 py-0.5 rounded text-[10px]">{{ currentPlugin.token_preview }}</code>
+              当前已保存: <code class="bg-muted px-1.5 py-0.5 rounded text-[10px]">{{ currentPlugin.token_preview }}</code>
             </p>
           </div>
 

@@ -1,9 +1,6 @@
 from pydantic import BaseModel, HttpUrl
 from typing import List, Optional, Any
 from datetime import datetime
-from shared.entities import ItemIntent
-
-
 class ItemResponse(BaseModel):
     """用于列表和搜索结果展示的响应模型"""
     id: str
@@ -13,7 +10,7 @@ class ItemResponse(BaseModel):
     content_text: Optional[str] = None
     summary: Optional[str] = None
     tags: List[str] = []
-    intent: ItemIntent
+    intent: str
     created_at: datetime
     metadata_extra: dict = {}
     # 注意：这里坚决不包含 embedding 字段，减少传输压力

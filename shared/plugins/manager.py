@@ -1,6 +1,7 @@
 from typing import Dict, List, Optional
 import importlib
 import inspect
+from copy import deepcopy
 from sqlalchemy import select
 from shared.plugins.base import BasePlugin
 from shared.logger import hub_log
@@ -16,13 +17,67 @@ class PluginManager:
             cls._instance.plugins = {}
         return cls._instance
 
+    def _infer_default_auto_short_summary(self, manifest: Dict) -> bool:
+        text = " ".join(
+            str(manifest.get(key, "")).lower()
+            for key in ("id", "name", "description")
+        )
+        return not any(keyword in text for keyword in ("video", "bilibili", "影音", "视频"))
+
+    def _inject_global_settings(self, manifest: Dict) -> Dict:
+        normalized = deepcopy(manifest)
+        settings_schema = dict(normalized.get("settings_schema") or {})
+
+        for legacy_key in (
+            "enable_ai_summary",
+            "auto_summarize",
+            "retention_days",
+            "sync_limit",
+            "auto_sync",
+            "auto_sync_interval",
+        ):
+            settings_schema.pop(legacy_key, None)
+
+        settings_schema["auto_short_summary"] = {
+            "type": "boolean",
+            "label": "启用 AI 短总结",
+            "default": self._infer_default_auto_short_summary(normalized),
+        }
+        settings_schema["retention_hours"] = {
+            "type": "integer",
+            "label": "数据存活时间(小时)",
+            "default": 168,
+            "description": "-1 为永久保存，默认 7 天",
+        }
+        settings_schema["sync_limit"] = {
+            "type": "integer",
+            "label": "同步限制",
+            "default": 100,
+            "description": "每次同步抓取的最大条数",
+        }
+        settings_schema["auto_sync"] = {
+            "type": "boolean",
+            "label": "自动同步",
+            "default": False,
+        }
+        settings_schema["auto_sync_interval"] = {
+            "type": "integer",
+            "label": "同步间隔 (分钟)",
+            "default": 60,
+            "description": "自动同步开启后，按此分钟间隔巡检",
+        }
+
+        normalized["settings_schema"] = settings_schema
+        return normalized
+
     def register(self, plugin: BasePlugin):
-        manifest = plugin.manifest
+        manifest = self._inject_global_settings(plugin.manifest)
         plugin_id = manifest.get("id")
         if not plugin_id:
             hub_log.error("❌ 无法注册插件：未找到 plugin id")
             return
-            
+        
+        plugin._manifest = manifest
         self.plugins[plugin_id] = plugin
         hub_log.info(f"🧩 插件已注册: {manifest.get('name')} ({plugin_id})")
 
@@ -30,7 +85,7 @@ class PluginManager:
         return self.plugins.get(plugin_id)
 
     def get_all_manifests(self) -> List[Dict]:
-        return [plugin.manifest for plugin in self.plugins.values()]
+        return [deepcopy(plugin._manifest or plugin.manifest) for plugin in self.plugins.values()]
     
     async def load_enabled_plugins(self, session):
         """动态加载已启用的插件"""
@@ -69,11 +124,12 @@ class PluginManager:
                         
                         # 尝试从模块同级目录读取 manifest.json
                         module_file = getattr(module, '__file__', None)
-                        manifest_data = {
+                        manifest_data = deepcopy(plugin_instance.manifest or {})
+                        manifest_data.update({
                             "id": plugin_record.plugin_id,
                             "name": plugin_record.name,
                             "version": plugin_record.version
-                        }
+                        })
                         
                         if module_file:
                             manifest_path = Path(module_file).parent / "manifest.json"
@@ -87,7 +143,6 @@ class PluginManager:
                                     hub_log.error(f"读取 manifest.json 失败: {e}")
                                     
                         plugin_instance._manifest = manifest_data
-                        
                         self.register(plugin_instance)
                         found = True
                         break

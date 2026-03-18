@@ -1,6 +1,6 @@
 from shared.plugins.base import PluginContext
 from shared.plugins.manager import plugin_manager
-from shared.entities import UniversalItem, ItemIntent
+from shared.entities import UniversalItem
 from worker.ingestion.pipeline import process_new_item_task
 from shared.logger import worker_log
 from worker.broker import broker
@@ -106,11 +106,11 @@ async def run_plugin_pipeline_task(plugin_id: str, limit: int = None):
                 source_type=normalized["source_type"],
                 raw_link=normalized["raw_link"],
                 content_text=normalized.get("content_text", ""),
-                intent=ItemIntent.article,
-                retention_days=-1,
+                intent=normalized.get("intent", "article"),
+                retention_hours=int(config_dict.get("retention_hours", normalized.get("retention_hours", 168))),
                 capabilities=["summarize"] if normalized.get("content_text") or ai_text else [],
                 metadata_extra=final_metadata,
-                auto_ai_processing=normalized.get("auto_ai_processing", normalized.get("source_type") != "bilibili")
+                auto_short_summary=bool(config_dict.get("auto_short_summary", normalized.get("auto_short_summary", False)))
             )
             
             worker_log.info(f"📤 [{plugin_id}] 发送至 Pipeline 处理: {item.title}")

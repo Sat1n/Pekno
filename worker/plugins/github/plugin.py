@@ -7,21 +7,16 @@ class GitHubStarsPlugin(BasePlugin):
     GitHub Star 插件
     负责同步用户的 Star 仓库并交给 Pipeline 处理
     """
-
-    @property
-    def manifest(self) -> dict:
-        return {
+    def __init__(self):
+        super().__init__()
+        self._manifest = {
             "id": "github_stars",
             "name": "GitHub Stars",
             "description": "同步你 Star 的 GitHub 仓库",
             "version": "1.0.0",
             "auto_sync_supported": True,
             "settings_schema": {
-                "token": {"type": "string", "secret": True, "label": "Personal Access Token"},
-                "sync_limit": {"type": "integer", "default": 100, "label": "同步限制"},
-                "auto_sync": {"type": "boolean", "default": False, "label": "自动同步"},
-                "auto_sync_interval": {"type": "integer", "default": 60, "label": "同步间隔 (分钟)"},
-                "auto_summarize": {"type": "boolean", "default": False, "label": "自动总结"}
+                "token": {"type": "string", "secret": True, "label": "Personal Access Token"}
             }
         }
 
