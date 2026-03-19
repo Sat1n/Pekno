@@ -6,13 +6,14 @@ from worker.broker import broker
 from shared.logger import worker_log
 from shared.config import ConfigManager, ConfigKeys
 from worker.plugins.pipeline import run_plugin_pipeline_task
+from shared.time_utils import get_app_timezone, now_in_app_timezone_naive
 
 @broker.task(
     task_name="system_heartbeat",
     schedule=[{"cron": "*/5 * * * *"}],
 )
 async def system_heartbeat_task():
-    now = datetime.now()
+    now = now_in_app_timezone_naive()
     next_update_at = now + timedelta(minutes=5)
     worker_log.info(
         f"💓 系统心跳巡检开始，next update at {next_update_at.strftime('%Y-%m-%d %H:%M:%S')}"
@@ -72,7 +73,25 @@ async def system_heartbeat_task():
         f"💓 心跳巡检完成：扫描 {len(plugin_ids)} 个启用插件，触发 {triggered_count} 个自动同步。"
     )
 
-async def cleanup_expired_items():
+async def _delete_from_vector_store(expired_ids: list[str]) -> None:
+    # Future hook: if we move embeddings into an external vector store
+    # (Milvus / Qdrant / Chroma), delete those ids here as part of GC.
+    #
+    # Current architecture stores embeddings inline in Postgres via
+    # ItemORM.embedding (pgvector), so deleting the row already releases
+    # the vector payload and no extra action is needed.
+    if expired_ids:
+        worker_log.debug(
+            f"🧠 [TTL 清理] pgvector 内嵌于 ItemORM，无需额外删除向量索引，共 {len(expired_ids)} 条。"
+        )
+
+
+async def cleanup_expired_items() -> int:
+    # Future config hook: heartbeat / TTL cleanup cron should eventually
+    # be read from global admin settings stored in ConfigORM.
+    now_local = now_in_app_timezone_naive()
+    app_tz = get_app_timezone()
+
     async with AsyncSessionLocal() as session:
         async with session.begin():
             result = await session.execute(
@@ -82,17 +101,47 @@ async def cleanup_expired_items():
                 )
             )
             rows = result.all()
+            worker_log.debug(
+                f"🧪 [TTL 清理] 当前应用时区={app_tz.key}，当前时间={now_local.isoformat(sep=' ', timespec='seconds')}，候选数据={len(rows)}"
+            )
             expired_ids = [
                 row.id
                 for row in rows
-                if row.created_at < datetime.now() - timedelta(hours=row.retention_days)
+                if row.created_at + timedelta(hours=row.retention_days) < now_local
             ]
 
+            for row in rows[:10]:
+                expires_at = row.created_at + timedelta(hours=row.retention_days)
+                worker_log.debug(
+                    f"🧪 [TTL 清理] item={row.id} created_at={row.created_at.isoformat(sep=' ', timespec='seconds')} "
+                    f"retention_hours={row.retention_days} expires_at={expires_at.isoformat(sep=' ', timespec='seconds')} "
+                    f"expired={expires_at < now_local}"
+                )
+
             if not expired_ids:
-                print("🧹 自动清理完成，未发现过期数据。")
-                return
+                worker_log.info("🧹 [TTL 清理] 成功销毁了 0 条过期数据。")
+                return 0
+
+            await _delete_from_vector_store(expired_ids)
 
             delete_result = await session.execute(
                 delete(ItemORM).where(ItemORM.id.in_(expired_ids))
             )
-            print(f"🧹 自动清理完成，移除了 {delete_result.rowcount} 条过期数据。")
+
+    deleted_count = delete_result.rowcount or len(expired_ids)
+    worker_log.info(f"🧹 [TTL 清理] 成功销毁了 {deleted_count} 条过期数据。")
+    return deleted_count
+
+
+@broker.task(
+    task_name="system_ttl_cleanup",
+    schedule=[{"cron": "*/5 * * * *"}],
+)
+async def system_ttl_cleanup_task():
+    # Future config hook: this cron should be moved to global admin
+    # settings once ConfigORM exposes platform-level scheduling options.
+    next_cleanup_at = now_in_app_timezone_naive() + timedelta(minutes=5)
+    worker_log.info(
+        f"🧹 [TTL 清理] 开始巡检，next update at {next_cleanup_at.strftime('%Y-%m-%d %H:%M:%S')}"
+    )
+    await cleanup_expired_items()

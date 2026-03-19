@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import List, Optional, Dict, Any
 from enum import Enum
 from pydantic import BaseModel, Field, HttpUrl, ConfigDict
+from shared.time_utils import now_in_app_timezone_naive
 
 class ItemIntent(str, Enum):
     video = "video"
@@ -30,7 +31,7 @@ class UniversalItem(BaseModel):
     id: str
     title: str
     source_type: str
-    created_at: datetime = Field(default_factory=datetime.now)
+    created_at: datetime = Field(default_factory=now_in_app_timezone_naive)
     raw_link: HttpUrl
     intent: str
     cover_url: Optional[str] = None 

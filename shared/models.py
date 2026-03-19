@@ -4,6 +4,7 @@ from sqlalchemy.dialects.postgresql import ARRAY
 from pgvector.sqlalchemy import Vector # 处理向量的核心
 from datetime import datetime, timedelta
 from typing import List, Optional
+from shared.time_utils import now_in_app_timezone_naive
 
 class Base(DeclarativeBase):
     pass
@@ -17,10 +18,10 @@ class ItemORM(Base):
     title: Mapped[str] = mapped_column(String)
     embedding: Mapped[Optional[Vector]] = mapped_column(Vector(768))
     source_type: Mapped[str] = mapped_column(String)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now_in_app_timezone_naive)
     raw_link: Mapped[str] = mapped_column(String)
     intent: Mapped[str] = mapped_column(String)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=now_in_app_timezone_naive, onupdate=now_in_app_timezone_naive)
 
     # 保留策略：-1 代表永久，正整数按“小时”解释（沿用旧列名避免额外迁移）
     retention_days: Mapped[int] = mapped_column(Integer, default=-1) 
@@ -54,8 +55,8 @@ class ConfigORM(Base):
     description: Mapped[Optional[str]] = mapped_column(Text, default="")
     
     # 创建和更新时间
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now_in_app_timezone_naive)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=now_in_app_timezone_naive, onupdate=now_in_app_timezone_naive)
     
     # 是否启用
     is_enabled: Mapped[bool] = mapped_column(default=True)
@@ -80,4 +81,4 @@ class PluginRegistryORM(Base):
     version: Mapped[str] = mapped_column(String, default="1.0.0")
 
     # 安装时间
-    installed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    installed_at: Mapped[datetime] = mapped_column(DateTime, default=now_in_app_timezone_naive)

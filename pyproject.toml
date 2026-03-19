@@ -20,6 +20,7 @@ dependencies = [
     "python-multipart>=0.0.22",
     "sqlalchemy>=2.0.48",
     "taskiq-redis>=1.2.2",
+    "tzdata>=2025.3",
     "uvicorn>=0.41.0",
 ]
 

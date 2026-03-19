@@ -28,7 +28,9 @@ class ColorFormatter(logging.Formatter):
 
 def setup_logger(name: str):
     logger = logging.getLogger(name)
-    level = os.getenv("LOG_LEVEL", "DEBUG").upper() # 默认先开 DEBUG 方便看效果
+    app_env = os.getenv("APP_ENV", "dev").lower()
+    default_level = "DEBUG" if app_env == "dev" else "INFO"
+    level = os.getenv("LOG_LEVEL", default_level).upper()
     logger.setLevel(level)
 
     handler = logging.StreamHandler(sys.stdout)
