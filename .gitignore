@@ -60,3 +60,5 @@ Thumbs.db
 .env.test.local
 .env.production.local
 data/
+!web/src/lib/
+!web/src/lib/**
