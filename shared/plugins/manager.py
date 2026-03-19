@@ -24,6 +24,10 @@ class PluginManager:
         )
         return not any(keyword in text for keyword in ("video", "bilibili", "影音", "视频"))
 
+    def _get_framework_default(self, manifest: Dict, key: str, fallback):
+        framework_defaults = manifest.get("framework_defaults") or {}
+        return framework_defaults.get(key, fallback)
+
     def _inject_global_settings(self, manifest: Dict) -> Dict:
         normalized = deepcopy(manifest)
         settings_schema = dict(normalized.get("settings_schema") or {})
@@ -32,21 +36,27 @@ class PluginManager:
             "enable_ai_summary",
             "auto_summarize",
             "retention_days",
+            "retention_hours",
             "sync_limit",
             "auto_sync",
             "auto_sync_interval",
+            "auto_short_summary",
         ):
             settings_schema.pop(legacy_key, None)
 
         settings_schema["auto_short_summary"] = {
             "type": "boolean",
             "label": "启用 AI 短总结",
-            "default": self._infer_default_auto_short_summary(normalized),
+            "default": self._get_framework_default(
+                normalized,
+                "auto_short_summary",
+                self._infer_default_auto_short_summary(normalized),
+            ),
         }
         settings_schema["retention_hours"] = {
             "type": "integer",
             "label": "数据存活时间(小时)",
-            "default": 168,
+            "default": self._get_framework_default(normalized, "retention_hours", 168),
             "description": "-1 为永久保存，默认 7 天",
         }
         settings_schema["sync_limit"] = {

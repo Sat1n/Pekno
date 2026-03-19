@@ -14,7 +14,18 @@ class BasePlugin(ABC):
 
     @property
     def manifest(self) -> dict:
-        """返回插件的 UI 配置清单 (包含 id, name, settings_schema 等)"""
+        """返回插件的 UI 配置清单 (包含 id, name, settings_schema 等)。
+
+        注意：Iris 会在加载时向 settings_schema 自动注入通用字段：
+        - auto_short_summary
+        - retention_hours
+        - sync_limit
+        - auto_sync
+        - auto_sync_interval
+
+        插件作者不应手写这些字段；如果想覆盖默认值，请在 manifest 中提供
+        framework_defaults，例如 {"retention_hours": 24, "auto_short_summary": false}。
+        """
         return self._manifest
 
     @abstractmethod
@@ -30,6 +41,7 @@ class BasePlugin(ABC):
         - title: 标题
         - raw_link: 原始链接
         - source_type: 来源类型 (如 'github_star')
+        - intent: 内容类型 (如 'article', 'video', 'dynamic')
         - metadata_extra: 插件私有扩展数据 (存入 JSON 字段)
         """
         pass
