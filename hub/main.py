@@ -12,10 +12,12 @@ from sqlalchemy import select, delete
 from pydantic import BaseModel
 from shared.plugins.manager import plugin_manager
 from hub.core.security import get_current_user
+from hub.core.init_db import ensure_runtime_tables
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """系统启动时动态加载插件"""
+    await ensure_runtime_tables()
     async with AsyncSessionLocal() as session:
         await plugin_manager.load_enabled_plugins(session)
     yield

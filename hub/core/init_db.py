@@ -5,6 +5,17 @@ from sqlalchemy import text
 from sqlalchemy.dialects.postgresql import insert
 from shared.logger import hub_log
 
+
+async def ensure_runtime_tables():
+    """在应用启动时补齐缺失的数据表，不破坏现有业务数据。"""
+    async with engine.begin() as conn:
+        hub_log.info("🧪 正在检查并开启 pgvector 扩展...")
+        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+
+        hub_log.info("🧱 正在补齐缺失的数据表...")
+        await conn.run_sync(Base.metadata.create_all)
+
+
 async def init_db():
     async with engine.begin() as conn:
         hub_log.info("🧪 正在检查并开启 pgvector 扩展...")

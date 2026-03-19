@@ -12,7 +12,10 @@ from shared.database import AsyncSessionLocal
 from shared.models import UserORM
 from shared.secret_store import load_or_create_secret
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+pwd_context = CryptContext(
+    schemes=["pbkdf2_sha256", "bcrypt_sha256", "bcrypt"],
+    deprecated="auto",
+)
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 
 SECRET_KEY = load_or_create_secret(
