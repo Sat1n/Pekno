@@ -106,6 +106,8 @@ export interface SearchResult {
   source: string
   tags: string[]
   time: string
+  is_read?: boolean
+  is_starred?: boolean
 }
 
 export interface RawItem {
@@ -119,6 +121,8 @@ export interface RawItem {
   intent: string
   created_at: string
   metadata_extra?: Record<string, any> | null
+  is_read: boolean
+  is_starred: boolean
 }
 
 export interface AuthStatus {
@@ -172,14 +176,33 @@ export async function searchGitHub(params: SearchParams = {}): Promise<SearchRes
  * @param offset 偏移量
  * @returns 条目列表
  */
-export async function getItems(limit?: number, offset: number = 0): Promise<RawItem[]> {
-  const params: Record<string, number> = { offset }
+export async function getItems(
+  limit?: number,
+  offset: number = 0,
+  options: { starredOnly?: boolean } = {}
+): Promise<RawItem[]> {
+  const params: Record<string, number | boolean> = { offset }
   if (typeof limit === 'number') {
     params.limit = limit
+  }
+  if (options.starredOnly) {
+    params.starred_only = true
   }
 
   const response = await apiClient.get<RawItem[]>('/api/items', {
     params,
+  })
+  return response.data
+}
+
+export async function toggleItemStar(itemId: string): Promise<{ item_id: string; is_read: boolean; is_starred: boolean }> {
+  const response = await apiClient.post(`/api/items/${itemId}/star`)
+  return response.data
+}
+
+export async function markItemsReadBatch(itemIds: string[]): Promise<{ status: string; updated_count: number }> {
+  const response = await apiClient.post('/api/items/read_batch', {
+    item_ids: itemIds,
   })
   return response.data
 }

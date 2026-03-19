@@ -6,10 +6,9 @@ from datetime import datetime
 from hub.core.search import SearchService
 from shared.database import AsyncSessionLocal
 from shared.models import ItemORM
-from hub.api.schemas import ItemResponse, SearchResponse, SyncRequest, FrontendSearchItem
+from hub.api.schemas import FrontendSearchItem, SyncRequest
 from shared.config import ConfigManager, ConfigKeys
 from sqlalchemy import select, delete
-from pydantic import BaseModel
 from shared.plugins.manager import plugin_manager
 from hub.core.security import get_current_user
 from hub.core.init_db import ensure_runtime_tables
@@ -36,22 +35,12 @@ search_service = SearchService()
 
 # 注册路由
 from hub.api import data
-from hub.api.routers import auth, plugins
+from hub.api.routers import auth, items, plugins
 
 app.include_router(data.router, prefix="/api")
 app.include_router(plugins.router)
 app.include_router(auth.router)
-
-@app.get("/api/items", response_model=List[ItemResponse])
-async def get_items(limit: Optional[int] = None, offset: int = 0, current_user=Depends(get_current_user)):
-    """获取所有已入库的条目列表"""
-    async with AsyncSessionLocal() as session:
-        stmt = select(ItemORM).order_by(ItemORM.created_at.desc()).offset(offset)
-        if limit is not None:
-            stmt = stmt.limit(limit)
-        result = await session.execute(stmt)
-        items = result.scalars().all()
-        return items
+app.include_router(items.router)
 
 
 @app.get("/api/search", response_model=List[FrontendSearchItem])
@@ -278,72 +267,6 @@ async def trigger_github_sync(req: SyncRequest, current_user=Depends(get_current
     from worker.plugins.github.task import sync_github_stars_task
     await sync_github_stars_task.kiq(limit=req.limit if req.limit else 10)
     return {"status": "accepted"}
-
-
-@app.delete("/api/items/{item_id}")
-async def delete_item(item_id: str, current_user=Depends(get_current_user)):
-    """手动删除某条数据"""
-    async with AsyncSessionLocal() as session:
-        async with session.begin():
-            await session.execute(delete(ItemORM).where(ItemORM.id == item_id))
-    return {"status": "success"}
-
-
-@app.post("/api/items/{item_id}/summarize")
-async def summarize_item(item_id: str, current_user=Depends(get_current_user)):
-    """
-    触发 AI 总结任务
-    
-    异步处理，返回 202 Accepted 和 task_id
-    """
-    # 触发异步任务
-    from worker.plugins.pipeline import summarize_repo_task
-    
-    # 生成 task_id
-    import uuid
-    task_id = str(uuid.uuid4())
-    
-    # 异步触发总结任务
-    await summarize_repo_task.kiq(item_id, task_id)
-    
-    # 返回 202 Accepted
-    return {
-        "status": "accepted",
-        "task_id": task_id,
-        "message": "AI 总结任务已启动，请稍后查询结果"
-    }
-
-
-@app.get("/api/items/{item_id}/summary_status")
-async def get_item_summary_status(item_id: str, current_user=Depends(get_current_user)):
-    """
-    查询某条目的 AI 总结状态
-    
-    直接从数据库读取 has_long_summary 标识来判断是否完成
-    """
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            ItemORM.__table__.select().where(ItemORM.id == item_id)
-        )
-        item = result.fetchone()
-        
-        if not item:
-            return {"item_id": item_id, "status": "not_found"}
-        
-        metadata = item.metadata_extra or {}
-        has_long_summary = metadata.get("has_long_summary", False)
-        
-        if has_long_summary:
-            return {
-                "item_id": item_id,
-                "status": "completed",
-                "summary": item.summary
-            }
-        else:
-            return {
-                "item_id": item_id,
-                "status": "pending"
-            }
 
 
 # ========== 配置管理 API: 由通用插件引擎 (/api/plugins) 接管 ==========

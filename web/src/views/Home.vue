@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { marked } from 'marked'
 import MainLayout from '@/layouts/MainLayout.vue'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
@@ -21,8 +22,8 @@ import {
   SheetHeader,
   SheetTitle
 } from '@/components/ui/sheet'
-import { Github, Tv, FileText, MoreVertical, Sparkles, Bookmark, ExternalLink, Trash2, Star, Loader2 } from 'lucide-vue-next'
-import { getItems, search, summarizeItem, getItemSummaryStatus, getStoredAuthUser, type RawItem, type SearchResult } from '@/lib/api'
+import { Github, Tv, FileText, MoreVertical, Sparkles, Bookmark, BookmarkCheck, ExternalLink, Trash2, Star, Loader2 } from 'lucide-vue-next'
+import { getItems, search, summarizeItem, getItemSummaryStatus, getStoredAuthUser, toggleItemStar, markItemsReadBatch, type RawItem, type SearchResult } from '@/lib/api'
 import { useToast } from '@/components/ui/toast/use-toast'
 import { Toaster } from '@/components/ui/toast'
 
@@ -31,6 +32,8 @@ interface LocalSearchResult extends SearchResult {
   raw_link?: string
   authorName?: string
   displayTags?: string[]
+  isRead: boolean
+  isStarred: boolean
 }
 
 const savedLayout = (localStorage.getItem('pekno-layout') as 'list' | 'grid' | 'compact') || 'list'
@@ -44,7 +47,26 @@ const selectedItem = ref<LocalSearchResult | null>(null)
 const isSummarizing = ref(false)
 const currentTaskId = ref<string | null>(null)
 const pollInterval = ref<number | undefined>(undefined)
+const route = useRoute()
 const currentUsername = computed(() => getStoredAuthUser().username || '管理员')
+const initialAnchorItemId = ref<string | null>(null)
+const isWatchLaterPage = computed(() => route.name === 'watch-later')
+const pageTitle = computed(() => isWatchLaterPage.value ? '稍后再看' : `欢迎回来，${currentUsername.value}`)
+const pageSubtitle = computed(() => {
+  if (isLoading.value) {
+    return '正在加载数据...'
+  }
+  if (isWatchLaterPage.value) {
+    return `${currentUsername.value} 当前收藏了 ${searchResults.value.length} 条稍后再看`
+  }
+  return `今天 Iris 为 ${currentUsername.value} 整理了 ${searchResults.value.length} 条资料`
+})
+
+let observer: IntersectionObserver | null = null
+let flushReadsInterval: number | undefined
+const cardElements = new Map<string, HTMLElement>()
+const visibilityTimers = new Map<string, number>()
+const pendingReadIds = new Set<string>()
 
 const renderedSummary = computed(() => {
   const raw = selectedItem.value?.long_summary || selectedItem.value?.summary || ''
@@ -120,6 +142,8 @@ function normalizeRawItem(item: RawItem, index: number): LocalSearchResult {
     displayTags: tags.slice(0, 5).length > 0 ? tags.slice(0, 5) : ['未分类'],
     time,
     raw_link: item.raw_link || '#',
+    isRead: Boolean(item.is_read),
+    isStarred: Boolean(item.is_starred),
   }
 }
 
@@ -131,6 +155,8 @@ function normalizeSearchResult(item: SearchResult): LocalSearchResult {
     authorName,
     displayTags: item.tags.length > 0 ? item.tags : ['未分类'],
     raw_link: item.raw_link || (item.source === 'github' ? `https://github.com/${item.title}` : '#'),
+    isRead: Boolean(item.is_read),
+    isStarred: Boolean(item.is_starred),
   }
 }
 
@@ -139,18 +165,40 @@ function getDisplayTags(item: LocalSearchResult) {
 }
 
 async function loadData(query: string = '') {
+  await flushPendingReads()
   isLoading.value = true
   try {
+    if (isWatchLaterPage.value) {
+      const items = await getItems(undefined, 0, { starredOnly: true })
+      const normalized = items.map((item, index) => normalizeRawItem(item, index))
+      initialAnchorItemId.value = null
+      if (query.trim()) {
+        const keyword = query.trim().toLowerCase()
+        searchResults.value = normalized.filter((item) =>
+          item.title.toLowerCase().includes(keyword) ||
+          item.summary.toLowerCase().includes(keyword) ||
+          item.tags.some((tag) => tag.toLowerCase().includes(keyword))
+        )
+      } else {
+        searchResults.value = normalized
+      }
+      return
+    }
+
     if (query.trim()) {
       const results = await search({ q: query })
+      initialAnchorItemId.value = null
       searchResults.value = results.map(normalizeSearchResult)
       return
     }
 
     const items = await getItems(undefined, 0)
-    searchResults.value = items.map((item, index) => normalizeRawItem(item, index))
+    const normalized = items.map((item, index) => normalizeRawItem(item, index))
+    initialAnchorItemId.value = normalized.find((item) => item.isRead)?.id ?? null
+    searchResults.value = normalized
   } catch (error) {
     console.error('搜索失败:', error)
+    initialAnchorItemId.value = null
     searchResults.value = []
   } finally {
     isLoading.value = false
@@ -162,7 +210,27 @@ async function handleSearch() {
 }
 
 onMounted(() => {
-  loadData()
+  void loadData()
+  flushReadsInterval = window.setInterval(() => {
+    void flushPendingReads()
+  }, 5000)
+})
+
+onBeforeUnmount(() => {
+  if (observer) {
+    observer.disconnect()
+    observer = null
+  }
+
+  visibilityTimers.forEach((timerId) => window.clearTimeout(timerId))
+  visibilityTimers.clear()
+
+  if (flushReadsInterval !== undefined) {
+    clearInterval(flushReadsInterval)
+    flushReadsInterval = undefined
+  }
+
+  void flushPendingReads()
 })
 
 const getSourceIcon = (source: string) => {
@@ -197,8 +265,25 @@ function handleAISummary(item: LocalSearchResult) {
   }
 }
 
-function handleAddToWatchLater(item: LocalSearchResult) {
-  console.log('添加到稍后再看:', item.title)
+async function handleAddToWatchLater(item: LocalSearchResult) {
+  try {
+    const response = await toggleItemStar(item.id)
+    updateLocalItemState(item.id, {
+      isRead: response.is_read,
+      isStarred: response.is_starred,
+    })
+    toast({
+      title: response.is_starred ? '已加入稍后再看' : '已取消稍后再看',
+      description: item.title,
+    })
+  } catch (error) {
+    console.error('切换稍后再看失败:', error)
+    toast({
+      title: '操作失败',
+      description: '无法更新稍后再看状态，请稍后重试',
+      variant: 'destructive',
+    })
+  }
 }
 
 function handleClearRecord() {
@@ -287,6 +372,136 @@ function openExternalLink(url?: string) {
     window.open(url, '_blank')
   }
 }
+
+function updateLocalItemState(itemId: string, patch: Partial<Pick<LocalSearchResult, 'isRead' | 'isStarred'>>) {
+  searchResults.value = searchResults.value.map((entry) =>
+    entry.id === itemId ? { ...entry, ...patch } : entry
+  )
+
+  if (selectedItem.value?.id === itemId) {
+    selectedItem.value = {
+      ...selectedItem.value,
+      ...patch,
+    }
+  }
+}
+
+function queuePendingRead(itemId: string) {
+  const item = searchResults.value.find((entry) => entry.id === itemId)
+  if (!item || item.isRead) {
+    return
+  }
+  pendingReadIds.add(itemId)
+}
+
+async function flushPendingReads() {
+  const itemIds = Array.from(pendingReadIds).filter((itemId) => {
+    const item = searchResults.value.find((entry) => entry.id === itemId)
+    return item && !item.isRead
+  })
+
+  if (itemIds.length === 0) {
+    pendingReadIds.clear()
+    return
+  }
+
+  try {
+    await markItemsReadBatch(itemIds)
+    for (const itemId of itemIds) {
+      pendingReadIds.delete(itemId)
+      updateLocalItemState(itemId, { isRead: true })
+    }
+  } catch (error) {
+    console.error('批量已读同步失败:', error)
+  }
+}
+
+function clearVisibilityTimer(itemId: string) {
+  const timerId = visibilityTimers.get(itemId)
+  if (timerId !== undefined) {
+    window.clearTimeout(timerId)
+    visibilityTimers.delete(itemId)
+  }
+}
+
+function setCardRef(itemId: string, el: Element | null) {
+  clearVisibilityTimer(itemId)
+
+  if (observer) {
+    const oldElement = cardElements.get(itemId)
+    if (oldElement) {
+      observer.unobserve(oldElement)
+    }
+  }
+
+  if (el instanceof HTMLElement) {
+    cardElements.set(itemId, el)
+    el.dataset.itemId = itemId
+    if (observer) {
+      observer.observe(el)
+    }
+  } else {
+    cardElements.delete(itemId)
+  }
+}
+
+function setupIntersectionObserver() {
+  if (observer) {
+    observer.disconnect()
+  }
+
+  observer = new IntersectionObserver(
+    (entries) => {
+      for (const entry of entries) {
+        const itemId = (entry.target as HTMLElement).dataset.itemId
+        if (!itemId) {
+          continue
+        }
+
+        const item = searchResults.value.find((record) => record.id === itemId)
+        if (!item || item.isRead) {
+          clearVisibilityTimer(itemId)
+          continue
+        }
+
+        if (entry.isIntersecting && entry.intersectionRatio >= 0.6) {
+          if (!visibilityTimers.has(itemId)) {
+            const timerId = window.setTimeout(() => {
+              queuePendingRead(itemId)
+              visibilityTimers.delete(itemId)
+            }, 1500)
+            visibilityTimers.set(itemId, timerId)
+          }
+        } else {
+          clearVisibilityTimer(itemId)
+        }
+      }
+    },
+    {
+      threshold: [0.6],
+    }
+  )
+
+  cardElements.forEach((element) => observer?.observe(element))
+}
+
+watch(
+  searchResults,
+  async () => {
+    await nextTick()
+    setupIntersectionObserver()
+  },
+  { flush: 'post' }
+)
+
+watch(
+  () => route.name,
+  async () => {
+    searchQuery.value = ''
+    initialAnchorItemId.value = null
+    await loadData()
+  }
+)
 </script>
 
 <template>
@@ -296,10 +511,8 @@ function openExternalLink(url?: string) {
     @search="handleSearch"
   >
     <div class="mb-8">
-      <h2 class="text-2xl font-bold">欢迎回来，{{ currentUsername }}</h2>
-      <p class="text-muted-foreground">
-        {{ isLoading ? '正在加载数据...' : `今天 Iris 为你整理了 ${searchResults.length} 条新情报` }}
-      </p>
+      <h2 class="text-2xl font-bold">{{ pageTitle }}</h2>
+      <p class="text-muted-foreground">{{ pageSubtitle }}</p>
     </div>
 
     <div v-if="isLoading" :class="['grid transition-all duration-300', gridClass]">
@@ -326,21 +539,37 @@ function openExternalLink(url?: string) {
     </div>
 
     <div v-else :class="['grid transition-all duration-300', gridClass]">
-      <Card
-        v-for="item in searchResults"
-        :key="item.id"
-        :class="[
-          'bg-card text-card-foreground border-border transition-all cursor-pointer overflow-hidden group shadow-md flex flex-col relative',
-          isCardActive(item) ? 'border-primary ring-2 ring-primary/20' : 'hover:border-primary/20'
-        ]"
-        @click="handleCardClick(item)"
-      >
+      <template v-for="item in searchResults" :key="item.id">
+        <div
+          v-if="!isWatchLaterPage && initialAnchorItemId === item.id"
+          class="col-span-full flex items-center gap-3 rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 text-sm text-primary"
+        >
+          <span class="text-base">👇</span>
+          <span class="font-medium">上次阅读到这</span>
+        </div>
+
+        <Card
+          :ref="(el) => setCardRef(item.id, ((el as any)?.$el ?? el) as Element | null)"
+          :class="[
+            'bg-card text-card-foreground border-border transition-all cursor-pointer overflow-hidden group shadow-md flex flex-col relative',
+            isCardActive(item) ? 'border-primary ring-2 ring-primary/20' : 'hover:border-primary/20',
+            item.isStarred ? 'border-amber-300/60 shadow-amber-100/20' : ''
+          ]"
+          @click="handleCardClick(item)"
+        >
         <div
           v-if="item.has_long_summary"
           class="absolute top-2 left-2 z-10"
           title="已有 AI 总结"
         >
           <Star class="w-4 h-4 text-yellow-500 fill-yellow-500 animate-pulse" />
+        </div>
+
+        <div
+          v-if="item.isStarred"
+          class="absolute top-2 left-10 z-10 rounded-full bg-amber-500/15 px-2 py-1 text-[10px] font-semibold text-amber-700"
+        >
+          稍后再看
         </div>
 
         <div class="absolute top-2 right-2 z-10" @click.stop>
@@ -360,8 +589,8 @@ function openExternalLink(url?: string) {
                 <span>✨ AI 总结</span>
               </DropdownMenuItem>
               <DropdownMenuItem @click.stop="handleAddToWatchLater(item)">
-                <Bookmark class="mr-2 h-4 w-4" />
-                <span>🔖 添加到稍后再看</span>
+                <component :is="item.isStarred ? BookmarkCheck : Bookmark" class="mr-2 h-4 w-4" />
+                <span>{{ item.isStarred ? '移出稍后再看' : '添加到稍后再看' }}</span>
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -426,7 +655,8 @@ function openExternalLink(url?: string) {
             </div>
           </div>
         </CardContent>
-      </Card>
+        </Card>
+      </template>
     </div>
 
     <div v-if="!isLoading && searchResults.length === 0" class="text-center py-20">

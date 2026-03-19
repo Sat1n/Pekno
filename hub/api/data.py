@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from typing import List, Dict, Any
 from shared.database import AsyncSessionLocal
-from shared.models import ItemORM
+from shared.models import ItemORM, UserItemStateORM
 from sqlalchemy import select, func, delete
 from pydantic import BaseModel
 from hub.core.security import get_current_user
@@ -30,6 +30,16 @@ async def clear_data_source(source_type: str, current_user=Depends(get_current_u
     async with AsyncSessionLocal() as session:
         try:
             # 执行删除操作
+            item_ids_result = await session.execute(
+                select(ItemORM.id).where(ItemORM.source_type == source_type)
+            )
+            item_ids = item_ids_result.scalars().all()
+
+            if item_ids:
+                await session.execute(
+                    delete(UserItemStateORM).where(UserItemStateORM.item_id.in_(item_ids))
+                )
+
             result = await session.execute(
                 delete(ItemORM).where(ItemORM.source_type == source_type)
             )

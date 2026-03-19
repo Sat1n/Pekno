@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useColorMode } from '@vueuse/core'
 import { Search, Activity, Clock, Settings, Sun, Moon, Monitor, LayoutList, LayoutGrid, Rows3, Bell } from 'lucide-vue-next'
 import { Sidebar, SidebarContent, SidebarGroup, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar'
@@ -82,6 +82,7 @@ function formatTime(date: Date): string {
 
 const mode = useColorMode()
 const router = useRouter()
+const route = useRoute()
 const currentUser = computed(() => getStoredAuthUser())
 const usernameLabel = computed(() => currentUser.value.username || 'Guest')
 const userInitials = computed(() => usernameLabel.value.slice(0, 2).toUpperCase())
@@ -110,14 +111,21 @@ defineExpose({
 })
 
 const navMain = [
-  { title: '探索 (Explore)', icon: Search },
-  { title: '动态 (Activity)', icon: Activity },
-  { title: '稍后再看', icon: Clock },
+  { title: '探索 (Explore)', icon: Search, to: '/' },
+  { title: '动态 (Activity)', icon: Activity, to: '/activity', disabled: true },
+  { title: '稍后再看', icon: Clock, to: '/watch-later' },
 ]
 
 async function logout() {
   clearStoredToken()
   await router.replace('/login')
+}
+
+async function navigateTo(path: string, disabled?: boolean) {
+  if (disabled || route.path === path) {
+    return
+  }
+  await router.push(path)
 }
 
 </script>
@@ -288,7 +296,12 @@ async function logout() {
             <SidebarGroup>
               <SidebarMenu>
                 <SidebarMenuItem v-for="item in navMain" :key="item.title">
-                  <SidebarMenuButton class="py-5">
+                  <SidebarMenuButton
+                    class="py-5"
+                    :class="{ 'bg-background text-foreground shadow-sm': route.path === item.to }"
+                    :disabled="item.disabled"
+                    @click="navigateTo(item.to, item.disabled)"
+                  >
                     <component :is="item.icon" class="w-4 h-4 mr-2" />
                     <span>{{ item.title }}</span>
                   </SidebarMenuButton>

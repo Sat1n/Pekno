@@ -1,6 +1,6 @@
 from sqlalchemy import delete, select
 from shared.database import AsyncSessionLocal
-from shared.models import ItemORM, PluginRegistryORM
+from shared.models import ItemORM, PluginRegistryORM, UserItemStateORM
 from datetime import datetime, timedelta
 from worker.broker import broker
 from shared.logger import worker_log
@@ -110,6 +110,20 @@ async def cleanup_expired_items() -> int:
                 if row.created_at + timedelta(hours=row.retention_days) < now_local
             ]
 
+            if expired_ids:
+                starred_result = await session.execute(
+                    select(UserItemStateORM.item_id).where(
+                        UserItemStateORM.item_id.in_(expired_ids),
+                        UserItemStateORM.is_starred == True,
+                    )
+                )
+                starred_ids = set(starred_result.scalars().all())
+                if starred_ids:
+                    worker_log.info(
+                        f"🛡️ [TTL 清理] 检测到 {len(starred_ids)} 条已被收藏的过期数据，跳过物理销毁。"
+                    )
+                    expired_ids = [item_id for item_id in expired_ids if item_id not in starred_ids]
+
             for row in rows[:10]:
                 expires_at = row.created_at + timedelta(hours=row.retention_days)
                 worker_log.debug(
@@ -124,6 +138,9 @@ async def cleanup_expired_items() -> int:
 
             await _delete_from_vector_store(expired_ids)
 
+            await session.execute(
+                delete(UserItemStateORM).where(UserItemStateORM.item_id.in_(expired_ids))
+            )
             delete_result = await session.execute(
                 delete(ItemORM).where(ItemORM.id.in_(expired_ids))
             )

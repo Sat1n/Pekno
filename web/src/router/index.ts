@@ -30,6 +30,12 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
     {
+      path: '/watch-later',
+      name: 'watch-later',
+      component: Home,
+      meta: { requiresAuth: true },
+    },
+    {
       path: '/init',
       name: 'init',
       component: Init,

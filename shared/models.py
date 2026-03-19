@@ -1,5 +1,5 @@
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
-from sqlalchemy import String, DateTime, JSON, Text, Integer, Boolean
+from sqlalchemy import String, DateTime, JSON, Text, Integer, Boolean, ForeignKey, UniqueConstraint
 from sqlalchemy.dialects.postgresql import ARRAY
 from pgvector.sqlalchemy import Vector # 处理向量的核心
 from datetime import datetime, timedelta
@@ -93,3 +93,22 @@ class UserORM(Base):
     username: Mapped[str] = mapped_column(String, unique=True, index=True)
     hashed_password: Mapped[str] = mapped_column(String)
     role: Mapped[str] = mapped_column(String, default="admin")
+
+
+class UserItemStateORM(Base):
+    """用户与内容之间的个性化状态表"""
+    __tablename__ = "user_item_states"
+    __table_args__ = (
+        UniqueConstraint("user_id", "item_id", name="uq_user_item_state_user_item"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    item_id: Mapped[str] = mapped_column(String, ForeignKey("items.id", ondelete="CASCADE"), index=True)
+    is_read: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_starred: Mapped[bool] = mapped_column(Boolean, default=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=now_in_app_timezone_naive,
+        onupdate=now_in_app_timezone_naive,
+    )

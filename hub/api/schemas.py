@@ -13,6 +13,8 @@ class ItemResponse(BaseModel):
     intent: str
     created_at: datetime
     metadata_extra: dict = {}
+    is_read: bool = False
+    is_starred: bool = False
     # 注意：这里坚决不包含 embedding 字段，减少传输压力
     
     class Config:
@@ -73,3 +75,13 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     role: str
+
+
+class ReadBatchRequest(BaseModel):
+    item_ids: List[str] = Field(default_factory=list)
+
+
+class ItemStateResponse(BaseModel):
+    item_id: str
+    is_read: bool
+    is_starred: bool
