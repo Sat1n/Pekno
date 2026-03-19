@@ -74,47 +74,50 @@ async def run_plugin_pipeline_task(plugin_id: str, limit: int = None):
         if not raw_items:
             return
 
-        # 2. 遍历处理入库流水线
-        for raw_item in raw_items:
-            normalized = plugin.normalize_item(raw_item)
-            item_id = normalized["id"]
-            
-            # 3. 为 AI 摘要获取附加文本 + 连带获取 SHA 缓存更新凭证
-            ai_text = await plugin.extract_text_for_ai(ctx, raw_item)
-            metadata_extra = raw_item.get('metadata_extra', {})
-            new_sha = metadata_extra.get('readme_sha')
-            
-            # 去重检查：对比存储的 sha
-            async with AsyncSessionLocal() as session:
+        cache_hit_count = 0
+        async with AsyncSessionLocal() as session:
+            # 2. 遍历处理入库流水线
+            for raw_item in raw_items:
+                normalized = plugin.normalize_item(raw_item)
+                item_id = normalized["id"]
+
                 existing_item = await session.execute(
-                    select(ItemORM.metadata_extra).where(ItemORM.id == item_id)
+                    select(ItemORM.id).where(ItemORM.id == item_id)
                 )
-                record = existing_item.scalar_one_or_none()
-                db_metadata = record if record is not None else {}
-                
-                if record is not None and db_metadata.get('readme_sha') == new_sha and new_sha is not None:
-                    worker_log.info(f"⏭️ [{plugin_id}] 数据无更新，触发表级别 Cache Hit 跳过: {normalized['title']}")
+                existing_item_id = existing_item.scalar_one_or_none()
+
+                if existing_item_id is not None:
+                    cache_hit_count += 1
+                    worker_log.info(f"⏭️ [{plugin_id}] 命中历史数据，跳过: {normalized['title']} (连续命中 {cache_hit_count})")
+                    if cache_hit_count >= 3:
+                        worker_log.info(f"🛑 [{plugin_id}] 连续命中历史数据，触发增量熔断，提前结束同步。")
+                        break
                     continue
-            
-            final_metadata = normalized.get("metadata_extra", {})
-            final_metadata.update(metadata_extra)
-            final_metadata["has_long_summary"] = False
-            
-            item = UniversalItem(
-                id=normalized["id"],
-                title=normalized["title"],
-                source_type=normalized["source_type"],
-                raw_link=normalized["raw_link"],
-                content_text=normalized.get("content_text", ""),
-                intent=normalized.get("intent", "article"),
-                retention_hours=int(config_dict.get("retention_hours", normalized.get("retention_hours", 168))),
-                capabilities=["summarize"] if normalized.get("content_text") or ai_text else [],
-                metadata_extra=final_metadata,
-                auto_short_summary=bool(config_dict.get("auto_short_summary", normalized.get("auto_short_summary", False)))
-            )
-            
-            worker_log.info(f"📤 [{plugin_id}] 发送至 Pipeline 处理: {item.title}")
-            await process_new_item_task.kiq(item.model_dump())
+
+                cache_hit_count = 0
+
+                # 3. 为新数据补充附加文本与元数据
+                ai_text = await plugin.extract_text_for_ai(ctx, raw_item)
+                metadata_extra = raw_item.get('metadata_extra', {})
+                final_metadata = normalized.get("metadata_extra", {})
+                final_metadata.update(metadata_extra)
+                final_metadata["has_long_summary"] = False
+
+                item = UniversalItem(
+                    id=normalized["id"],
+                    title=normalized["title"],
+                    source_type=normalized["source_type"],
+                    raw_link=normalized["raw_link"],
+                    content_text=normalized.get("content_text", ""),
+                    intent=normalized.get("intent", "article"),
+                    retention_hours=int(config_dict.get("retention_hours", normalized.get("retention_hours", 168))),
+                    capabilities=["summarize"] if normalized.get("content_text") or ai_text else [],
+                    metadata_extra=final_metadata,
+                    auto_short_summary=bool(config_dict.get("auto_short_summary", normalized.get("auto_short_summary", False)))
+                )
+
+                worker_log.info(f"📤 [{plugin_id}] 发送至 Pipeline 处理: {item.title}")
+                await process_new_item_task.kiq(item.model_dump())
 
         worker_log.info(f"✅ [{plugin_id}] 同步指令下发完毕，共处理 {len(raw_items)} 条记录。")
 
