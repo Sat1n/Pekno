@@ -1,5 +1,5 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Query, HTTPException
+from fastapi import FastAPI, Query, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Optional
 from datetime import datetime
@@ -11,6 +11,7 @@ from shared.config import ConfigManager, ConfigKeys
 from sqlalchemy import select, delete
 from pydantic import BaseModel
 from shared.plugins.manager import plugin_manager
+from hub.core.security import get_current_user
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -40,7 +41,7 @@ app.include_router(plugins.router)
 app.include_router(auth.router)
 
 @app.get("/api/items", response_model=List[ItemResponse])
-async def get_items(limit: Optional[int] = None, offset: int = 0):
+async def get_items(limit: Optional[int] = None, offset: int = 0, current_user=Depends(get_current_user)):
     """获取所有已入库的条目列表"""
     async with AsyncSessionLocal() as session:
         stmt = select(ItemORM).order_by(ItemORM.created_at.desc()).offset(offset)
@@ -53,7 +54,8 @@ async def get_items(limit: Optional[int] = None, offset: int = 0):
 
 @app.get("/api/search", response_model=List[FrontendSearchItem])
 async def hybrid_search_api(
-    q: Optional[str] = Query(None, description="搜索关键词，为空则返回所有")
+    q: Optional[str] = Query(None, description="搜索关键词，为空则返回所有"),
+    current_user=Depends(get_current_user),
 ):
     """
     全局混合搜索接口（语义+关键词）
@@ -183,7 +185,8 @@ async def hybrid_search_api(
 @app.get("/api/search/github", response_model=List[FrontendSearchItem])
 async def search_github_items(
     q: Optional[str] = Query(None, description="搜索关键词，为空则返回所有"),
-    limit: int = Query(20, ge=1, le=100, description="返回数量限制")
+    limit: int = Query(20, ge=1, le=100, description="返回数量限制"),
+    current_user=Depends(get_current_user),
 ):
     """
     搜索 GitHub 数据接口
@@ -265,7 +268,7 @@ async def search_github_items(
 
 
 @app.post("/api/sync/github")
-async def trigger_github_sync(req: SyncRequest):
+async def trigger_github_sync(req: SyncRequest, current_user=Depends(get_current_user)):
     """手动触发 GitHub 同步任务"""
     # 这里我们会调用之前写的 worker/plugins/github/task.py 逻辑
     # 实际生产中这里应该是异步触发，不等待完成即返回 202
@@ -276,7 +279,7 @@ async def trigger_github_sync(req: SyncRequest):
 
 
 @app.delete("/api/items/{item_id}")
-async def delete_item(item_id: str):
+async def delete_item(item_id: str, current_user=Depends(get_current_user)):
     """手动删除某条数据"""
     async with AsyncSessionLocal() as session:
         async with session.begin():
@@ -285,7 +288,7 @@ async def delete_item(item_id: str):
 
 
 @app.post("/api/items/{item_id}/summarize")
-async def summarize_item(item_id: str):
+async def summarize_item(item_id: str, current_user=Depends(get_current_user)):
     """
     触发 AI 总结任务
     
@@ -310,7 +313,7 @@ async def summarize_item(item_id: str):
 
 
 @app.get("/api/items/{item_id}/summary_status")
-async def get_item_summary_status(item_id: str):
+async def get_item_summary_status(item_id: str, current_user=Depends(get_current_user)):
     """
     查询某条目的 AI 总结状态
     

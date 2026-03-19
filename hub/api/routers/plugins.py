@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from typing import Dict, Any, List
 import shutil
 import os
@@ -13,6 +13,7 @@ from shared.database import AsyncSessionLocal
 from shared.utils.zip_utils import safe_extract_zip
 from worker.plugins.pipeline import reload_system_plugins_task, run_plugin_pipeline_task
 from sqlalchemy import select, delete
+from hub.core.security import get_current_user
 
 router = APIRouter(prefix="/api/plugins", tags=["Plugins"])
 
@@ -21,7 +22,7 @@ PLUGIN_INSTALL_DIR = Path("worker/plugins/third_party").resolve()
 TEMP_PREVIEW_DIR = Path(tempfile.gettempdir()) / "iris_plugins"
 
 @router.post("/upload_preview")
-async def upload_plugin_preview(file: UploadFile = File(...)):
+async def upload_plugin_preview(file: UploadFile = File(...), current_user=Depends(get_current_user)):
     """
     步骤1：上传并预检插件
     解压到临时目录，读取 manifest 和源码供审查
@@ -87,7 +88,7 @@ async def upload_plugin_preview(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=f"预检失败: {str(e)}")
 
 @router.post("/confirm_install")
-async def confirm_install_plugin(token: str):
+async def confirm_install_plugin(token: str, current_user=Depends(get_current_user)):
     """
     步骤2：确认安装
     将临时目录移动到插件目录，写入数据库，触发热重载
@@ -160,7 +161,7 @@ async def confirm_install_plugin(token: str):
         raise HTTPException(status_code=500, detail=f"安装失败: {str(e)}")
 
 @router.delete("/{plugin_id}")
-async def uninstall_plugin(plugin_id: str):
+async def uninstall_plugin(plugin_id: str, current_user=Depends(get_current_user)):
     """
     卸载插件
     """
@@ -196,7 +197,7 @@ async def uninstall_plugin(plugin_id: str):
         raise HTTPException(status_code=500, detail=f"卸载失败: {str(e)}")
 
 @router.get("")
-async def get_plugins():
+async def get_plugins(current_user=Depends(get_current_user)):
     """获取所有插件清单和当前配置"""
     manifests = plugin_manager.get_all_manifests()
     result = []
@@ -250,7 +251,7 @@ async def get_plugins():
     return result
 
 @router.post("/{plugin_id}/config")
-async def save_plugin_config(plugin_id: str, config: Dict[str, Any]):
+async def save_plugin_config(plugin_id: str, config: Dict[str, Any], current_user=Depends(get_current_user)):
     """动态保存插件配置"""
     plugin = plugin_manager.get_plugin(plugin_id)
     if not plugin:
@@ -280,7 +281,7 @@ async def save_plugin_config(plugin_id: str, config: Dict[str, Any]):
     return {"status": "success", "message": f"{plugin.manifest.get('name')} 配置已保存"}
 
 @router.post("/{plugin_id}/sync")
-async def trigger_plugin_sync(plugin_id: str):
+async def trigger_plugin_sync(plugin_id: str, current_user=Depends(get_current_user)):
     """触发插件同步"""
     plugin = plugin_manager.get_plugin(plugin_id)
     if not plugin:

@@ -1,14 +1,16 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { useColorMode } from '@vueuse/core'
 import { Search, Activity, Clock, Settings, Sun, Moon, Monitor, LayoutList, LayoutGrid, Rows3, Bell } from 'lucide-vue-next'
 import { Sidebar, SidebarContent, SidebarGroup, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
-import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar'
+import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import SettingsDialog from '@/components/SettingsDialog.vue'
 import PluginSettingsDialog from '@/components/PluginSettingsDialog.vue'
+import { clearStoredToken, getStoredAuthUser } from '@/lib/api'
 
 defineEmits<{
   search: []
@@ -79,6 +81,10 @@ function formatTime(date: Date): string {
 }
 
 const mode = useColorMode()
+const router = useRouter()
+const currentUser = computed(() => getStoredAuthUser())
+const usernameLabel = computed(() => currentUser.value.username || 'Guest')
+const userInitials = computed(() => usernameLabel.value.slice(0, 2).toUpperCase())
 
 // 布局模式 v-model
 const layoutMode = defineModel<'list' | 'grid' | 'compact'>('layout', { default: 'list' })
@@ -108,6 +114,11 @@ const navMain = [
   { title: '动态 (Activity)', icon: Activity },
   { title: '稍后再看', icon: Clock },
 ]
+
+async function logout() {
+  clearStoredToken()
+  await router.replace('/login')
+}
 
 </script>
 
@@ -247,10 +258,27 @@ const navMain = [
             </DropdownMenuContent>
           </DropdownMenu>
 
-          <Avatar class="h-8 w-8 cursor-pointer border">
-            <AvatarImage src="https://github.com/shadcn.png" />
-            <AvatarFallback>NT</AvatarFallback>
-          </Avatar>
+          <DropdownMenu>
+            <DropdownMenuTrigger as-child>
+              <Button variant="ghost" class="h-10 px-2 gap-2">
+                <Avatar class="h-8 w-8 cursor-pointer border">
+                  <AvatarFallback>{{ userInitials }}</AvatarFallback>
+                </Avatar>
+                <div class="hidden md:flex flex-col items-start leading-none">
+                  <span class="text-sm font-medium">{{ usernameLabel }}</span>
+                  <span class="text-[11px] text-muted-foreground">{{ currentUser.role || 'admin' }}</span>
+                </div>
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" class="w-48">
+              <DropdownMenuItem disabled>
+                {{ usernameLabel }}
+              </DropdownMenuItem>
+              <DropdownMenuItem @click="logout">
+                退出登录
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </header>
 
