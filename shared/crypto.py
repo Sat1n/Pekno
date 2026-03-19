@@ -4,18 +4,15 @@
 """
 from cryptography.fernet import Fernet
 import os
-import base64
 from typing import Optional
+from shared.secret_store import load_or_create_secret
 
-# 从环境变量获取加密密钥，如果不存在则生成一个（仅开发环境）
-# 生产环境必须在环境变量中设置固定的密钥
-ENCRYPTION_KEY = os.getenv("IRIS_ENCRYPTION_KEY")
-
-if not ENCRYPTION_KEY:
-    # 开发环境：生成一个临时密钥（每次重启会变化，仅用于测试）
-    # 警告：生产环境不要使用这种方式！
-    ENCRYPTION_KEY = base64.urlsafe_b64encode(os.urandom(32)).decode()
-    print(f"⚠️ 警告：使用临时加密密钥（开发环境），密钥: {ENCRYPTION_KEY[:20]}...")
+ENCRYPTION_KEY = load_or_create_secret(
+    env_key="IRIS_ENCRYPTION_KEY",
+    filename="iris_encryption_key",
+    generator=lambda: Fernet.generate_key().decode(),
+    announce_label="Iris 配置加密密钥",
+)
 
 
 def get_fernet() -> Fernet:

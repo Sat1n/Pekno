@@ -33,10 +33,11 @@ search_service = SearchService()
 
 # 注册路由
 from hub.api import data
-from hub.api.routers import plugins
+from hub.api.routers import auth, plugins
 
 app.include_router(data.router, prefix="/api")
 app.include_router(plugins.router)
+app.include_router(auth.router)
 
 @app.get("/api/items", response_model=List[ItemResponse])
 async def get_items(limit: Optional[int] = None, offset: int = 0):

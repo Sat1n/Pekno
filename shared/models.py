@@ -5,6 +5,7 @@ from pgvector.sqlalchemy import Vector # 处理向量的核心
 from datetime import datetime, timedelta
 from typing import List, Optional
 from shared.time_utils import now_in_app_timezone_naive
+import uuid
 
 class Base(DeclarativeBase):
     pass
@@ -82,3 +83,13 @@ class PluginRegistryORM(Base):
 
     # 安装时间
     installed_at: Mapped[datetime] = mapped_column(DateTime, default=now_in_app_timezone_naive)
+
+
+class UserORM(Base):
+    """Hub 身份认证用户表"""
+    __tablename__ = "users"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    username: Mapped[str] = mapped_column(String, unique=True, index=True)
+    hashed_password: Mapped[str] = mapped_column(String)
+    role: Mapped[str] = mapped_column(String, default="admin")

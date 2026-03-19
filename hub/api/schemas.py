@@ -1,4 +1,4 @@
-from pydantic import BaseModel, HttpUrl
+from pydantic import BaseModel, HttpUrl, Field
 from typing import List, Optional, Any
 from datetime import datetime
 class ItemResponse(BaseModel):
@@ -53,3 +53,23 @@ class FrontendSearchItem(BaseModel):
     
     class Config:
         from_attributes = True
+
+
+class AuthStatusResponse(BaseModel):
+    needs_initialization: bool
+
+
+class AuthInitRequest(BaseModel):
+    username: str = Field(min_length=3, max_length=64)
+    password: str = Field(min_length=8, max_length=128)
+
+
+class AuthLoginRequest(BaseModel):
+    username: str = Field(min_length=3, max_length=64)
+    password: str = Field(min_length=8, max_length=128)
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    role: str
