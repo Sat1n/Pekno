@@ -7,6 +7,7 @@ from shared.database import AsyncSessionLocal
 from shared.models import ConfigORM
 from shared.crypto import encrypt_value, decrypt_value
 from shared.logger import worker_log
+from sqlalchemy import select
 
 
 class ConfigKeys:
@@ -16,13 +17,36 @@ class ConfigKeys:
     AUTO_SYNC_INTERVAL = "auto_sync_interval"
     LAST_SYNC_TIME = "last_sync_time"
     SYNC_STATUS = "sync_status"
+    AUTO_SHORT_SUMMARY = "auto_short_summary"
+    RETENTION_HOURS = "retention_hours"
+
+
+SYSTEM_CONFIG_USER_ID = "system"
+SYSTEM_SCOPED_CONFIG_KEYS = {
+    ConfigKeys.SYNC_LIMIT,
+    ConfigKeys.AUTO_SYNC,
+    ConfigKeys.AUTO_SYNC_INTERVAL,
+    ConfigKeys.AUTO_SHORT_SUMMARY,
+    ConfigKeys.RETENTION_HOURS,
+}
 
 
 class ConfigManager:
     """配置管理器"""
+
+    @staticmethod
+    def resolve_user_scope(key: str, user_id: Optional[str] = None) -> str:
+        if key in SYSTEM_SCOPED_CONFIG_KEYS:
+            return SYSTEM_CONFIG_USER_ID
+        return user_id or SYSTEM_CONFIG_USER_ID
     
     @staticmethod
-    async def get_config(plugin_id: str, key: str, default: Optional[str] = None) -> Optional[str]:
+    async def get_config(
+        plugin_id: str,
+        key: str,
+        default: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ) -> Optional[str]:
         """
         获取配置值
         
@@ -36,11 +60,26 @@ class ConfigManager:
         """
         async with AsyncSessionLocal() as session:
             result = await session.execute(
-                ConfigORM.__table__.select().where(
-                    (ConfigORM.plugin_id == plugin_id) & (ConfigORM.key == key)
+                select(ConfigORM).where(
+                    (ConfigORM.plugin_id == plugin_id)
+                    & (ConfigORM.key == key)
+                    & (ConfigORM.user_id == ConfigManager.resolve_user_scope(key, user_id))
                 )
             )
-            config = result.fetchone()
+            config = result.scalar_one_or_none()
+
+            if config is None and user_id is None and key not in SYSTEM_SCOPED_CONFIG_KEYS:
+                fallback_result = await session.execute(
+                    select(ConfigORM)
+                    .where(
+                        (ConfigORM.plugin_id == plugin_id)
+                        & (ConfigORM.key == key)
+                        & (ConfigORM.user_id != SYSTEM_CONFIG_USER_ID)
+                    )
+                    .order_by(ConfigORM.updated_at.desc())
+                    .limit(1)
+                )
+                config = fallback_result.scalar_one_or_none()
             
             if not config or not config.value:
                 return default
@@ -50,7 +89,13 @@ class ConfigManager:
             return decrypted if decrypted is not None else default
     
     @staticmethod
-    async def set_config(plugin_id: str, key: str, value: str, description: str = "") -> bool:
+    async def set_config(
+        plugin_id: str,
+        key: str,
+        value: str,
+        description: str = "",
+        user_id: Optional[str] = None,
+    ) -> bool:
         """
         设置配置值
         
@@ -73,11 +118,12 @@ class ConfigManager:
                     
                     stmt = insert(ConfigORM).values(
                         plugin_id=plugin_id,
+                        user_id=ConfigManager.resolve_user_scope(key, user_id),
                         key=key,
                         value=encrypted_value,
                         description=description
                     ).on_conflict_do_update(
-                        index_elements=['plugin_id', 'key'],
+                        index_elements=['plugin_id', 'user_id', 'key'],
                         set_={
                             'value': encrypted_value,
                             'description': description
@@ -94,7 +140,7 @@ class ConfigManager:
             return False
     
     @staticmethod
-    async def delete_config(plugin_id: str, key: str) -> bool:
+    async def delete_config(plugin_id: str, key: str, user_id: Optional[str] = None) -> bool:
         """
         删除配置
         
@@ -110,7 +156,9 @@ class ConfigManager:
                 async with session.begin():
                     from sqlalchemy import delete
                     stmt = delete(ConfigORM).where(
-                        (ConfigORM.plugin_id == plugin_id) & (ConfigORM.key == key)
+                        (ConfigORM.plugin_id == plugin_id)
+                        & (ConfigORM.key == key)
+                        & (ConfigORM.user_id == ConfigManager.resolve_user_scope(key, user_id))
                     )
                     result = await session.execute(stmt)
                     if result.rowcount > 0:

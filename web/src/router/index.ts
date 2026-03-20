@@ -3,6 +3,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import Home from '@/views/Home.vue'
 import Init from '@/views/Init.vue'
 import Login from '@/views/Login.vue'
+import Register from '@/views/Register.vue'
 import { getAuthStatus, getStoredToken } from '@/lib/api'
 
 let authStatusCache: { needs_initialization: boolean } | null = null
@@ -47,6 +48,12 @@ const router = createRouter({
       component: Login,
       meta: { public: true },
     },
+    {
+      path: '/register',
+      name: 'register',
+      component: Register,
+      meta: { public: true },
+    },
   ],
 })
 
@@ -64,7 +71,8 @@ router.beforeEach(async (to) => {
     return { path: getStoredToken() ? '/' : '/login' }
   }
 
-  const requiresAuth = to.meta.requiresAuth !== false
+  const isPublicRoute = to.meta.public === true
+  const requiresAuth = !isPublicRoute
   if (requiresAuth && !getStoredToken()) {
     if (to.path !== '/login') {
       return {
@@ -74,7 +82,7 @@ router.beforeEach(async (to) => {
     }
   }
 
-  if (to.path === '/login' && getStoredToken()) {
+  if ((to.path === '/login' || to.path === '/register') && getStoredToken()) {
     return { path: '/' }
   }
 

@@ -30,6 +30,7 @@ function decodeBase64Url(value: string): string | null {
 }
 
 export interface StoredAuthUser {
+  id: string | null
   username: string | null
   role: string | null
 }
@@ -37,27 +38,28 @@ export interface StoredAuthUser {
 export function getStoredAuthUser(): StoredAuthUser {
   const token = getStoredToken()
   if (!token) {
-    return { username: null, role: null }
+    return { id: null, username: null, role: null }
   }
 
   const parts = token.split('.')
   if (parts.length < 2) {
-    return { username: null, role: null }
+    return { id: null, username: null, role: null }
   }
 
   const payloadText = decodeBase64Url(parts[1])
   if (!payloadText) {
-    return { username: null, role: null }
+    return { id: null, username: null, role: null }
   }
 
   try {
-    const payload = JSON.parse(payloadText) as { sub?: string; role?: string }
+    const payload = JSON.parse(payloadText) as { sub?: string; role?: string; uid?: string }
     return {
+      id: payload.uid ?? null,
       username: payload.sub ?? null,
       role: payload.role ?? null,
     }
   } catch {
-    return { username: null, role: null }
+    return { id: null, username: null, role: null }
   }
 }
 
@@ -133,6 +135,14 @@ export interface AuthTokenResponse {
   access_token: string
   token_type: string
   role: string
+}
+
+export interface InvitationCodeInfo {
+  id: string
+  code: string
+  is_used: boolean
+  used_by_username?: string | null
+  created_at: string
 }
 
 // 搜索参数接口
@@ -222,6 +232,26 @@ export async function login(payload: { username: string; password: string }): Pr
   return response.data
 }
 
+export async function register(payload: { username: string; password: string; invite_code: string }): Promise<AuthTokenResponse> {
+  const response = await apiClient.post<AuthTokenResponse>('/api/auth/register', payload)
+  return response.data
+}
+
+export async function changePassword(payload: { current_password: string; new_password: string }): Promise<{ status: string; message: string }> {
+  const response = await apiClient.post('/api/auth/change_password', payload)
+  return response.data
+}
+
+export async function createInvitationCode(): Promise<InvitationCodeInfo> {
+  const response = await apiClient.post<InvitationCodeInfo>('/api/admin/invitations')
+  return response.data
+}
+
+export async function getInvitationCodes(): Promise<InvitationCodeInfo[]> {
+  const response = await apiClient.get<InvitationCodeInfo[]>('/api/admin/invitations')
+  return response.data
+}
+
 /**
  * 触发 AI 总结任务
  * @param itemId 项目 ID
@@ -258,6 +288,7 @@ export async function getItemSummaryStatus(itemId: string): Promise<SummaryStatu
 export interface PluginSettingSchema {
   type: 'string' | 'boolean' | 'integer' | 'select'
   label: string
+  scope?: 'system' | 'user'
   description?: string
   default?: any
   secret?: boolean

@@ -14,6 +14,14 @@ async def ensure_runtime_tables():
 
         hub_log.info("🧱 正在补齐缺失的数据表...")
         await conn.run_sync(Base.metadata.create_all)
+        # MVP 阶段先用轻量 schema bootstrap，后续可迁移到 Alembic。
+        await conn.execute(text("ALTER TABLE IF EXISTS configs ADD COLUMN IF NOT EXISTS user_id VARCHAR DEFAULT 'system'"))
+        await conn.execute(text("ALTER TABLE IF EXISTS configs ADD COLUMN IF NOT EXISTS id VARCHAR"))
+        await conn.execute(text("UPDATE configs SET user_id = 'system' WHERE user_id IS NULL"))
+        await conn.execute(text("UPDATE configs SET id = md5(plugin_id || ':' || key || ':' || user_id) WHERE id IS NULL"))
+        await conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_configs_plugin_user_key ON configs (plugin_id, user_id, key)"))
+        await conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_invitation_codes_code ON invitation_codes (code)"))
+        await conn.execute(text("ALTER TABLE IF EXISTS invitation_codes ADD COLUMN IF NOT EXISTS used_by_user_id VARCHAR"))
 
 
 async def init_db():

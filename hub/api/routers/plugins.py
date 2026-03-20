@@ -7,13 +7,13 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 from shared.plugins.manager import plugin_manager
-from shared.config import ConfigManager
-from shared.models import PluginRegistryORM
+from shared.config import ConfigManager, SYSTEM_SCOPED_CONFIG_KEYS
+from shared.models import ConfigORM, PluginRegistryORM
 from shared.database import AsyncSessionLocal
 from shared.utils.zip_utils import safe_extract_zip
 from worker.plugins.pipeline import reload_system_plugins_task, run_plugin_pipeline_task
 from sqlalchemy import select, delete
-from hub.core.security import get_current_user
+from hub.core.security import get_current_user, require_admin
 
 router = APIRouter(prefix="/api/plugins", tags=["Plugins"])
 
@@ -22,7 +22,7 @@ PLUGIN_INSTALL_DIR = Path("worker/plugins/third_party").resolve()
 TEMP_PREVIEW_DIR = Path(tempfile.gettempdir()) / "iris_plugins"
 
 @router.post("/upload_preview")
-async def upload_plugin_preview(file: UploadFile = File(...), current_user=Depends(get_current_user)):
+async def upload_plugin_preview(file: UploadFile = File(...), current_user=Depends(require_admin)):
     """
     步骤1：上传并预检插件
     解压到临时目录，读取 manifest 和源码供审查
@@ -88,7 +88,7 @@ async def upload_plugin_preview(file: UploadFile = File(...), current_user=Depen
         raise HTTPException(status_code=500, detail=f"预检失败: {str(e)}")
 
 @router.post("/confirm_install")
-async def confirm_install_plugin(token: str, current_user=Depends(get_current_user)):
+async def confirm_install_plugin(token: str, current_user=Depends(require_admin)):
     """
     步骤2：确认安装
     将临时目录移动到插件目录，写入数据库，触发热重载
@@ -161,7 +161,7 @@ async def confirm_install_plugin(token: str, current_user=Depends(get_current_us
         raise HTTPException(status_code=500, detail=f"安装失败: {str(e)}")
 
 @router.delete("/{plugin_id}")
-async def uninstall_plugin(plugin_id: str, current_user=Depends(get_current_user)):
+async def uninstall_plugin(plugin_id: str, current_user=Depends(require_admin)):
     """
     卸载插件
     """
@@ -173,7 +173,6 @@ async def uninstall_plugin(plugin_id: str, current_user=Depends(get_current_user
             await session.execute(stmt_registry)
             
             # 1.2 删除插件相关配置 (Fix: 卸载时清理配置)
-            from shared.models import ConfigORM
             stmt_config = delete(ConfigORM).where(ConfigORM.plugin_id == plugin_id)
             await session.execute(stmt_config)
             
@@ -210,7 +209,7 @@ async def get_plugins(current_user=Depends(get_current_user)):
         secret_configured = False
         
         for key, schema in settings_schema.items():
-            val = await ConfigManager.get_config(plugin_id, key)
+            val = await ConfigManager.get_config(plugin_id, key, user_id=current_user["id"])
             if val is not None:
                 if schema.get("type") == "integer":
                     val = int(val)
@@ -232,7 +231,7 @@ async def get_plugins(current_user=Depends(get_current_user)):
 
         required_configured = True
         for key in required_keys:
-            val = await ConfigManager.get_config(plugin_id, key)
+            val = await ConfigManager.get_config(plugin_id, key, user_id=current_user["id"])
             if val in (None, ""):
                 required_configured = False
                 break
@@ -264,6 +263,8 @@ async def save_plugin_config(plugin_id: str, config: Dict[str, Any], current_use
             continue
             
         schema = settings_schema[key]
+        if key in SYSTEM_SCOPED_CONFIG_KEYS and current_user["role"] not in {"admin", "super_admin"}:
+            continue
         
         # 针对空值的密码(secret)字段，通常表示不修改
         if schema.get("secret") and (val is None or str(val).strip() == ""):
@@ -275,7 +276,8 @@ async def save_plugin_config(plugin_id: str, config: Dict[str, Any], current_use
             plugin_id, 
             key, 
             str_val, 
-            description=schema.get("label", key)
+            description=schema.get("label", key),
+            user_id=current_user["id"],
         )
         
     return {"status": "success", "message": f"{plugin.manifest.get('name')} 配置已保存"}
@@ -288,7 +290,7 @@ async def trigger_plugin_sync(plugin_id: str, current_user=Depends(get_current_u
         raise HTTPException(status_code=404, detail=f"找不到插件: {plugin_id}")
         
     # 异步触发，取代之前的 sync_github_stars_task
-    task = await run_plugin_pipeline_task.kiq(plugin_id)
+    task = await run_plugin_pipeline_task.kiq(plugin_id, None, current_user["id"])
     
     return {
         "status": "accepted",

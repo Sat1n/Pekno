@@ -16,7 +16,7 @@ import {
 import { Settings, Save, RefreshCw, Loader2, AlertCircle, Check, Trash2 } from 'lucide-vue-next'
 import { useToast } from '@/components/ui/toast/use-toast'
 import { usePluginStore } from '@/store/usePluginStore'
-import { uninstallPluginApi, type PluginSettingSchema } from '@/lib/api'
+import { getStoredAuthUser, uninstallPluginApi, type PluginSettingSchema } from '@/lib/api'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 
 const props = defineProps<{
@@ -30,6 +30,8 @@ const emit = defineEmits<{
 
 const { toast } = useToast()
 const pluginStore = usePluginStore()
+const currentUser = computed(() => getStoredAuthUser())
+const isAdmin = computed(() => ['admin', 'super_admin'].includes(currentUser.value.role || ''))
 
 // 状态
 const isSaving = ref(false)
@@ -72,6 +74,13 @@ async function handleUninstall() {
 
 
 const schema = computed<Record<string, PluginSettingSchema>>(() => currentPlugin.value?.manifest.settings_schema || {})
+const visibleSchema = computed<Record<string, PluginSettingSchema>>(() => {
+  const entries = Object.entries(schema.value).filter(([, fieldConfig]) => {
+    if (isAdmin.value) return true
+    return fieldConfig.scope !== 'system'
+  })
+  return Object.fromEntries(entries)
+})
 
 // 初始化表单数据
 function initForm() {
@@ -79,8 +88,8 @@ function initForm() {
   const config = currentPlugin.value.config || {}
   
   formData.value = {}
-  for (const key in schema.value) {
-    const fieldConfig = schema.value[key]
+  for (const key in visibleSchema.value) {
+    const fieldConfig = visibleSchema.value[key]
     if (!fieldConfig) continue
     if (fieldConfig.secret) {
       // 密码字段不回填，留空
@@ -117,8 +126,8 @@ async function handleSave() {
   if (!currentPlugin.value) return
 
   // 验证必填项
-  for (const key in schema.value) {
-    const field = schema.value[key]
+  for (const key in visibleSchema.value) {
+    const field = visibleSchema.value[key]
     if (!field) continue
     if (isRequired(field) && (formData.value[key] === undefined || formData.value[key] === null || formData.value[key] === '')) {
       toast({
@@ -135,7 +144,7 @@ async function handleSave() {
     const savePayload: Record<string, any> = {}
     for (const key in formData.value) {
       const val = formData.value[key]
-      const field = schema.value[key]
+      const field = visibleSchema.value[key]
       if (!field) {
         savePayload[key] = val
         continue
@@ -219,7 +228,7 @@ async function handleSync() {
       <Separator class="my-6" />
 
       <div class="px-6 space-y-6 max-h-[60vh] overflow-y-auto pb-6">
-        <div v-for="(fieldConfig, fieldKey) in schema" :key="fieldKey" class="space-y-3">
+        <div v-for="(fieldConfig, fieldKey) in visibleSchema" :key="fieldKey" class="space-y-3">
           <!-- 布尔类型：Switch -->
           <div v-if="fieldConfig.type === 'boolean'" class="flex items-center justify-between p-4 rounded-lg border bg-card">
             <div class="space-y-0.5">
@@ -272,7 +281,7 @@ async function handleSync() {
         <div class="flex gap-2">
           <!-- 卸载按钮（仅对第三方插件显示，假设非 github_stars 为第三方，或者简单起见都显示） -->
           <Button 
-            v-if="currentPlugin.manifest.id !== 'github_stars'"
+            v-if="isAdmin && currentPlugin.manifest.id !== 'github_stars'"
             variant="ghost" 
             class="text-destructive hover:text-destructive hover:bg-destructive/10"
             @click="isUninstallDialogOpen = true"

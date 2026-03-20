@@ -42,12 +42,18 @@ class ItemORM(Base):
 class ConfigORM(Base):
     """用户配置存储表（加密存储敏感信息）"""
     __tablename__ = "configs"
+    __table_args__ = (
+        UniqueConstraint("plugin_id", "user_id", "key", name="uq_config_plugin_user_key"),
+    )
 
     # 插件标识，如 "github_stars"
-    plugin_id: Mapped[str] = mapped_column(String, primary_key=True)
+    plugin_id: Mapped[str] = mapped_column(String)
+
+    # 配置所属用户，system 代表系统级配置
+    user_id: Mapped[str] = mapped_column(String, default="system")
     
     # 配置键，如 "token", "sync_limit" 等
-    key: Mapped[str] = mapped_column(String, primary_key=True)
+    key: Mapped[str] = mapped_column(String)
     
     # 加密后的值
     value: Mapped[str] = mapped_column(Text)
@@ -61,6 +67,8 @@ class ConfigORM(Base):
     
     # 是否启用
     is_enabled: Mapped[bool] = mapped_column(default=True)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
 
 class PluginRegistryORM(Base):
     """插件物理注册表"""
@@ -112,3 +120,14 @@ class UserItemStateORM(Base):
         default=now_in_app_timezone_naive,
         onupdate=now_in_app_timezone_naive,
     )
+
+
+class InvitationCodeORM(Base):
+    """邀请码追踪表"""
+    __tablename__ = "invitation_codes"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    code: Mapped[str] = mapped_column(String, unique=True, index=True)
+    is_used: Mapped[bool] = mapped_column(Boolean, default=False)
+    used_by_user_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now_in_app_timezone_naive)

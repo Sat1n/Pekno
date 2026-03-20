@@ -71,6 +71,17 @@ class AuthLoginRequest(BaseModel):
     password: str = Field(min_length=8, max_length=128)
 
 
+class AuthRegisterRequest(BaseModel):
+    username: str = Field(min_length=3, max_length=64)
+    password: str = Field(min_length=8, max_length=128)
+    invite_code: str = Field(min_length=6, max_length=128)
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(min_length=8, max_length=128)
+    new_password: str = Field(min_length=8, max_length=128)
+
+
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
@@ -85,3 +96,18 @@ class ItemStateResponse(BaseModel):
     item_id: str
     is_read: bool
     is_starred: bool
+
+
+class InvitationCodeResponse(BaseModel):
+    id: str
+    code: str
+    is_used: bool
+    used_by_username: Optional[str] = None
+    created_at: datetime
+
+
+class InvitationCreateResponse(BaseModel):
+    id: str
+    code: str
+    is_used: bool
+    created_at: datetime

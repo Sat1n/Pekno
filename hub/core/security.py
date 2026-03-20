@@ -73,3 +73,12 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> Dict[str, Any
         "username": user.username,
         "role": role or user.role,
     }
+
+
+def require_admin(current_user: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
+    if current_user["role"] not in {"admin", "super_admin"}:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="仅管理员可以执行该操作",
+        )
+    return current_user

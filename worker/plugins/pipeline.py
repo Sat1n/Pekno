@@ -12,7 +12,7 @@ import datetime
 import re
 
 @broker.task(task_name="run_plugin_pipeline")
-async def run_plugin_pipeline_task(plugin_id: str, limit: int = None):
+async def run_plugin_pipeline_task(plugin_id: str, limit: int = None, user_id: str | None = None):
     """
     通用化：运行指定插件的同步流水线
     """
@@ -29,18 +29,18 @@ async def run_plugin_pipeline_task(plugin_id: str, limit: int = None):
         return
 
     # 状态锁检查
-    status = await ConfigManager.get_config(plugin_id, ConfigKeys.SYNC_STATUS)
+    status = await ConfigManager.get_config(plugin_id, ConfigKeys.SYNC_STATUS, user_id=user_id)
     if status == "running":
         worker_log.warning(f"⚠️ [{plugin_id}] 同步任务已经在运行中，跳过本次执行")
         return
 
-    await ConfigManager.set_config(plugin_id, ConfigKeys.SYNC_STATUS, "running")
+    await ConfigManager.set_config(plugin_id, ConfigKeys.SYNC_STATUS, "running", user_id=user_id)
 
     try:
         # 获取基础配置字典
         config_dict = {}
         for key, schema in plugin.manifest.get("settings_schema", {}).items():
-            val = await ConfigManager.get_config(plugin_id, key)
+            val = await ConfigManager.get_config(plugin_id, key, user_id=user_id)
             if val is not None:
                 config_dict[key] = int(val) if schema.get("type") == "integer" else (val == "true" if schema.get("type") == "boolean" else val)
             else:
@@ -124,8 +124,8 @@ async def run_plugin_pipeline_task(plugin_id: str, limit: int = None):
     except Exception as e:
         worker_log.error(f"❌ [{plugin_id}] 任务执行出错: {e}")
     finally:
-        await ConfigManager.set_config(plugin_id, ConfigKeys.SYNC_STATUS, "idle")
-        await ConfigManager.set_config(plugin_id, ConfigKeys.LAST_SYNC_TIME, datetime.datetime.now().isoformat())
+        await ConfigManager.set_config(plugin_id, ConfigKeys.SYNC_STATUS, "idle", user_id=user_id)
+        await ConfigManager.set_config(plugin_id, ConfigKeys.LAST_SYNC_TIME, datetime.datetime.now().isoformat(), user_id=user_id)
 
 
 @broker.task(task_name="summarize_repo")

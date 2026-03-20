@@ -35,12 +35,13 @@ search_service = SearchService()
 
 # 注册路由
 from hub.api import data
-from hub.api.routers import auth, items, plugins
+from hub.api.routers import admin, auth, items, plugins
 
 app.include_router(data.router, prefix="/api")
 app.include_router(plugins.router)
 app.include_router(auth.router)
 app.include_router(items.router)
+app.include_router(admin.router)
 
 
 @app.get("/api/search", response_model=List[FrontendSearchItem])

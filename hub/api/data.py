@@ -4,7 +4,7 @@ from shared.database import AsyncSessionLocal
 from shared.models import ItemORM, UserItemStateORM
 from sqlalchemy import select, func, delete
 from pydantic import BaseModel
-from hub.core.security import get_current_user
+from hub.core.security import require_admin
 
 router = APIRouter(prefix="/data", tags=["Data Management"])
 
@@ -13,7 +13,7 @@ class DataSourceStat(BaseModel):
     count: int
 
 @router.get("/sources", response_model=List[DataSourceStat])
-async def get_data_sources(current_user=Depends(get_current_user)):
+async def get_data_sources(current_user=Depends(require_admin)):
     """获取所有数据源的统计信息"""
     async with AsyncSessionLocal() as session:
         result = await session.execute(
@@ -25,7 +25,7 @@ async def get_data_sources(current_user=Depends(get_current_user)):
 
 
 @router.delete("/sources/{source_type}")
-async def clear_data_source(source_type: str, current_user=Depends(get_current_user)):
+async def clear_data_source(source_type: str, current_user=Depends(require_admin)):
     """清除特定数据源的所有数据"""
     async with AsyncSessionLocal() as session:
         try:

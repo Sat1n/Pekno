@@ -47,6 +47,7 @@ class PluginManager:
         settings_schema["auto_short_summary"] = {
             "type": "boolean",
             "label": "启用 AI 短总结",
+            "scope": "system",
             "default": self._get_framework_default(
                 normalized,
                 "auto_short_summary",
@@ -56,23 +57,27 @@ class PluginManager:
         settings_schema["retention_hours"] = {
             "type": "integer",
             "label": "数据存活时间(小时)",
+            "scope": "system",
             "default": self._get_framework_default(normalized, "retention_hours", 168),
             "description": "-1 为永久保存，默认 7 天",
         }
         settings_schema["sync_limit"] = {
             "type": "integer",
             "label": "同步限制",
+            "scope": "system",
             "default": 100,
             "description": "每次同步抓取的最大条数",
         }
         settings_schema["auto_sync"] = {
             "type": "boolean",
             "label": "自动同步",
+            "scope": "system",
             "default": False,
         }
         settings_schema["auto_sync_interval"] = {
             "type": "integer",
             "label": "同步间隔 (分钟)",
+            "scope": "system",
             "default": 60,
             "description": "自动同步开启后，按此分钟间隔巡检",
         }
