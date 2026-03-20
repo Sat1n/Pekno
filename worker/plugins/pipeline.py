@@ -177,7 +177,7 @@ async def summarize_repo_task(item_id: str, task_id: str):
         
         from hub.core.llm.service import LLMManager
         ai = LLMManager()
-        summary = await ai.llm.provider.generate_summary(text_to_summarize, length="long")
+        summary = await ai.generate_summary(text_to_summarize, length="long")
 
         async with AsyncSessionLocal() as session:
             new_metadata_extra = dict(item.metadata_extra) if item.metadata_extra else {}

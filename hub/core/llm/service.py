@@ -1,55 +1,53 @@
-from .providers.openai_adapter import OpenAIProvider
-from .providers.ollama_adapter import OllamaProvider
-from langchain_ollama import OllamaEmbeddings
-import os
-import asyncio
 from typing import List
 
+from hub.core import model_settings
+
+
 class LLMService:
-    def __init__(self):
-        # 模拟从用户配置读取，现在先写死为 Ollama 方便你测试
-        self.config = {
-            "type": "ollama",
-            "host": "http://127.0.0.1:11434",
-            "model": "qwen3:8b" # 或者是你本地 pull 的模型名，如 qwen2.5
-        }
-        self.provider = self._get_provider()
+    async def generate_summary(self, text: str, length: str = "short") -> str:
+        summary, _ = await model_settings.generate_summary(text, length=length)
+        return summary
 
-    def _get_provider(self):
-        if self.config["type"] == "ollama":
-            return OllamaProvider(self.config["host"], self.config["model"])
-        elif self.config["type"] == "openai":
-            return OpenAIProvider(...)
-        raise ValueError("Unknown provider")
+    async def extract_tags(self, text: str) -> List[str]:
+        tags, _ = await model_settings.extract_tags(text)
+        return tags
 
-    @property
-    def current_model(self) -> str:
-        return self.provider.model_name
+    async def current_model_name(self, purpose: str = "short_summary") -> str:
+        assignments = await model_settings.get_model_assignments()
+        match = next((item for item in assignments if item["key"] == purpose), None)
+        return match["model"] if match else ""
+
 
 class EmbeddingService:
-    def __init__(self):
-        # 同样支持从配置读取，这里先写死 Ollama
-        self.model_name = "nomic-embed-text-v2-moe" # 或者你 local pull 的模型
-        self.client = OllamaEmbeddings(
-            model=self.model_name,
-            base_url="http://127.0.0.1:11434"
-        )
-
     async def get_vector(self, text: str) -> List[float]:
-        """将文本转为 1536 维(或对应维度)的向量"""
-        # 注意：LangChain 的 embed_query 是同步阻塞的，在异步环境下建议跑在线程池
-        return await asyncio.to_thread(self.client.embed_query, text)
+        vector, _ = await model_settings.embed_text(text)
+        return vector
+
+    async def current_model_name(self) -> str:
+        assignments = await model_settings.get_model_assignments()
+        match = next((item for item in assignments if item["key"] == "embedding"), None)
+        return match["model"] if match else ""
+
 
 class LLMManager:
     def __init__(self):
-        # 这里的配置以后从用户的 DB 设置里读
         self.llm = LLMService()
         self.embed = EmbeddingService()
-    
-    @property
-    def model_name(self):
-        return self.llm.current_model
 
-    @property
-    def embed_model_name(self):
-        return self.embed.model_name
+    async def generate_summary(self, text: str, length: str = "short") -> str:
+        return await self.llm.generate_summary(text, length=length)
+
+    async def extract_tags(self, text: str) -> List[str]:
+        return await self.llm.extract_tags(text)
+
+    async def get_vector(self, text: str) -> List[float]:
+        return await self.embed.get_vector(text)
+
+    async def get_summary_model_name(self, length: str = "short") -> str:
+        return await self.llm.current_model_name("short_summary" if length == "short" else "long_summary")
+
+    async def get_tagging_model_name(self) -> str:
+        return await self.llm.current_model_name("tagging")
+
+    async def get_embedding_model_name(self) -> str:
+        return await self.embed.current_model_name()

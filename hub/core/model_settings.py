@@ -1,0 +1,325 @@
+import asyncio
+import json
+import re
+from typing import Any, Dict, List, Tuple
+
+import openai
+from langchain_ollama import OllamaEmbeddings
+
+from shared.config import SYSTEM_CONFIG_USER_ID, ConfigManager
+from hub.core.llm.providers.ollama_adapter import OllamaProvider
+from hub.core.llm.providers.openai_adapter import OpenAIProvider
+
+MODEL_SETTINGS_NAMESPACE = "__model_settings__"
+
+MODEL_PROVIDER_CATALOG: List[Dict[str, Any]] = [
+    {
+        "id": "ollama",
+        "name": "Ollama",
+        "description": "连接本地或局域网 Ollama，适合离线推理与自托管场景。",
+        "badge": "本地优先",
+        "capabilities": ["LLM", "Embedding"],
+        "config_fields": [
+            {"key": "host", "label": "服务地址", "type": "string", "default": "http://127.0.0.1:11434"},
+        ],
+    },
+    {
+        "id": "openai_compatible",
+        "name": "OpenAI Compatible",
+        "description": "兼容 OpenAI API 的通用提供商，适配 LM Studio、vLLM、One API 等。",
+        "badge": "通用兼容",
+        "capabilities": ["LLM", "Embedding"],
+        "config_fields": [
+            {"key": "base_url", "label": "Base URL", "type": "string", "default": "https://api.openai.com/v1"},
+            {"key": "api_key", "label": "API Key", "type": "string", "secret": True, "default": ""},
+        ],
+    },
+    {
+        "id": "openai",
+        "name": "OpenAI",
+        "description": "OpenAI 官方服务，适合 GPT 与 text-embedding 系列模型。",
+        "badge": "官方",
+        "capabilities": ["LLM", "Embedding"],
+        "config_fields": [
+            {"key": "base_url", "label": "Base URL", "type": "string", "default": "https://api.openai.com/v1"},
+            {"key": "api_key", "label": "API Key", "type": "string", "secret": True, "default": ""},
+        ],
+    },
+    {
+        "id": "openrouter",
+        "name": "OpenRouter",
+        "description": "统一访问多家模型供应商，适合快速试用不同模型。",
+        "badge": "聚合",
+        "capabilities": ["LLM", "Embedding"],
+        "config_fields": [
+            {"key": "base_url", "label": "Base URL", "type": "string", "default": "https://openrouter.ai/api/v1"},
+            {"key": "api_key", "label": "API Key", "type": "string", "secret": True, "default": ""},
+        ],
+    },
+    {
+        "id": "siliconflow",
+        "name": "硅基流动",
+        "description": "常见国产推理平台，适合接入通用 OpenAI 兼容模型接口。",
+        "badge": "国产",
+        "capabilities": ["LLM", "Embedding"],
+        "config_fields": [
+            {"key": "base_url", "label": "Base URL", "type": "string", "default": "https://api.siliconflow.cn/v1"},
+            {"key": "api_key", "label": "API Key", "type": "string", "secret": True, "default": ""},
+        ],
+    },
+]
+
+MODEL_ASSIGNMENT_DEFINITIONS: List[Dict[str, Any]] = [
+    {
+        "key": "tagging",
+        "label": "标签提取模型",
+        "description": "负责为内容生成关键词标签。",
+        "task_type": "llm",
+        "default_provider": "ollama",
+        "default_model": "qwen3:8b",
+    },
+    {
+        "key": "short_summary",
+        "label": "短总结模型",
+        "description": "负责生成信息流卡片上的短摘要。",
+        "task_type": "llm",
+        "default_provider": "ollama",
+        "default_model": "qwen3:8b",
+    },
+    {
+        "key": "long_summary",
+        "label": "长总结模型",
+        "description": "负责生成详细的 AI Markdown 总结。",
+        "task_type": "llm",
+        "default_provider": "ollama",
+        "default_model": "qwen3:8b",
+    },
+    {
+        "key": "embedding",
+        "label": "向量模型",
+        "description": "负责全文向量化，用于语义检索与相似度匹配。",
+        "task_type": "embedding",
+        "default_provider": "ollama",
+        "default_model": "nomic-embed-text-v2-moe",
+    },
+]
+
+
+def _normalize_ollama_host(host: str) -> str:
+    normalized = (host or "http://127.0.0.1:11434").rstrip("/")
+    if normalized.endswith("/v1"):
+        normalized = normalized[:-3]
+    return normalized
+
+
+def parse_tag_list(raw_text: str) -> List[str]:
+    parts = re.split(r"[,，\n]+", raw_text or "")
+    cleaned: List[str] = []
+    for part in parts:
+        tag = part.strip().strip("#")
+        if not tag or tag in cleaned:
+            continue
+        cleaned.append(tag)
+    return cleaned[:8]
+
+
+def _provider_config_key(provider_id: str) -> str:
+    return f"provider_config::{provider_id}"
+
+
+def _assignment_key(purpose: str) -> str:
+    return f"assignment::{purpose}"
+
+
+def _catalog_map() -> Dict[str, Dict[str, Any]]:
+    return {provider["id"]: provider for provider in MODEL_PROVIDER_CATALOG}
+
+
+async def _load_json_config(key: str, default: Dict[str, Any]) -> Dict[str, Any]:
+    raw_value = await ConfigManager.get_config(
+        MODEL_SETTINGS_NAMESPACE,
+        key,
+        default=None,
+        user_id=SYSTEM_CONFIG_USER_ID,
+    )
+    if not raw_value:
+        return dict(default)
+    try:
+        parsed = json.loads(raw_value)
+        if isinstance(parsed, dict):
+            return parsed
+    except json.JSONDecodeError:
+        pass
+    return dict(default)
+
+
+async def _save_json_config(key: str, value: Dict[str, Any], description: str) -> bool:
+    return await ConfigManager.set_config(
+        MODEL_SETTINGS_NAMESPACE,
+        key,
+        json.dumps(value, ensure_ascii=True),
+        description=description,
+        user_id=SYSTEM_CONFIG_USER_ID,
+    )
+
+
+async def get_model_provider_state() -> Dict[str, Any]:
+    provider_states: List[Dict[str, Any]] = []
+    for provider in MODEL_PROVIDER_CATALOG:
+        defaults = {
+            field["key"]: field.get("default")
+            for field in provider.get("config_fields", [])
+        }
+        config = await _load_json_config(_provider_config_key(provider["id"]), defaults)
+        secret_preview = None
+        api_key = config.get("api_key")
+        if isinstance(api_key, str) and api_key:
+            secret_preview = f"{api_key[:4]}..." if len(api_key) > 4 else api_key
+            config["api_key"] = ""
+
+        provider_states.append(
+            {
+                **provider,
+                "config": config,
+                "is_configured": bool(api_key) if "api_key" in defaults else bool(config.get("host")),
+                "secret_preview": secret_preview,
+            }
+        )
+
+    assignments = await get_model_assignments()
+    return {
+        "providers": provider_states,
+        "assignments": assignments,
+    }
+
+
+async def save_model_provider_config(provider_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    provider = _catalog_map().get(provider_id)
+    if not provider:
+        raise ValueError("未知模型提供商")
+
+    defaults = {
+        field["key"]: field.get("default")
+        for field in provider.get("config_fields", [])
+    }
+    current = await _load_json_config(_provider_config_key(provider_id), defaults)
+
+    merged = dict(current)
+    for field in provider.get("config_fields", []):
+        key = field["key"]
+        if key not in payload:
+            continue
+        value = payload.get(key)
+        if field.get("secret") and (value is None or str(value).strip() == ""):
+            continue
+        merged[key] = value
+
+    success = await _save_json_config(
+        _provider_config_key(provider_id),
+        merged,
+        description=f"模型提供商配置: {provider['name']}",
+    )
+    if not success:
+        raise ValueError("保存模型提供商配置失败")
+
+    return await get_model_provider_state()
+
+
+async def get_model_assignments() -> List[Dict[str, Any]]:
+    assignments: List[Dict[str, Any]] = []
+    for item in MODEL_ASSIGNMENT_DEFINITIONS:
+        default_value = {
+            "provider": item["default_provider"],
+            "model": item["default_model"],
+        }
+        config = await _load_json_config(_assignment_key(item["key"]), default_value)
+        assignments.append(
+            {
+                **item,
+                "provider": config.get("provider", item["default_provider"]),
+                "model": config.get("model", item["default_model"]),
+            }
+        )
+    return assignments
+
+
+async def save_model_assignments(assignments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    definition_map = {item["key"]: item for item in MODEL_ASSIGNMENT_DEFINITIONS}
+    for assignment in assignments:
+        key = assignment.get("key")
+        if key not in definition_map:
+            continue
+        definition = definition_map[key]
+        payload = {
+            "provider": assignment.get("provider", definition["default_provider"]),
+            "model": assignment.get("model", definition["default_model"]),
+        }
+        success = await _save_json_config(
+            _assignment_key(key),
+            payload,
+            description=f"系统模型用途配置: {definition['label']}",
+        )
+        if not success:
+            raise ValueError(f"保存模型用途失败: {key}")
+    return await get_model_assignments()
+
+
+async def _resolve_assignment(purpose: str) -> Dict[str, Any]:
+    assignments = await get_model_assignments()
+    for assignment in assignments:
+        if assignment["key"] == purpose:
+            return assignment
+    raise ValueError(f"未知模型用途: {purpose}")
+
+
+async def _build_llm_provider(purpose: str):
+    assignment = await _resolve_assignment(purpose)
+    provider_id = assignment["provider"]
+    model = assignment["model"]
+    provider_config = await _load_json_config(_provider_config_key(provider_id), {})
+
+    if provider_id == "ollama":
+        return OllamaProvider(_normalize_ollama_host(provider_config.get("host", "http://127.0.0.1:11434")), model), model
+
+    api_key = provider_config.get("api_key")
+    base_url = provider_config.get("base_url", "https://api.openai.com/v1")
+    if not api_key:
+        raise ValueError(f"模型提供商 [{provider_id}] 尚未配置 API Key")
+    return OpenAIProvider(api_key=api_key, base_url=base_url, model=model), model
+
+
+async def generate_summary(text: str, length: str = "short") -> Tuple[str, str]:
+    purpose = "short_summary" if length == "short" else "long_summary"
+    provider, model_name = await _build_llm_provider(purpose)
+    summary = await provider.generate_summary(text, length=length)
+    return summary, model_name
+
+
+async def extract_tags(text: str) -> Tuple[List[str], str]:
+    provider, model_name = await _build_llm_provider("tagging")
+    tags = await provider.extract_tags(text)
+    return tags, model_name
+
+
+async def embed_text(text: str) -> Tuple[List[float], str]:
+    assignment = await _resolve_assignment("embedding")
+    provider_id = assignment["provider"]
+    model_name = assignment["model"]
+    provider_config = await _load_json_config(_provider_config_key(provider_id), {})
+
+    if provider_id == "ollama":
+        client = OllamaEmbeddings(
+            model=model_name,
+            base_url=_normalize_ollama_host(provider_config.get("host", "http://127.0.0.1:11434")),
+        )
+        vector = await asyncio.to_thread(client.embed_query, text)
+        return vector, model_name
+
+    api_key = provider_config.get("api_key")
+    base_url = provider_config.get("base_url", "https://api.openai.com/v1")
+    if not api_key:
+        raise ValueError(f"模型提供商 [{provider_id}] 尚未配置 API Key")
+
+    client = openai.AsyncOpenAI(api_key=api_key, base_url=base_url)
+    response = await client.embeddings.create(model=model_name, input=text)
+    return response.data[0].embedding, model_name

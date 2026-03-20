@@ -1,5 +1,17 @@
 import openai
 from ..base import BaseLLMProvider
+import re
+
+
+def _parse_tag_list(raw_text: str) -> list[str]:
+    parts = re.split(r"[,，\n]+", raw_text or "")
+    cleaned: list[str] = []
+    for part in parts:
+        tag = part.strip().strip("#")
+        if not tag or tag in cleaned:
+            continue
+        cleaned.append(tag)
+    return cleaned[:8]
 
 class OllamaProvider(BaseLLMProvider):
     def __init__(self, host: str, model: str):
@@ -31,4 +43,4 @@ class OllamaProvider(BaseLLMProvider):
             model=self.model_name,
             messages=[{"role": "user", "content": f"提取3个关键词，逗号隔开：\n{text[:500]}"}]
         )
-        return [t.strip() for t in response.choices[0].message.content.split(",")]
+        return _parse_tag_list(response.choices[0].message.content)

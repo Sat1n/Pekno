@@ -6,9 +6,9 @@ import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Blocks, User, ChevronRight, Database, Trash2, Loader2, HardDrive, Puzzle, Plus, MailPlus, LogOut, KeyRound, Copy } from 'lucide-vue-next'
+import { Blocks, User, ChevronRight, Database, Trash2, Loader2, HardDrive, Puzzle, Plus, MailPlus, LogOut, KeyRound, Copy, BrainCircuit, SlidersHorizontal, Cpu, Save } from 'lucide-vue-next'
 import { usePluginStore } from '@/store/usePluginStore'
-import { changePassword, clearStoredToken, createInvitationCode, getDataSources, getInvitationCodes, getStoredAuthUser, clearDataSource, type DataSourceStat, type InvitationCodeInfo } from '@/lib/api'
+import { changePassword, clearStoredToken, createInvitationCode, getDataSources, getInvitationCodes, getModelAssignments, getModelProviders, getStoredAuthUser, clearDataSource, saveModelAssignments, saveModelProvider, type DataSourceStat, type InvitationCodeInfo, type ModelAssignmentInfo, type ModelProviderInfo } from '@/lib/api'
 import { useToast } from '@/components/ui/toast/use-toast'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import PluginInstallDialog from './PluginInstallDialog.vue'
@@ -31,6 +31,14 @@ const isClearingData = ref<Record<string, boolean>>({})
 const invitations = ref<InvitationCodeInfo[]>([])
 const isLoadingInvitations = ref(false)
 const isCreatingInvitation = ref(false)
+const modelProviders = ref<ModelProviderInfo[]>([])
+const modelAssignments = ref<ModelAssignmentInfo[]>([])
+const isLoadingModels = ref(false)
+const isSavingModelProvider = ref(false)
+const isSavingModelAssignments = ref(false)
+const selectedProviderId = ref('ollama')
+const providerDraft = ref<Record<string, string>>({})
+const modelSettingsTab = ref<'providers' | 'assignments'>('providers')
 
 const currentPassword = ref('')
 const newPassword = ref('')
@@ -49,6 +57,7 @@ const menuItems = computed(() => {
   if (isAdmin.value) {
     return [
       { id: 'plugins', label: '插件管理', icon: Blocks },
+      { id: 'models', label: '模型设置', icon: BrainCircuit },
       { id: 'data', label: '数据管理', icon: Database },
       { id: 'invites', label: '邀请管理', icon: MailPlus },
       { id: 'account', label: '账户信息', icon: User },
@@ -89,6 +98,33 @@ async function loadInvitations() {
   }
 }
 
+const selectedProvider = computed(() => {
+  return modelProviders.value.find((provider) => provider.id === selectedProviderId.value) || null
+})
+
+async function loadModelSettings() {
+  if (!isAdmin.value) return
+  isLoadingModels.value = true
+  try {
+    const providerState = await getModelProviders()
+    modelProviders.value = providerState.providers
+    modelAssignments.value = providerState.assignments
+    if (!selectedProvider.value && providerState.providers.length > 0) {
+      selectedProviderId.value = providerState.providers[0].id
+    }
+    providerDraft.value = { ...(selectedProvider.value?.config || {}) }
+  } catch (error) {
+    console.error('加载模型设置失败:', error)
+    toast({
+      title: '加载失败',
+      description: '无法获取模型设置',
+      variant: 'destructive',
+    })
+  } finally {
+    isLoadingModels.value = false
+  }
+}
+
 async function handleCreateInvitation() {
   isCreatingInvitation.value = true
   try {
@@ -123,6 +159,52 @@ async function copyInviteCode(code: string) {
       description: '请手动复制邀请码',
       variant: 'destructive',
     })
+  }
+}
+
+watch(selectedProvider, (provider) => {
+  providerDraft.value = { ...(provider?.config || {}) }
+})
+
+async function handleSaveModelProvider() {
+  if (!selectedProvider.value) return
+  isSavingModelProvider.value = true
+  try {
+    const state = await saveModelProvider(selectedProvider.value.id, providerDraft.value)
+    modelProviders.value = state.providers
+    modelAssignments.value = state.assignments
+    toast({
+      title: '提供商配置已保存',
+      description: selectedProvider.value.name,
+    })
+  } catch (error: any) {
+    toast({
+      title: '保存失败',
+      description: error?.response?.data?.detail || '无法保存模型提供商配置',
+      variant: 'destructive',
+    })
+  } finally {
+    isSavingModelProvider.value = false
+  }
+}
+
+async function handleSaveAssignments() {
+  isSavingModelAssignments.value = true
+  try {
+    const response = await saveModelAssignments(modelAssignments.value)
+    modelAssignments.value = response.assignments
+    toast({
+      title: '系统模型设置已保存',
+      description: '新的模型用途配置已生效',
+    })
+  } catch (error: any) {
+    toast({
+      title: '保存失败',
+      description: error?.response?.data?.detail || '无法保存系统模型设置',
+      variant: 'destructive',
+    })
+  } finally {
+    isSavingModelAssignments.value = false
   }
 }
 
@@ -206,6 +288,9 @@ watch(
 )
 
 watch(activeTab, (newTab) => {
+  if (newTab === 'models') {
+    void loadModelSettings()
+  }
   if (newTab === 'data') {
     void loadDataSources()
   }
@@ -272,6 +357,122 @@ watch(activeTab, (newTab) => {
                       </div>
                     </div>
                     <ChevronRight class="w-4 h-4 text-muted-foreground group-hover:translate-x-1 transition-transform" />
+                  </div>
+                </div>
+              </div>
+
+              <div v-else-if="activeTab === 'models'" class="space-y-8 animate-in fade-in slide-in-from-right-4 duration-300">
+                <div class="flex items-center justify-between">
+                  <div>
+                    <h3 class="text-2xl font-bold tracking-tight">模型设置</h3>
+                    <p class="text-muted-foreground text-sm mt-1 text-balance">统一管理服务器的模型提供商，以及标签、总结、向量检索等用途所使用的模型。</p>
+                  </div>
+                </div>
+
+                <div class="flex items-center gap-2">
+                  <Button :variant="modelSettingsTab === 'providers' ? 'default' : 'outline'" @click="modelSettingsTab = 'providers'">
+                    <Cpu class="w-4 h-4 mr-2" />
+                    模型提供商
+                  </Button>
+                  <Button :variant="modelSettingsTab === 'assignments' ? 'default' : 'outline'" @click="modelSettingsTab = 'assignments'">
+                    <SlidersHorizontal class="w-4 h-4 mr-2" />
+                    系统模型设置
+                  </Button>
+                </div>
+
+                <div v-if="isLoadingModels" class="flex justify-center items-center py-12">
+                  <Loader2 class="w-8 h-8 animate-spin text-muted-foreground" />
+                </div>
+
+                <template v-else-if="modelSettingsTab === 'providers'">
+                  <div class="grid grid-cols-1 xl:grid-cols-[1.4fr_0.9fr] gap-6">
+                    <div class="space-y-4">
+                      <div class="grid md:grid-cols-2 gap-4">
+                        <button
+                          v-for="provider in modelProviders"
+                          :key="provider.id"
+                          class="text-left rounded-2xl border p-5 transition-all bg-card hover:border-primary/40"
+                          :class="provider.id === selectedProviderId ? 'border-primary shadow-md bg-primary/5' : ''"
+                          @click="selectedProviderId = provider.id"
+                        >
+                          <div class="flex items-center justify-between gap-3">
+                            <div>
+                              <div class="font-semibold text-base">{{ provider.name }}</div>
+                              <div class="text-xs text-muted-foreground mt-1">{{ provider.badge }}</div>
+                            </div>
+                            <div class="h-2.5 w-2.5 rounded-full" :class="provider.is_configured ? 'bg-green-500' : 'bg-muted-foreground/40'"></div>
+                          </div>
+                          <p class="text-sm text-muted-foreground leading-relaxed mt-3">{{ provider.description }}</p>
+                          <div class="flex flex-wrap gap-2 mt-4">
+                            <span v-for="capability in provider.capabilities" :key="capability" class="rounded-full bg-muted px-2.5 py-1 text-[11px] font-medium">
+                              {{ capability }}
+                            </span>
+                          </div>
+                        </button>
+                      </div>
+                    </div>
+
+                    <div v-if="selectedProvider" class="rounded-2xl border bg-card p-6 space-y-5 h-fit sticky top-0">
+                      <div>
+                        <h4 class="text-lg font-semibold">{{ selectedProvider.name }}</h4>
+                        <p class="text-sm text-muted-foreground mt-1">{{ selectedProvider.description }}</p>
+                      </div>
+
+                      <div v-for="field in selectedProvider.config_fields" :key="field.key" class="space-y-2">
+                        <Label>{{ field.label }}</Label>
+                        <Input
+                          v-model="providerDraft[field.key]"
+                          :type="field.secret ? 'password' : 'text'"
+                          :placeholder="field.default || ''"
+                        />
+                        <p v-if="field.secret && selectedProvider.secret_preview" class="text-xs text-muted-foreground">
+                          当前已保存: <code class="bg-muted px-1.5 py-0.5 rounded text-[10px]">{{ selectedProvider.secret_preview }}</code>
+                        </p>
+                      </div>
+
+                      <Button class="w-full" @click="handleSaveModelProvider" :disabled="isSavingModelProvider">
+                        <Loader2 v-if="isSavingModelProvider" class="w-4 h-4 mr-2 animate-spin" />
+                        <Save v-else class="w-4 h-4 mr-2" />
+                        保存提供商配置
+                      </Button>
+                    </div>
+                  </div>
+                </template>
+
+                <div v-else class="space-y-4">
+                  <div
+                    v-for="assignment in modelAssignments"
+                    :key="assignment.key"
+                    class="rounded-2xl border bg-card p-5 space-y-4"
+                  >
+                    <div>
+                      <div class="font-semibold text-base">{{ assignment.label }}</div>
+                      <p class="text-sm text-muted-foreground mt-1">{{ assignment.description }}</p>
+                    </div>
+
+                    <div class="grid md:grid-cols-2 gap-4">
+                      <div class="space-y-2">
+                        <Label>模型提供商</Label>
+                        <select v-model="assignment.provider" class="w-full rounded-md border bg-background px-3 py-2 text-sm">
+                          <option v-for="provider in modelProviders" :key="provider.id" :value="provider.id">
+                            {{ provider.name }}
+                          </option>
+                        </select>
+                      </div>
+
+                      <div class="space-y-2">
+                        <Label>模型名称</Label>
+                        <Input v-model="assignment.model" :placeholder="assignment.default_model" />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="flex justify-end">
+                    <Button @click="handleSaveAssignments" :disabled="isSavingModelAssignments">
+                      <Loader2 v-if="isSavingModelAssignments" class="w-4 h-4 mr-2 animate-spin" />
+                      <Save v-else class="w-4 h-4 mr-2" />
+                      保存系统模型设置
+                    </Button>
                   </div>
                 </div>
               </div>

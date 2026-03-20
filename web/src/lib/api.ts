@@ -145,6 +145,37 @@ export interface InvitationCodeInfo {
   created_at: string
 }
 
+export interface ModelProviderField {
+  key: string
+  label: string
+  type: 'string'
+  secret?: boolean
+  default?: string
+}
+
+export interface ModelProviderInfo {
+  id: string
+  name: string
+  description: string
+  badge?: string
+  capabilities: string[]
+  config_fields: ModelProviderField[]
+  config: Record<string, string>
+  is_configured: boolean
+  secret_preview?: string | null
+}
+
+export interface ModelAssignmentInfo {
+  key: string
+  label: string
+  description: string
+  task_type: 'llm' | 'embedding'
+  default_provider: string
+  default_model: string
+  provider: string
+  model: string
+}
+
 // 搜索参数接口
 export interface SearchParams {
   q?: string
@@ -249,6 +280,28 @@ export async function createInvitationCode(): Promise<InvitationCodeInfo> {
 
 export async function getInvitationCodes(): Promise<InvitationCodeInfo[]> {
   const response = await apiClient.get<InvitationCodeInfo[]>('/api/admin/invitations')
+  return response.data
+}
+
+export async function getModelProviders(): Promise<{ providers: ModelProviderInfo[]; assignments: ModelAssignmentInfo[] }> {
+  const response = await apiClient.get('/api/admin/models/providers')
+  return response.data
+}
+
+export async function saveModelProvider(providerId: string, payload: Record<string, string>): Promise<{ providers: ModelProviderInfo[]; assignments: ModelAssignmentInfo[] }> {
+  const response = await apiClient.put(`/api/admin/models/providers/${providerId}`, payload)
+  return response.data
+}
+
+export async function getModelAssignments(): Promise<{ assignments: ModelAssignmentInfo[] }> {
+  const response = await apiClient.get('/api/admin/models/assignments')
+  return response.data
+}
+
+export async function saveModelAssignments(assignments: ModelAssignmentInfo[]): Promise<{ assignments: ModelAssignmentInfo[] }> {
+  const response = await apiClient.put('/api/admin/models/assignments', {
+    assignments,
+  })
   return response.data
 }
 

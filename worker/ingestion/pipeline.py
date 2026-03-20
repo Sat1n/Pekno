@@ -45,8 +45,9 @@ class IngestionPipeline:
         feature_text = "\n".join(part for part in (core_text, " ".join(item.tags)) if part)
         
         # 2. 调用 Embedding 服务
-        self.logger.info(f"🧠 [Embed] 正在使用 [{self.ai.embed_model_name}] 计算向量...")
-        vector = await self.ai.embed.get_vector(feature_text)
+        embed_model_name = await self.ai.get_embedding_model_name()
+        self.logger.info(f"🧠 [Embed] 正在使用 [{embed_model_name}] 计算向量...")
+        vector = await self.ai.get_vector(feature_text)
 
         # 3. 写入数据库
         async with AsyncSessionLocal() as session:
@@ -85,14 +86,14 @@ class IngestionPipeline:
         self.logger.info(f"✨ 向量数据已成功持久化: {item.id} (Vector Dim: {len(vector)})")
 
     async def _generate_summary(self, core_text: str):
-        model = self.ai.model_name
+        model = await self.ai.get_summary_model_name("short")
         self.logger.info(f"🤖 [LLM] 正在请求模型 [{model}] 生成摘要...")
-        return await self.ai.llm.provider.generate_summary(core_text, length="short")
+        return await self.ai.generate_summary(core_text, length="short")
 
     async def _auto_tagging(self, core_text: str):
-        model = self.ai.model_name
+        model = await self.ai.get_tagging_model_name()
         self.logger.debug(f"DEBUG - [LLM] 正在使用 [{model}] 提取标签...")
-        return await self.ai.llm.provider.extract_tags(core_text)
+        return await self.ai.extract_tags(core_text)
 
 @broker.task(task_name="process_new_item")
 async def process_new_item_task(item_dict: dict):

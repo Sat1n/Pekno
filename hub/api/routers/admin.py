@@ -1,9 +1,10 @@
 import secrets
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 
 from hub.api.schemas import InvitationCodeResponse, InvitationCreateResponse
+from hub.core import model_settings
 from hub.core.security import require_admin
 from shared.database import AsyncSessionLocal
 from shared.models import InvitationCodeORM, UserORM
@@ -60,3 +61,32 @@ async def list_invitations(current_user=Depends(require_admin)):
         )
         for invitation, username in rows
     ]
+
+
+@router.get("/models/providers")
+async def get_model_providers(current_user=Depends(require_admin)):
+    return await model_settings.get_model_provider_state()
+
+
+@router.put("/models/providers/{provider_id}")
+async def update_model_provider(provider_id: str, payload: dict, current_user=Depends(require_admin)):
+    try:
+        return await model_settings.save_model_provider_config(provider_id, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.get("/models/assignments")
+async def get_model_assignments(current_user=Depends(require_admin)):
+    return {"assignments": await model_settings.get_model_assignments()}
+
+
+@router.put("/models/assignments")
+async def update_model_assignments(payload: dict, current_user=Depends(require_admin)):
+    assignments = payload.get("assignments")
+    if not isinstance(assignments, list):
+        raise HTTPException(status_code=400, detail="assignments 必须为数组")
+    try:
+        return {"assignments": await model_settings.save_model_assignments(assignments)}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
