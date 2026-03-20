@@ -40,7 +40,7 @@ async def get_items(
     async with AsyncSessionLocal() as session:
         stmt = (
             select(ItemORM, UserItemStateORM)
-            .outerjoin(
+            .join(
                 UserItemStateORM,
                 and_(
                     UserItemStateORM.item_id == ItemORM.id,
@@ -78,16 +78,10 @@ async def toggle_item_star(item_id: str, current_user=Depends(get_current_user))
             state = result.scalar_one_or_none()
 
             if state is None:
-                state = UserItemStateORM(
-                    user_id=current_user["id"],
-                    item_id=item_id,
-                    is_read=False,
-                    is_starred=True,
-                )
-                session.add(state)
-            else:
-                state.is_starred = not state.is_starred
-                state.updated_at = now_in_app_timezone_naive()
+                raise HTTPException(status_code=404, detail="当前用户无权操作该条目")
+
+            state.is_starred = not state.is_starred
+            state.updated_at = now_in_app_timezone_naive()
 
     return ItemStateResponse(
         item_id=item_id,
@@ -107,7 +101,10 @@ async def mark_items_read_batch(payload: ReadBatchRequest, current_user=Depends(
     async with AsyncSessionLocal() as session:
         async with session.begin():
             valid_items_result = await session.execute(
-                select(ItemORM.id).where(ItemORM.id.in_(item_ids))
+                select(UserItemStateORM.item_id).where(
+                    UserItemStateORM.user_id == current_user["id"],
+                    UserItemStateORM.item_id.in_(item_ids),
+                )
             )
             valid_item_ids = valid_items_result.scalars().all()
             if not valid_item_ids:
@@ -148,6 +145,16 @@ async def delete_item(item_id: str, current_user=Depends(get_current_user)):
 
 @router.post("/{item_id}/summarize")
 async def summarize_item(item_id: str, current_user=Depends(get_current_user)):
+    async with AsyncSessionLocal() as session:
+        link = await session.execute(
+            select(UserItemStateORM).where(
+                UserItemStateORM.user_id == current_user["id"],
+                UserItemStateORM.item_id == item_id,
+            )
+        )
+        if link.scalar_one_or_none() is None:
+            raise HTTPException(status_code=404, detail="当前用户无权访问该条目")
+
     from worker.plugins.pipeline import summarize_repo_task
     import uuid
 
@@ -164,7 +171,15 @@ async def summarize_item(item_id: str, current_user=Depends(get_current_user)):
 @router.get("/{item_id}/summary_status")
 async def get_item_summary_status(item_id: str, current_user=Depends(get_current_user)):
     async with AsyncSessionLocal() as session:
-        item = await session.get(ItemORM, item_id)
+        result = await session.execute(
+            select(ItemORM)
+            .join(UserItemStateORM, UserItemStateORM.item_id == ItemORM.id)
+            .where(
+                UserItemStateORM.user_id == current_user["id"],
+                ItemORM.id == item_id,
+            )
+        )
+        item = result.scalar_one_or_none()
 
     if not item:
         return {"item_id": item_id, "status": "not_found"}

@@ -272,13 +272,15 @@ async def save_plugin_config(plugin_id: str, config: Dict[str, Any], current_use
             
         str_val = str(val) if not isinstance(val, bool) else ("true" if val else "false")
         
-        await ConfigManager.set_config(
+        success = await ConfigManager.set_config(
             plugin_id, 
             key, 
             str_val, 
             description=schema.get("label", key),
             user_id=current_user["id"],
         )
+        if not success:
+            raise HTTPException(status_code=500, detail=f"保存配置失败: {key}")
         
     return {"status": "success", "message": f"{plugin.manifest.get('name')} 配置已保存"}
 

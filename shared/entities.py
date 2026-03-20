@@ -43,3 +43,4 @@ class UniversalItem(BaseModel):
     status: ItemStatus = ItemStatus.inbox
     metadata_extra: Dict[str, Any] = Field(default_factory=dict)
     auto_short_summary: bool = False
+    source_user_id: Optional[str] = None

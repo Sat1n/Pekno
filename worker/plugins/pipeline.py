@@ -6,8 +6,9 @@ from shared.logger import worker_log
 from worker.broker import broker
 from shared.config import ConfigManager, ConfigKeys
 from shared.database import AsyncSessionLocal
-from shared.models import ItemORM
+from shared.models import ItemORM, UserItemStateORM
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert
 import datetime
 import re
 
@@ -87,6 +88,17 @@ async def run_plugin_pipeline_task(plugin_id: str, limit: int = None, user_id: s
                 existing_item_id = existing_item.scalar_one_or_none()
 
                 if existing_item_id is not None:
+                    if user_id:
+                        await session.execute(
+                            insert(UserItemStateORM).values(
+                                user_id=user_id,
+                                item_id=item_id,
+                                is_read=False,
+                                is_starred=False,
+                            ).on_conflict_do_nothing(
+                                index_elements=["user_id", "item_id"]
+                            )
+                        )
                     cache_hit_count += 1
                     worker_log.info(f"⏭️ [{plugin_id}] 命中历史数据，跳过: {normalized['title']} (连续命中 {cache_hit_count})")
                     if cache_hit_count >= 3:
@@ -113,7 +125,8 @@ async def run_plugin_pipeline_task(plugin_id: str, limit: int = None, user_id: s
                     retention_hours=int(config_dict.get("retention_hours", normalized.get("retention_hours", 168))),
                     capabilities=["summarize"] if normalized.get("content_text") or ai_text else [],
                     metadata_extra=final_metadata,
-                    auto_short_summary=bool(config_dict.get("auto_short_summary", normalized.get("auto_short_summary", False)))
+                    auto_short_summary=bool(config_dict.get("auto_short_summary", normalized.get("auto_short_summary", False))),
+                    source_user_id=user_id,
                 )
 
                 worker_log.info(f"📤 [{plugin_id}] 发送至 Pipeline 处理: {item.title}")

@@ -1,8 +1,8 @@
 import asyncio
 from typing import List
-from sqlalchemy import select, text, case, cast, Float
+from sqlalchemy import select, text, case, cast, Float, and_
 from shared.database import AsyncSessionLocal
-from shared.models import ItemORM
+from shared.models import ItemORM, UserItemStateORM
 from hub.core.llm.service import EmbeddingService
 from shared.logger import hub_log
 
@@ -10,7 +10,7 @@ class SearchService:
     def __init__(self):
         self.embed_service = EmbeddingService()
 
-    async def vector_search(self, query_text: str, limit: int = 5):
+    async def vector_search(self, query_text: str, user_id: str, limit: int = 5):
         """纯向量搜索"""
         query_vector = await self.embed_service.get_vector(query_text)
         async with AsyncSessionLocal() as session:
@@ -20,13 +20,20 @@ class SearchService:
                     ItemORM,
                     (1 - ItemORM.embedding.cosine_distance(query_vector)).label("score")
                 )
+                .join(
+                    UserItemStateORM,
+                    and_(
+                        UserItemStateORM.item_id == ItemORM.id,
+                        UserItemStateORM.user_id == user_id,
+                    ),
+                )
                 .order_by(text("score DESC"))
                 .limit(limit)
             )
             result = await session.execute(stmt)
             return result.all()
 
-    async def hybrid_search(self, query_text: str, limit: int = 5):
+    async def hybrid_search(self, query_text: str, user_id: str, limit: int = 5):
         """混合搜索 2.0：修复 label 报错，使用原生 case 表达式"""
         query_vector = await self.embed_service.get_vector(query_text)
         
@@ -48,6 +55,13 @@ class SearchService:
                     ItemORM,
                     v_score,
                     t_score
+                )
+                .join(
+                    UserItemStateORM,
+                    and_(
+                        UserItemStateORM.item_id == ItemORM.id,
+                        UserItemStateORM.user_id == user_id,
+                    ),
                 )
                 .order_by((v_score + t_score).desc())
                 .limit(limit)

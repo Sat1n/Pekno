@@ -2,7 +2,7 @@ from shared.entities import UniversalItem
 from shared.logger import worker_log
 from worker.broker import broker
 from shared.database import AsyncSessionLocal  # 导入会话工厂
-from shared.models import ItemORM     # 导入数据库模型
+from shared.models import ItemORM, UserItemStateORM     # 导入数据库模型
 from sqlalchemy.dialects.postgresql import insert
 from hub.core.llm.service import LLMManager
 
@@ -71,6 +71,17 @@ class IngestionPipeline:
                     set_={k: v for k, v in data.items() if k != 'id'}
                 )
                 await session.execute(stmt)
+
+                if item.source_user_id:
+                    link_stmt = insert(UserItemStateORM).values(
+                        user_id=item.source_user_id,
+                        item_id=item.id,
+                        is_read=False,
+                        is_starred=False,
+                    ).on_conflict_do_nothing(
+                        index_elements=['user_id', 'item_id']
+                    )
+                    await session.execute(link_stmt)
         self.logger.info(f"✨ 向量数据已成功持久化: {item.id} (Vector Dim: {len(vector)})")
 
     async def _generate_summary(self, core_text: str):

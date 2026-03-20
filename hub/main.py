@@ -5,7 +5,7 @@ from typing import List, Optional
 from datetime import datetime
 from hub.core.search import SearchService
 from shared.database import AsyncSessionLocal
-from shared.models import ItemORM
+from shared.models import ItemORM, UserItemStateORM
 from hub.api.schemas import FrontendSearchItem, SyncRequest
 from shared.config import ConfigManager, ConfigKeys
 from sqlalchemy import select, delete
@@ -64,7 +64,11 @@ async def hybrid_search_api(
     if not q:
         async with AsyncSessionLocal() as session:
             result = await session.execute(
-                select(ItemORM).order_by(ItemORM.created_at.desc()).limit(20)
+                select(ItemORM)
+                .join(UserItemStateORM, UserItemStateORM.item_id == ItemORM.id)
+                .where(UserItemStateORM.user_id == current_user["id"])
+                .order_by(ItemORM.created_at.desc())
+                .limit(20)
             )
             items = result.scalars().all()
             # 转换为前端格式
@@ -115,7 +119,7 @@ async def hybrid_search_api(
             return search_results
     
     # 有搜索词时，执行混合搜索
-    results = await search_service.hybrid_search(q, limit=20)
+    results = await search_service.hybrid_search(q, current_user["id"], limit=20)
     
     search_results = []
     for item, v_score, t_score in results:
@@ -194,6 +198,9 @@ async def search_github_items(
     async with AsyncSessionLocal() as session:
         # 查询 GitHub 来源的数据
         query = select(ItemORM).where(ItemORM.source_type == "github_star")
+        query = query.join(UserItemStateORM, UserItemStateORM.item_id == ItemORM.id).where(
+            UserItemStateORM.user_id == current_user["id"]
+        )
         
         if q:
             # 如果有搜索词，添加标题和摘要的模糊搜索

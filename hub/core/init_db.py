@@ -19,6 +19,34 @@ async def ensure_runtime_tables():
         await conn.execute(text("ALTER TABLE IF EXISTS configs ADD COLUMN IF NOT EXISTS id VARCHAR"))
         await conn.execute(text("UPDATE configs SET user_id = 'system' WHERE user_id IS NULL"))
         await conn.execute(text("UPDATE configs SET id = md5(plugin_id || ':' || key || ':' || user_id) WHERE id IS NULL"))
+        await conn.execute(text("ALTER TABLE IF EXISTS configs ALTER COLUMN user_id SET DEFAULT 'system'"))
+        await conn.execute(text("ALTER TABLE IF EXISTS configs ALTER COLUMN id SET NOT NULL"))
+        await conn.execute(text("""
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'configs_pkey'
+          AND conrelid = 'configs'::regclass
+    ) THEN
+        ALTER TABLE configs DROP CONSTRAINT configs_pkey;
+    END IF;
+END $$;
+"""))
+        await conn.execute(text("""
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'configs_pkey'
+          AND conrelid = 'configs'::regclass
+    ) THEN
+        ALTER TABLE configs ADD CONSTRAINT configs_pkey PRIMARY KEY (id);
+    END IF;
+END $$;
+"""))
         await conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_configs_plugin_user_key ON configs (plugin_id, user_id, key)"))
         await conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_invitation_codes_code ON invitation_codes (code)"))
         await conn.execute(text("ALTER TABLE IF EXISTS invitation_codes ADD COLUMN IF NOT EXISTS used_by_user_id VARCHAR"))
