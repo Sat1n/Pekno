@@ -50,6 +50,14 @@ END $$;
         await conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_configs_plugin_user_key ON configs (plugin_id, user_id, key)"))
         await conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_invitation_codes_code ON invitation_codes (code)"))
         await conn.execute(text("ALTER TABLE IF EXISTS invitation_codes ADD COLUMN IF NOT EXISTS used_by_user_id VARCHAR"))
+        
+        # 确保内置插件始终存在于注册表中 (即使不运行 init_db 也能在第一次启动时载入)
+        hub_log.info("🌱 正在检查并补齐内置插件...")
+        await conn.execute(text("""
+            INSERT INTO plugins (plugin_id, name, module_path, is_enabled, version, installed_at)
+            VALUES ('github_stars', 'GitHub Stars', 'worker.plugins.github.plugin', true, '1.0.0', CURRENT_TIMESTAMP)
+            ON CONFLICT (plugin_id) DO NOTHING;
+        """))
 
 
 async def init_db():

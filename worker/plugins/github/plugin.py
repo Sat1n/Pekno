@@ -12,6 +12,7 @@ class GitHubStarsPlugin(BasePlugin):
         self._manifest = {
             "id": "github_stars",
             "name": "GitHub Stars",
+            "source_type": "github_star",
             "description": "同步你 Star 的 GitHub 仓库",
             "version": "1.0.0",
             "auto_sync_supported": True,

@@ -13,7 +13,7 @@ import { useToast } from '@/components/ui/toast/use-toast'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import PluginInstallDialog from './PluginInstallDialog.vue'
 
-const props = defineProps<{ open: boolean }>()
+const props = defineProps<{ open: boolean; initialTab?: string }>()
 defineEmits(['close', 'open-plugin-settings'])
 
 const router = useRouter()
@@ -333,7 +333,7 @@ watch(
   () => props.open,
   async (newVal) => {
     if (!newVal) return
-    activeTab.value = 'plugins'
+    activeTab.value = props.initialTab || 'plugins'
     await loadAllPlugins()
   }
 )

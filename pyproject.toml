@@ -24,6 +24,7 @@ dependencies = [
     "taskiq-redis>=1.2.2",
     "tzdata>=2025.3",
     "uvicorn>=0.41.0",
+    "dotenv>=0.9.9",
 ]
 
 [tool.pytest.ini_options]

@@ -132,8 +132,8 @@ MODEL_ASSIGNMENT_DEFINITIONS: List[Dict[str, Any]] = [
         "group": "当前工作流",
         "status": "active",
         "task_type": "llm",
-        "default_provider": "ollama",
-        "default_model": "qwen3:8b",
+        "default_provider": "",
+        "default_model": "",
     },
     {
         "key": "short_summary",
@@ -142,8 +142,8 @@ MODEL_ASSIGNMENT_DEFINITIONS: List[Dict[str, Any]] = [
         "group": "当前工作流",
         "status": "active",
         "task_type": "llm",
-        "default_provider": "ollama",
-        "default_model": "qwen3:8b",
+        "default_provider": "",
+        "default_model": "",
     },
     {
         "key": "long_summary",
@@ -152,8 +152,8 @@ MODEL_ASSIGNMENT_DEFINITIONS: List[Dict[str, Any]] = [
         "group": "当前工作流",
         "status": "active",
         "task_type": "llm",
-        "default_provider": "ollama",
-        "default_model": "qwen3:8b",
+        "default_provider": "",
+        "default_model": "",
     },
     {
         "key": "embedding",
@@ -162,8 +162,8 @@ MODEL_ASSIGNMENT_DEFINITIONS: List[Dict[str, Any]] = [
         "group": "当前工作流",
         "status": "active",
         "task_type": "embedding",
-        "default_provider": "ollama",
-        "default_model": "nomic-embed-text-v2-moe",
+        "default_provider": "",
+        "default_model": "",
     },
     {
         "key": "speech_to_text",
@@ -263,18 +263,32 @@ async def get_model_provider_state() -> Dict[str, Any]:
             field["key"]: field.get("default")
             for field in provider.get("config_fields", [])
         }
+        
+        raw_value = await ConfigManager.get_config(
+            MODEL_SETTINGS_NAMESPACE,
+            _provider_config_key(provider["id"]),
+            default=None,
+            user_id=SYSTEM_CONFIG_USER_ID,
+        )
+        is_configured_in_db = raw_value is not None
+        
         config = await _load_json_config(_provider_config_key(provider["id"]), defaults)
         secret_preview = None
         api_key = config.get("api_key")
         if isinstance(api_key, str) and api_key:
             secret_preview = f"{api_key[:4]}..." if len(api_key) > 4 else api_key
             config["api_key"] = ""
+            
+        if "api_key" in defaults:
+            is_configured = bool(api_key)
+        else:
+            is_configured = is_configured_in_db and bool(config.get("host"))
 
         provider_states.append(
             {
                 **provider,
                 "config": config,
-                "is_configured": bool(api_key) if "api_key" in defaults else bool(config.get("host")),
+                "is_configured": is_configured,
                 "secret_preview": secret_preview,
             }
         )

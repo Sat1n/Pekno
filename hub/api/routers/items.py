@@ -35,6 +35,7 @@ async def get_items(
     limit: Optional[int] = Query(default=None, ge=1),
     offset: int = Query(default=0, ge=0),
     starred_only: bool = Query(default=False),
+    source_type: Optional[str] = Query(default=None),
     current_user=Depends(get_current_user),
 ):
     async with AsyncSessionLocal() as session:
@@ -52,6 +53,8 @@ async def get_items(
         )
         if starred_only:
             stmt = stmt.where(UserItemStateORM.is_starred == True)
+        if source_type:
+            stmt = stmt.where(ItemORM.source_type == source_type)
         if limit is not None:
             stmt = stmt.limit(limit)
 

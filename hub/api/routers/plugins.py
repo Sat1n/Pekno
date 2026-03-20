@@ -195,6 +195,40 @@ async def uninstall_plugin(plugin_id: str, current_user=Depends(require_admin)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"卸载失败: {str(e)}")
 
+@router.get("/active")
+async def get_active_plugins(current_user=Depends(get_current_user)):
+    """获取当前用户已配置好的启用的插件列表 (用于前端顶级导航标签)"""
+    manifests = plugin_manager.get_all_manifests()
+    result = []
+    
+    for manifest in manifests:
+        plugin_id = manifest["id"]
+        source_type = manifest.get("source_type", plugin_id)
+        settings_schema = manifest.get("settings_schema", {})
+        
+        has_secret_field = any(s.get("secret") for s in settings_schema.values())
+        is_configured = True
+        
+        # 简单判断只要有 secret 配置上就是可用的 （你也可以根据实际必填逻辑调整）
+        if has_secret_field:
+            secret_configured = False
+            for key, schema in settings_schema.items():
+                if schema.get("secret"):
+                    val = await ConfigManager.get_config(plugin_id, key, user_id=current_user["id"])
+                    if val:
+                        secret_configured = True
+                        break
+            is_configured = secret_configured
+            
+        if is_configured:
+            result.append({
+                "id": plugin_id,
+                "name": manifest.get("name", plugin_id),
+                "source_type": source_type
+            })
+            
+    return result
+
 @router.get("")
 async def get_plugins(current_user=Depends(get_current_user)):
     """获取所有插件清单和当前配置"""

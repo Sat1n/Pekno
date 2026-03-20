@@ -222,14 +222,17 @@ export async function searchGitHub(params: SearchParams = {}): Promise<SearchRes
 export async function getItems(
   limit?: number,
   offset: number = 0,
-  options: { starredOnly?: boolean } = {}
+  options: { starredOnly?: boolean; source_type?: string } = {}
 ): Promise<RawItem[]> {
-  const params: Record<string, number | boolean> = { offset }
+  const params: Record<string, number | boolean | string> = { offset }
   if (typeof limit === 'number') {
     params.limit = limit
   }
   if (options.starredOnly) {
     params.starred_only = true
+  }
+  if (options.source_type) {
+    params.source_type = options.source_type
   }
 
   const response = await apiClient.get<RawItem[]>('/api/items', {
@@ -367,6 +370,17 @@ export interface PluginInfo {
   config: Record<string, any>
   has_token: boolean
   token_preview: string | null
+}
+
+export interface ActivePlugin {
+  id: string
+  name: string
+  source_type: string
+}
+
+export async function getActivePlugins(): Promise<ActivePlugin[]> {
+  const response = await apiClient.get<ActivePlugin[]>('/api/plugins/active')
+  return response.data
 }
 
 /**

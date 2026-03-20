@@ -95,6 +95,7 @@ const searchQuery = defineModel<string>('searchQuery', { default: '' })
 
 // 系统设置弹窗状态
 const isSettingsOpen = ref(false)
+const settingsTab = ref('plugins')
 
 // 插件设置弹窗状态
 const isPluginSettingsOpen = ref(false)
@@ -128,6 +129,14 @@ async function navigateTo(path: string, disabled?: boolean) {
   await router.push(path)
 }
 
+import { onMounted } from 'vue'
+onMounted(() => {
+  if (route.query.openSettings === 'models') {
+    settingsTab.value = 'models'
+    isSettingsOpen.value = true
+    router.replace({ path: route.path })
+  }
+})
 </script>
 
 <template>
@@ -312,7 +321,7 @@ async function navigateTo(path: string, disabled?: boolean) {
           <div class="mt-auto p-4 border-t border-border space-y-2">
             <SidebarMenuButton 
               class="w-full justify-start hover:bg-muted/50"
-              @click="isSettingsOpen = true"
+              @click="isSettingsOpen = true; settingsTab = 'plugins'"
             >
               <Settings class="w-4 h-4 mr-2" />
               <span>系统设置</span>
@@ -331,6 +340,7 @@ async function navigateTo(path: string, disabled?: boolean) {
     <!-- 系统设置弹窗 -->
     <SettingsDialog 
       :open="isSettingsOpen" 
+      :initial-tab="settingsTab"
       @close="isSettingsOpen = false"
       @open-plugin-settings="openPluginSettings"
     />

@@ -25,7 +25,7 @@ async function submitInit() {
     })
     setStoredToken(result.access_token)
     await resolveAuthStatus(true)
-    await router.replace('/')
+    await router.replace('/?openSettings=models')
   } catch (error: any) {
     errorMessage.value = error?.response?.data?.detail || '初始化失败，请稍后重试。'
   } finally {

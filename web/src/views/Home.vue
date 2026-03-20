@@ -23,7 +23,7 @@ import {
   SheetTitle
 } from '@/components/ui/sheet'
 import { Github, Tv, FileText, MoreVertical, Sparkles, Bookmark, BookmarkCheck, ExternalLink, Trash2, Star, Loader2 } from 'lucide-vue-next'
-import { getItems, search, summarizeItem, getItemSummaryStatus, getStoredAuthUser, toggleItemStar, markItemsReadBatch, type RawItem, type SearchResult } from '@/lib/api'
+import { getItems, search, summarizeItem, getItemSummaryStatus, getStoredAuthUser, toggleItemStar, markItemsReadBatch, getActivePlugins, type RawItem, type SearchResult, type ActivePlugin } from '@/lib/api'
 import { useToast } from '@/components/ui/toast/use-toast'
 import { Toaster } from '@/components/ui/toast'
 
@@ -41,6 +41,8 @@ const layoutMode = ref<'list' | 'grid' | 'compact'>(savedLayout)
 watch(layoutMode, (val) => localStorage.setItem('pekno-layout', val))
 const searchQuery = ref('')
 const searchResults = ref<LocalSearchResult[]>([])
+const activeSource = ref<string>('all')
+const activePlugins = ref<ActivePlugin[]>([])
 const isLoading = ref(false)
 const isSheetOpen = ref(false)
 const selectedItem = ref<LocalSearchResult | null>(null)
@@ -59,7 +61,27 @@ const pageSubtitle = computed(() => {
   if (isWatchLaterPage.value) {
     return `${currentUsername.value} 当前收藏了 ${searchResults.value.length} 条稍后再看`
   }
-  return `今天 Iris 为 ${currentUsername.value} 整理了 ${searchResults.value.length} 条资料`
+  
+  let unreadCount = searchResults.value.length
+  if (initialAnchorItemId.value) {
+    const anchorIndex = searchResults.value.findIndex(item => item.id === initialAnchorItemId.value)
+    if (anchorIndex !== -1) {
+      unreadCount = anchorIndex
+    }
+  } else {
+    const readIndex = searchResults.value.findIndex(item => item.isRead)
+    if (readIndex !== -1) {
+      unreadCount = readIndex
+    }
+  }
+
+  if (activeSource.value === 'all') {
+    return `iris 更新并整理了 ${unreadCount} 条资料`
+  } else {
+    const plugin = activePlugins.value.find(p => p.source_type === activeSource.value)
+    const pluginName = plugin ? plugin.name : activeSource.value
+    return `${pluginName} 有 ${unreadCount} 条更新`
+  }
 })
 
 let observer: IntersectionObserver | null = null
@@ -104,6 +126,7 @@ function mapSourceType(sourceType: string) {
   const sourceMap: Record<string, string> = {
     github_star: 'github',
     bilibili: 'bilibili',
+    bilibili_subscribed: 'bilibili',
     article: 'article',
   }
 
@@ -168,8 +191,10 @@ async function loadData(query: string = '') {
   await flushPendingReads()
   isLoading.value = true
   try {
+    const sourceFilter = activeSource.value === 'all' ? undefined : activeSource.value
+
     if (isWatchLaterPage.value) {
-      const items = await getItems(undefined, 0, { starredOnly: true })
+      const items = await getItems(undefined, 0, { starredOnly: true, source_type: sourceFilter })
       const normalized = items.map((item, index) => normalizeRawItem(item, index))
       initialAnchorItemId.value = null
       if (query.trim()) {
@@ -188,11 +213,19 @@ async function loadData(query: string = '') {
     if (query.trim()) {
       const results = await search({ q: query })
       initialAnchorItemId.value = null
-      searchResults.value = results.map(normalizeSearchResult)
+      const normalized = results.map(normalizeSearchResult)
+      if (sourceFilter) {
+        // 前端兜底过滤：当前 /api/search 后端未直接接收 source_type，我们按名称硬切
+        const targetPlugin = activePlugins.value.find(p => p.source_type === sourceFilter)
+        const filterStr = targetPlugin ? targetPlugin.name.toLowerCase() : sourceFilter.toLowerCase()
+        searchResults.value = normalized.filter(i => i.source.toLowerCase().includes(filterStr) || i.source === sourceFilter)
+      } else {
+        searchResults.value = normalized
+      }
       return
     }
 
-    const items = await getItems(undefined, 0)
+    const items = await getItems(undefined, 0, { source_type: sourceFilter })
     const normalized = items.map((item, index) => normalizeRawItem(item, index))
     initialAnchorItemId.value = normalized.find((item) => item.isRead)?.id ?? null
     searchResults.value = normalized
@@ -209,7 +242,19 @@ async function handleSearch() {
   await loadData(searchQuery.value)
 }
 
-onMounted(() => {
+async function handleSourceClick(sourceId: string) {
+  if (activeSource.value === sourceId) return
+  activeSource.value = sourceId
+  searchResults.value = []
+  await loadData(searchQuery.value)
+}
+
+onMounted(async () => {
+  try {
+    activePlugins.value = await getActivePlugins()
+  } catch (e) {
+    console.error('获取插件列表失败:', e)
+  }
   void loadData()
   flushReadsInterval = window.setInterval(() => {
     void flushPendingReads()
@@ -498,6 +543,7 @@ watch(
   () => route.name,
   async () => {
     searchQuery.value = ''
+    activeSource.value = 'all'
     initialAnchorItemId.value = null
     await loadData()
   }
@@ -510,9 +556,37 @@ watch(
     v-model:search-query="searchQuery"
     @search="handleSearch"
   >
-    <div class="mb-8">
+    <div class="mb-4">
       <h2 class="text-2xl font-bold">{{ pageTitle }}</h2>
       <p class="text-muted-foreground">{{ pageSubtitle }}</p>
+    </div>
+
+    <!-- Pill Navigation (Filters) -->
+    <div class="flex overflow-x-auto gap-2 mb-6 hide-scrollbar pb-2">
+      <button 
+        @click="handleSourceClick('all')"
+        :class="[
+          'rounded-full px-4 py-1.5 text-sm font-medium whitespace-nowrap transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-primary/20',
+          activeSource === 'all' 
+            ? 'bg-primary text-primary-foreground shadow-md' 
+            : 'bg-muted/50 text-muted-foreground hover:bg-muted/80 hover:text-foreground'
+        ]"
+      >
+        全部 (All)
+      </button>
+      <button 
+        v-for="plugin in activePlugins" 
+        :key="plugin.id"
+        @click="handleSourceClick(plugin.source_type)"
+        :class="[
+          'rounded-full px-4 py-1.5 text-sm font-medium whitespace-nowrap transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-primary/20 cursor-pointer',
+          activeSource === plugin.source_type
+            ? 'bg-primary text-primary-foreground shadow-md' 
+            : 'bg-muted/50 text-muted-foreground hover:bg-muted/80 hover:text-foreground'
+        ]"
+      >
+        {{ plugin.name }}
+      </button>
     </div>
 
     <div v-if="isLoading" :class="['grid transition-all duration-300', gridClass]">
@@ -760,6 +834,13 @@ watch(
 </template>
 
 <style scoped>
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.hide-scrollbar {
+  -ms-overflow-style: none; /* IE and Edge */
+  scrollbar-width: none;  /* Firefox */
+}
 :deep(.animate-pulse) {
   animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
