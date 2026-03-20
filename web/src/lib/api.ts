@@ -182,6 +182,7 @@ export interface ModelAssignmentInfo {
 export interface SearchParams {
   q?: string
   limit?: number
+  source_type?: string
 }
 
 /**
@@ -190,10 +191,12 @@ export interface SearchParams {
  * @returns 搜索结果列表
  */
 export async function search(params: SearchParams = {}): Promise<SearchResult[]> {
+  const queryParams: Record<string, any> = { q: params.q || '' }
+  if (params.source_type && params.source_type !== 'all') {
+    queryParams.source_type = params.source_type
+  }
   const response = await apiClient.get<SearchResult[]>('/api/search', {
-    params: {
-      q: params.q || '',
-    },
+    params: queryParams,
   })
   return response.data
 }

@@ -211,17 +211,9 @@ async function loadData(query: string = '') {
     }
 
     if (query.trim()) {
-      const results = await search({ q: query })
+      const results = await search({ q: query, source_type: sourceFilter })
       initialAnchorItemId.value = null
-      const normalized = results.map(normalizeSearchResult)
-      if (sourceFilter) {
-        // 前端兜底过滤：当前 /api/search 后端未直接接收 source_type，我们按名称硬切
-        const targetPlugin = activePlugins.value.find(p => p.source_type === sourceFilter)
-        const filterStr = targetPlugin ? targetPlugin.name.toLowerCase() : sourceFilter.toLowerCase()
-        searchResults.value = normalized.filter(i => i.source.toLowerCase().includes(filterStr) || i.source === sourceFilter)
-      } else {
-        searchResults.value = normalized
-      }
+      searchResults.value = results.map(normalizeSearchResult)
       return
     }
 

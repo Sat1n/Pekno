@@ -47,6 +47,7 @@ app.include_router(admin.router)
 @app.get("/api/search", response_model=List[FrontendSearchItem])
 async def hybrid_search_api(
     q: Optional[str] = Query(None, description="搜索关键词，为空则返回所有"),
+    source_type: Optional[str] = Query(None, description="按信息源过滤"),
     current_user=Depends(get_current_user),
 ):
     """
@@ -119,10 +120,10 @@ async def hybrid_search_api(
             return search_results
     
     # 有搜索词时，执行混合搜索
-    results = await search_service.hybrid_search(q, current_user["id"], limit=20)
+    results = await search_service.hybrid_search(q, current_user["id"], limit=20, source_type=source_type)
     
     search_results = []
-    for item, v_score, t_score in results:
+    for item, score in results:
         # 提取 metadata_extra 中的信息
         metadata = item.metadata_extra or {}
         lang = metadata.get("lang")
@@ -159,7 +160,7 @@ async def hybrid_search_api(
         source = source_map.get(item.source_type, item.source_type)
         
         # score：向量分数 + 文本分数
-        score = float(v_score + t_score)
+        score = round(float(score), 4)
         
         search_results.append(FrontendSearchItem(
             id=item.id,
