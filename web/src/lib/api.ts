@@ -169,7 +169,9 @@ export interface ModelAssignmentInfo {
   key: string
   label: string
   description: string
-  task_type: 'llm' | 'embedding'
+  group: string
+  status: 'active' | 'planned'
+  task_type: 'llm' | 'embedding' | 'speech' | 'vision' | 'video'
   default_provider: string
   default_model: string
   provider: string

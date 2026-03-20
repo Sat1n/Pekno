@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Blocks, User, ChevronRight, Database, Trash2, Loader2, HardDrive, Puzzle, Plus, MailPlus, LogOut, KeyRound, Copy, BrainCircuit, SlidersHorizontal, Cpu, Save } from 'lucide-vue-next'
+import { Blocks, User, ChevronRight, Database, Trash2, Loader2, HardDrive, Puzzle, Plus, MailPlus, LogOut, KeyRound, Copy, BrainCircuit, SlidersHorizontal, Cpu, Save, Search, Sparkles, GalleryVerticalEnd } from 'lucide-vue-next'
 import { usePluginStore } from '@/store/usePluginStore'
 import { changePassword, clearStoredToken, createInvitationCode, getDataSources, getInvitationCodes, getModelAssignments, getModelProviders, getStoredAuthUser, clearDataSource, saveModelAssignments, saveModelProvider, type DataSourceStat, type InvitationCodeInfo, type ModelAssignmentInfo, type ModelProviderInfo } from '@/lib/api'
 import { useToast } from '@/components/ui/toast/use-toast'
@@ -39,6 +39,8 @@ const isSavingModelAssignments = ref(false)
 const selectedProviderId = ref('ollama')
 const providerDraft = ref<Record<string, string>>({})
 const modelSettingsTab = ref<'providers' | 'assignments'>('providers')
+const providerSearch = ref('')
+const providerCapabilityFilter = ref<'all' | string>('all')
 
 const currentPassword = ref('')
 const newPassword = ref('')
@@ -102,6 +104,46 @@ const selectedProvider = computed(() => {
   return modelProviders.value.find((provider) => provider.id === selectedProviderId.value) || null
 })
 
+const providerCapabilities = computed(() => {
+  const values = new Set<string>()
+  for (const provider of modelProviders.value) {
+    for (const capability of provider.capabilities || []) {
+      values.add(capability)
+    }
+  }
+  return ['all', ...Array.from(values)]
+})
+
+const filteredProviders = computed(() => {
+  const keyword = providerSearch.value.trim().toLowerCase()
+  return modelProviders.value.filter((provider) => {
+    const matchesKeyword =
+      !keyword ||
+      provider.name.toLowerCase().includes(keyword) ||
+      provider.description.toLowerCase().includes(keyword) ||
+      provider.badge?.toLowerCase().includes(keyword)
+
+    const matchesCapability =
+      providerCapabilityFilter.value === 'all' ||
+      provider.capabilities.includes(providerCapabilityFilter.value)
+
+    return matchesKeyword && matchesCapability
+  })
+})
+
+const groupedAssignments = computed(() => {
+  const groups = new Map<string, ModelAssignmentInfo[]>()
+  for (const assignment of modelAssignments.value) {
+    const list = groups.get(assignment.group) || []
+    list.push(assignment)
+    groups.set(assignment.group, list)
+  }
+  return Array.from(groups.entries()).map(([group, items]) => ({
+    group,
+    items,
+  }))
+})
+
 async function loadModelSettings() {
   if (!isAdmin.value) return
   isLoadingModels.value = true
@@ -109,7 +151,8 @@ async function loadModelSettings() {
     const providerState = await getModelProviders()
     modelProviders.value = providerState.providers
     modelAssignments.value = providerState.assignments
-    if (!selectedProvider.value && providerState.providers.length > 0) {
+    const hasSelectedProvider = providerState.providers.some((provider) => provider.id === selectedProviderId.value)
+    if (!hasSelectedProvider && providerState.providers.length > 0) {
       selectedProviderId.value = providerState.providers[0].id
     }
     providerDraft.value = { ...(selectedProvider.value?.config || {}) }
@@ -164,6 +207,14 @@ async function copyInviteCode(code: string) {
 
 watch(selectedProvider, (provider) => {
   providerDraft.value = { ...(provider?.config || {}) }
+})
+
+watch(filteredProviders, (providers) => {
+  if (providers.length === 0) return
+  const exists = providers.some((provider) => provider.id === selectedProviderId.value)
+  if (!exists) {
+    selectedProviderId.value = providers[0].id
+  }
 })
 
 async function handleSaveModelProvider() {
@@ -369,14 +420,26 @@ watch(activeTab, (newTab) => {
                   </div>
                 </div>
 
-                <div class="flex items-center gap-2">
-                  <Button :variant="modelSettingsTab === 'providers' ? 'default' : 'outline'" @click="modelSettingsTab = 'providers'">
-                    <Cpu class="w-4 h-4 mr-2" />
-                    模型提供商
-                  </Button>
-                  <Button :variant="modelSettingsTab === 'assignments' ? 'default' : 'outline'" @click="modelSettingsTab = 'assignments'">
-                    <SlidersHorizontal class="w-4 h-4 mr-2" />
-                    系统模型设置
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <Button :variant="modelSettingsTab === 'providers' ? 'default' : 'outline'" @click="modelSettingsTab = 'providers'">
+                      <Cpu class="w-4 h-4 mr-2" />
+                      模型提供商
+                    </Button>
+                    <Button :variant="modelSettingsTab === 'assignments' ? 'default' : 'outline'" @click="modelSettingsTab = 'assignments'">
+                      <SlidersHorizontal class="w-4 h-4 mr-2" />
+                      系统模型设置
+                    </Button>
+                  </div>
+
+                  <Button
+                    v-if="modelSettingsTab === 'assignments'"
+                    @click="handleSaveAssignments"
+                    :disabled="isSavingModelAssignments"
+                  >
+                    <Loader2 v-if="isSavingModelAssignments" class="w-4 h-4 mr-2 animate-spin" />
+                    <Save v-else class="w-4 h-4 mr-2" />
+                    保存系统模型设置
                   </Button>
                 </div>
 
@@ -385,37 +448,81 @@ watch(activeTab, (newTab) => {
                 </div>
 
                 <template v-else-if="modelSettingsTab === 'providers'">
-                  <div class="grid grid-cols-1 xl:grid-cols-[1.4fr_0.9fr] gap-6">
-                    <div class="space-y-4">
-                      <div class="grid md:grid-cols-2 gap-4">
-                        <button
-                          v-for="provider in modelProviders"
-                          :key="provider.id"
-                          class="text-left rounded-2xl border p-5 transition-all bg-card hover:border-primary/40"
-                          :class="provider.id === selectedProviderId ? 'border-primary shadow-md bg-primary/5' : ''"
-                          @click="selectedProviderId = provider.id"
-                        >
-                          <div class="flex items-center justify-between gap-3">
-                            <div>
-                              <div class="font-semibold text-base">{{ provider.name }}</div>
-                              <div class="text-xs text-muted-foreground mt-1">{{ provider.badge }}</div>
-                            </div>
-                            <div class="h-2.5 w-2.5 rounded-full" :class="provider.is_configured ? 'bg-green-500' : 'bg-muted-foreground/40'"></div>
+                  <div class="grid grid-cols-1 xl:grid-cols-[1.15fr_0.95fr] gap-6">
+                    <div class="rounded-2xl border bg-card p-5 flex flex-col">
+                      <div class="flex flex-col gap-4 pb-4 border-b">
+                        <div class="flex items-center justify-between gap-3">
+                          <div>
+                            <h4 class="text-lg font-semibold">提供商列表</h4>
+                            <p class="text-sm text-muted-foreground mt-1">后续继续增加模型供应商时，依旧可以通过搜索与能力筛选快速定位。</p>
                           </div>
-                          <p class="text-sm text-muted-foreground leading-relaxed mt-3">{{ provider.description }}</p>
-                          <div class="flex flex-wrap gap-2 mt-4">
-                            <span v-for="capability in provider.capabilities" :key="capability" class="rounded-full bg-muted px-2.5 py-1 text-[11px] font-medium">
-                              {{ capability }}
-                            </span>
+                          <div class="text-xs text-muted-foreground whitespace-nowrap">
+                            共 {{ filteredProviders.length }} / {{ modelProviders.length }} 家
                           </div>
-                        </button>
+                        </div>
+
+                        <div class="grid gap-3 md:grid-cols-[1fr_auto]">
+                          <div class="relative">
+                            <Search class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                            <Input v-model="providerSearch" class="pl-9" placeholder="搜索提供商、描述或标签" />
+                          </div>
+                          <select v-model="providerCapabilityFilter" class="rounded-md border bg-background px-3 py-2 text-sm">
+                            <option v-for="capability in providerCapabilities" :key="capability" :value="capability">
+                              {{ capability === 'all' ? '全部能力' : capability }}
+                            </option>
+                          </select>
+                        </div>
                       </div>
+
+                      <ScrollArea class="mt-4 max-h-[52vh] pr-2">
+                        <div class="grid md:grid-cols-2 gap-4">
+                          <button
+                            v-for="provider in filteredProviders"
+                            :key="provider.id"
+                            class="text-left rounded-2xl border p-5 transition-all bg-card hover:border-primary/40"
+                            :class="provider.id === selectedProviderId ? 'border-primary shadow-md bg-primary/5' : ''"
+                            @click="selectedProviderId = provider.id"
+                          >
+                            <div class="flex items-center justify-between gap-3">
+                              <div>
+                                <div class="font-semibold text-base">{{ provider.name }}</div>
+                                <div class="text-xs text-muted-foreground mt-1">{{ provider.badge }}</div>
+                              </div>
+                              <div class="h-2.5 w-2.5 rounded-full" :class="provider.is_configured ? 'bg-green-500' : 'bg-muted-foreground/40'"></div>
+                            </div>
+                            <p class="text-sm text-muted-foreground leading-relaxed mt-3">{{ provider.description }}</p>
+                            <div class="flex flex-wrap gap-2 mt-4">
+                              <span v-for="capability in provider.capabilities" :key="capability" class="rounded-full bg-muted px-2.5 py-1 text-[11px] font-medium">
+                                {{ capability }}
+                              </span>
+                            </div>
+                          </button>
+                        </div>
+
+                        <div v-if="filteredProviders.length === 0" class="rounded-2xl border border-dashed py-14 text-center text-sm text-muted-foreground">
+                          当前筛选条件下没有匹配的模型提供商
+                        </div>
+                      </ScrollArea>
                     </div>
 
                     <div v-if="selectedProvider" class="rounded-2xl border bg-card p-6 space-y-5 h-fit sticky top-0">
-                      <div>
-                        <h4 class="text-lg font-semibold">{{ selectedProvider.name }}</h4>
-                        <p class="text-sm text-muted-foreground mt-1">{{ selectedProvider.description }}</p>
+                      <div class="space-y-2">
+                        <div class="flex items-start justify-between gap-3">
+                          <div>
+                            <h4 class="text-lg font-semibold">{{ selectedProvider.name }}</h4>
+                            <p class="text-sm text-muted-foreground mt-1">{{ selectedProvider.description }}</p>
+                          </div>
+                          <span class="rounded-full bg-muted px-2.5 py-1 text-[11px] font-medium">{{ selectedProvider.badge }}</span>
+                        </div>
+                        <div class="flex flex-wrap gap-2">
+                          <span v-for="capability in selectedProvider.capabilities" :key="capability" class="rounded-full bg-primary/10 text-primary px-2.5 py-1 text-[11px] font-medium">
+                            {{ capability }}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div class="rounded-xl border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
+                        推荐先完成供应商接入，再到“系统模型设置”里为不同任务分配模型。
                       </div>
 
                       <div v-for="field in selectedProvider.config_fields" :key="field.key" class="space-y-2">
@@ -439,41 +546,93 @@ watch(activeTab, (newTab) => {
                   </div>
                 </template>
 
-                <div v-else class="space-y-4">
-                  <div
-                    v-for="assignment in modelAssignments"
-                    :key="assignment.key"
-                    class="rounded-2xl border bg-card p-5 space-y-4"
-                  >
-                    <div>
-                      <div class="font-semibold text-base">{{ assignment.label }}</div>
-                      <p class="text-sm text-muted-foreground mt-1">{{ assignment.description }}</p>
+                <div v-else class="space-y-6">
+                  <div class="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
+                    <div class="rounded-2xl border bg-card p-5">
+                      <div class="flex items-start gap-3">
+                        <div class="rounded-xl bg-primary/10 p-2 text-primary">
+                          <Sparkles class="w-5 h-5" />
+                        </div>
+                        <div>
+                          <h4 class="font-semibold">当前工作流</h4>
+                          <p class="text-sm text-muted-foreground mt-1">这些设置已经接入后端，修改后会直接影响标签提取、摘要生成与向量检索。</p>
+                        </div>
+                      </div>
                     </div>
 
-                    <div class="grid md:grid-cols-2 gap-4">
-                      <div class="space-y-2">
-                        <Label>模型提供商</Label>
-                        <select v-model="assignment.provider" class="w-full rounded-md border bg-background px-3 py-2 text-sm">
-                          <option v-for="provider in modelProviders" :key="provider.id" :value="provider.id">
-                            {{ provider.name }}
-                          </option>
-                        </select>
-                      </div>
-
-                      <div class="space-y-2">
-                        <Label>模型名称</Label>
-                        <Input v-model="assignment.model" :placeholder="assignment.default_model" />
+                    <div class="rounded-2xl border bg-card p-5">
+                      <div class="flex items-start gap-3">
+                        <div class="rounded-xl bg-muted p-2 text-muted-foreground">
+                          <GalleryVerticalEnd class="w-5 h-5" />
+                        </div>
+                        <div>
+                          <h4 class="font-semibold">多模态占位</h4>
+                          <p class="text-sm text-muted-foreground mt-1">先把未来的视频工作流入口预留好，后续接语音转文字、视觉理解和视频理解时不需要重做设置结构。</p>
+                        </div>
                       </div>
                     </div>
                   </div>
 
-                  <div class="flex justify-end">
-                    <Button @click="handleSaveAssignments" :disabled="isSavingModelAssignments">
-                      <Loader2 v-if="isSavingModelAssignments" class="w-4 h-4 mr-2 animate-spin" />
-                      <Save v-else class="w-4 h-4 mr-2" />
-                      保存系统模型设置
-                    </Button>
-                  </div>
+                  <ScrollArea class="max-h-[52vh] pr-2">
+                    <div class="space-y-6">
+                      <div
+                        v-for="section in groupedAssignments"
+                        :key="section.group"
+                        class="space-y-4"
+                      >
+                        <div class="flex items-center justify-between gap-3">
+                          <div>
+                            <h4 class="text-lg font-semibold">{{ section.group }}</h4>
+                            <p class="text-sm text-muted-foreground mt-1">
+                              {{ section.group === '当前工作流' ? '已落地并正在使用的模型用途。' : '未来视频与多模态链路的预留模型用途。' }}
+                            </p>
+                          </div>
+                          <span class="rounded-full bg-muted px-2.5 py-1 text-[11px] font-medium">
+                            {{ section.items.length }} 项
+                          </span>
+                        </div>
+
+                        <div
+                          v-for="assignment in section.items"
+                          :key="assignment.key"
+                          class="rounded-2xl border bg-card p-5 space-y-4"
+                        >
+                          <div class="flex items-start justify-between gap-3">
+                            <div>
+                              <div class="font-semibold text-base">{{ assignment.label }}</div>
+                              <p class="text-sm text-muted-foreground mt-1">{{ assignment.description }}</p>
+                            </div>
+                            <span
+                              class="rounded-full px-2.5 py-1 text-[11px] font-medium"
+                              :class="assignment.status === 'active' ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'"
+                            >
+                              {{ assignment.status === 'active' ? '已接入' : '占位中' }}
+                            </span>
+                          </div>
+
+                          <div class="grid md:grid-cols-2 gap-4">
+                            <div class="space-y-2">
+                              <Label>模型提供商</Label>
+                              <select v-model="assignment.provider" class="w-full rounded-md border bg-background px-3 py-2 text-sm">
+                                <option v-for="provider in modelProviders" :key="provider.id" :value="provider.id">
+                                  {{ provider.name }}
+                                </option>
+                              </select>
+                            </div>
+
+                            <div class="space-y-2">
+                              <Label>模型名称</Label>
+                              <Input v-model="assignment.model" :placeholder="assignment.default_model" />
+                            </div>
+                          </div>
+
+                          <p v-if="assignment.status === 'planned'" class="text-xs text-muted-foreground">
+                            这个设置当前主要用于预留 UI 和配置结构，后续接入对应能力时会直接复用这里的值。
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </ScrollArea>
                 </div>
               </div>
 
