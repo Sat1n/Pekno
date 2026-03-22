@@ -19,7 +19,26 @@ from hub.core.security import (
     verify_password,
 )
 from shared.database import AsyncSessionLocal
-from shared.models import InvitationCodeORM, UserORM
+from shared.models import InvitationCodeORM, UserORM, PersonalAccessTokenORM
+from pydantic import BaseModel
+from typing import Optional
+from shared.time_utils import now_in_app_timezone_naive
+import uuid
+
+class PATCreateRequest(BaseModel):
+    alias: str
+    expires_days: Optional[int] = None
+
+class PATResponse(BaseModel):
+    id: str
+    alias: str
+    token: str
+    created_at: str
+    expires_at: Optional[str]
+
+class PATCreateResponse(BaseModel):
+    token: str
+    pat: PATResponse
 
 router = APIRouter(prefix="/api/auth", tags=["Auth"])
 
@@ -140,3 +159,71 @@ async def change_password(
             user.hashed_password = get_password_hash(payload.new_password)
 
     return {"status": "success", "message": "密码已更新"}
+
+from typing import List
+
+@router.get("/pat", response_model=List[PATResponse])
+async def get_pats(current_user=Depends(get_current_user)):
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(PersonalAccessTokenORM)
+            .where(PersonalAccessTokenORM.user_id == current_user["id"])
+            .order_by(PersonalAccessTokenORM.created_at.desc())
+        )
+        pats = result.scalars().all()
+        return [
+            PATResponse(
+                id=p.id,
+                alias=p.alias,
+                token=p.token,
+                created_at=p.created_at.isoformat(),
+                expires_at=p.expires_at.isoformat() if p.expires_at else None
+            ) for p in pats
+        ]
+
+@router.post("/pat", response_model=PATCreateResponse)
+async def create_pat(payload: PATCreateRequest, current_user=Depends(get_current_user)):
+    jti = str(uuid.uuid4())
+    expires_at = None
+    delta = timedelta(days=36500) # 100 years default for 'permanent'
+    
+    if payload.expires_days:
+        delta = timedelta(days=payload.expires_days)
+        expires_at = now_in_app_timezone_naive() + delta
+
+    token = create_access_token(
+        data={"sub": current_user["username"], "role": current_user["role"], "uid": current_user["id"], "type": "pat", "jti": jti},
+        expires_delta=delta
+    )
+        
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            pat = PersonalAccessTokenORM(
+                id=jti,
+                user_id=current_user["id"],
+                alias=payload.alias,
+                token=token,
+                expires_at=expires_at
+            )
+            session.add(pat)
+
+    return PATCreateResponse(
+        token=token,
+        pat=PATResponse(
+            id=jti,
+            alias=payload.alias,
+            token=token,
+            created_at=now_in_app_timezone_naive().isoformat(),
+            expires_at=expires_at.isoformat() if expires_at else None
+        )
+    )
+
+@router.delete("/pat/{pat_id}")
+async def delete_pat(pat_id: str, current_user=Depends(get_current_user)):
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            pat = await session.get(PersonalAccessTokenORM, pat_id)
+            if not pat or pat.user_id != current_user["id"]:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="令牌不存在")
+            await session.delete(pat)
+    return {"status": "success"}

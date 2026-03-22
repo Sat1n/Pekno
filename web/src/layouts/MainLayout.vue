@@ -111,11 +111,16 @@ defineExpose({
   addNotification,
 })
 
-const navMain = [
-  { title: '探索 (Explore)', icon: Search, to: '/' },
-  { title: '动态 (Activity)', icon: Activity, to: '/activity', disabled: true },
-  { title: '稍后再看', icon: Clock, to: '/watch-later' },
-]
+const navMain = computed(() => {
+  const items: Array<{ title: string; icon: any; to: string; disabled?: boolean }> = [
+    { title: '探索 (Explore)', icon: Search, to: '/' },
+    { title: '稍后再看', icon: Clock, to: '/watch-later' },
+  ]
+  if (currentUser.value.role === 'super_admin') {
+    items.push({ title: '动态 (Activity) [开发中]', icon: Activity, to: '/activity', disabled: true })
+  }
+  return items
+})
 
 async function logout() {
   clearStoredToken()

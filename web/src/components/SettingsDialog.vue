@@ -6,9 +6,9 @@ import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Blocks, User, ChevronRight, Database, Trash2, Loader2, HardDrive, Puzzle, Plus, MailPlus, LogOut, KeyRound, Copy, BrainCircuit, SlidersHorizontal, Cpu, Save, Search, Sparkles, GalleryVerticalEnd } from 'lucide-vue-next'
+import { Blocks, User, ChevronRight, Database, Trash2, Loader2, HardDrive, Puzzle, Plus, MailPlus, LogOut, KeyRound, Copy, BrainCircuit, SlidersHorizontal, Cpu, Save, Search, Sparkles, GalleryVerticalEnd, Shield, Server } from 'lucide-vue-next'
 import { usePluginStore } from '@/store/usePluginStore'
-import { changePassword, clearStoredToken, createInvitationCode, getDataSources, getInvitationCodes, getModelAssignments, getModelProviders, getStoredAuthUser, clearDataSource, saveModelAssignments, saveModelProvider, type DataSourceStat, type InvitationCodeInfo, type ModelAssignmentInfo, type ModelProviderInfo } from '@/lib/api'
+import { changePassword, clearStoredToken, createInvitationCode, getDataSources, getInvitationCodes, getModelAssignments, getModelProviders, getStoredAuthUser, clearDataSource, saveModelAssignments, saveModelProvider, getPATs, createPAT, deletePAT, type DataSourceStat, type InvitationCodeInfo, type ModelAssignmentInfo, type ModelProviderInfo, type PATItem } from '@/lib/api'
 import { useToast } from '@/components/ui/toast/use-toast'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import PluginInstallDialog from './PluginInstallDialog.vue'
@@ -44,6 +44,15 @@ const providerCapabilityFilter = ref<'all' | string>('all')
 
 const currentPassword = ref('')
 const newPassword = ref('')
+
+// PAT state
+const pats = ref<PATItem[]>([])
+const isLoadingPats = ref(false)
+const isCreatingPat = ref(false)
+const newPatAlias = ref('')
+const newPatExpiry = ref<number | null>(null)
+const justCreatedToken = ref<string | null>(null)
+const selectedMcpToken = ref('')
 const isChangingPassword = ref(false)
 
 const isClearDialogOpen = ref(false)
@@ -62,12 +71,16 @@ const menuItems = computed(() => {
       { id: 'models', label: '模型设置', icon: BrainCircuit },
       { id: 'data', label: '数据管理', icon: Database },
       { id: 'invites', label: '邀请管理', icon: MailPlus },
+      { id: 'tokens', label: '访问令牌', icon: Shield },
+      { id: 'mcp', label: 'MCP 服务', icon: Server },
       { id: 'account', label: '账户信息', icon: User },
     ]
   }
 
   return [
     { id: 'plugins', label: '插件管理', icon: Blocks },
+    { id: 'tokens', label: '访问令牌', icon: Shield },
+    { id: 'mcp', label: 'MCP 服务', icon: Server },
     { id: 'account', label: '账户信息', icon: User },
   ]
 })
@@ -348,7 +361,81 @@ watch(activeTab, (newTab) => {
   if (newTab === 'invites') {
     void loadInvitations()
   }
+  if (newTab === 'tokens' || newTab === 'mcp') {
+    void loadPats()
+  }
 })
+
+async function loadPats() {
+  isLoadingPats.value = true
+  try {
+    pats.value = await getPATs()
+  } catch (error) {
+    console.error('加载令牌失败:', error)
+  } finally {
+    isLoadingPats.value = false
+  }
+}
+
+async function handleCreatePat() {
+  if (!newPatAlias.value.trim()) {
+    toast({ title: '请输入令牌别名', variant: 'destructive' })
+    return
+  }
+  isCreatingPat.value = true
+  try {
+    const res = await createPAT(newPatAlias.value.trim(), newPatExpiry.value)
+    justCreatedToken.value = res.token
+    pats.value.unshift(res.pat)
+    newPatAlias.value = ''
+    newPatExpiry.value = null
+    toast({ title: '令牌已创建', description: '请立即复制并妥善保管，关闭后将无法再次查看完整令牌。' })
+  } catch (error: any) {
+    toast({ title: '创建失败', description: error?.response?.data?.detail || '请稍后重试', variant: 'destructive' })
+  } finally {
+    isCreatingPat.value = false
+  }
+}
+
+async function handleDeletePat(id: string) {
+  try {
+    await deletePAT(id)
+    pats.value = pats.value.filter(p => p.id !== id)
+    toast({ title: '令牌已删除' })
+  } catch {
+    toast({ title: '删除失败', variant: 'destructive' })
+  }
+}
+
+async function copyText(text: string, label: string = '内容') {
+  try {
+    await navigator.clipboard.writeText(text)
+    toast({ title: `${label}已复制到剪贴板` })
+  } catch {
+    toast({ title: '复制失败', variant: 'destructive' })
+  }
+}
+
+const mcpJsonConfig = computed(() => {
+  const token = selectedMcpToken.value || (pats.value.length > 0 ? (pats.value[0]?.token ?? '') : '')
+  const baseUrl = 'http://localhost:8001'
+  return JSON.stringify({
+    "mcpServers": {
+      "iris-hub": {
+        "url": `${baseUrl}/api/mcp/sse`,
+        "headers": {
+          "Authorization": `Bearer ${token || '<your-token>'}`
+        }
+      }
+    }
+  }, null, 2)
+})
+
+function formatPatExpiry(expiresAt: string | null): string {
+  if (!expiresAt) return '永久有效'
+  const d = new Date(expiresAt)
+  return d.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' }) + ' 过期'
+}
 </script>
 
 <template>
@@ -734,6 +821,156 @@ watch(activeTab, (newTab) => {
                       </tr>
                     </tbody>
                   </table>
+                </div>
+              </div>
+
+              <div v-else-if="activeTab === 'tokens'" class="space-y-8 animate-in fade-in slide-in-from-right-4 duration-300">
+                <div class="flex items-center justify-between">
+                  <div>
+                    <h3 class="text-2xl font-bold tracking-tight">访问令牌</h3>
+                    <p class="text-muted-foreground text-sm mt-1 text-balance">创建个人访问令牌 (PAT) 用于 MCP 服务等外部 AI Agent 接入。删除令牌将立即使其失效。</p>
+                  </div>
+                </div>
+
+                <div class="rounded-xl border bg-card p-5 space-y-4">
+                  <div class="flex items-center gap-2 mb-2">
+                    <Shield class="w-4 h-4 text-primary" />
+                    <h4 class="font-semibold">创建新令牌</h4>
+                  </div>
+                  <div class="grid gap-4 md:grid-cols-[1fr_auto_auto]">
+                    <Input v-model="newPatAlias" placeholder="令牌别名，如 Claude Desktop" />
+                    <select v-model="newPatExpiry" class="rounded-md border bg-background px-3 py-2 text-sm min-w-[140px]">
+                      <option :value="null">永久有效</option>
+                      <option :value="30">30 天</option>
+                      <option :value="90">90 天</option>
+                      <option :value="180">180 天</option>
+                      <option :value="365">365 天</option>
+                    </select>
+                    <Button @click="handleCreatePat" :disabled="isCreatingPat">
+                      <Loader2 v-if="isCreatingPat" class="w-4 h-4 mr-2 animate-spin" />
+                      <Plus v-else class="w-4 h-4 mr-2" />
+                      创建令牌
+                    </Button>
+                  </div>
+                </div>
+
+                <div v-if="justCreatedToken" class="rounded-xl border-2 border-green-500/40 bg-green-500/5 p-5 space-y-3">
+                  <div class="flex items-center gap-2">
+                    <Shield class="w-4 h-4 text-green-500" />
+                    <span class="font-semibold text-green-600 dark:text-green-400">令牌已生成 — 请立即复制！</span>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <code class="flex-1 bg-background rounded-lg px-3 py-2 text-xs font-mono break-all border">{{ justCreatedToken }}</code>
+                    <Button size="sm" variant="outline" @click="copyText(justCreatedToken!, '令牌'); justCreatedToken = null">
+                      <Copy class="w-4 h-4 mr-1" />
+                      复制并关闭
+                    </Button>
+                  </div>
+                </div>
+
+                <div v-if="isLoadingPats" class="flex justify-center items-center py-12">
+                  <Loader2 class="w-8 h-8 animate-spin text-muted-foreground" />
+                </div>
+
+                <div v-else-if="pats.length === 0" class="flex flex-col items-center justify-center py-16 text-muted-foreground border rounded-xl border-dashed">
+                  <Shield class="w-12 h-12 opacity-20 mb-4" />
+                  <p class="text-sm">暂未创建任何访问令牌</p>
+                </div>
+
+                <div v-else class="border rounded-xl overflow-hidden">
+                  <table class="w-full text-sm">
+                    <thead class="bg-muted/40">
+                      <tr class="text-left">
+                        <th class="px-4 py-3 font-medium">别名</th>
+                        <th class="px-4 py-3 font-medium">有效期</th>
+                        <th class="px-4 py-3 font-medium">创建时间</th>
+                        <th class="px-4 py-3 font-medium">操作</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="pat in pats" :key="pat.id" class="border-t">
+                        <td class="px-4 py-3 font-medium">{{ pat.alias }}</td>
+                        <td class="px-4 py-3 text-muted-foreground">{{ formatPatExpiry(pat.expires_at) }}</td>
+                        <td class="px-4 py-3 text-muted-foreground">{{ new Date(pat.created_at).toLocaleDateString('zh-CN') }}</td>
+                        <td class="px-4 py-3">
+                          <div class="flex items-center gap-1">
+                            <Button variant="ghost" size="sm" @click="copyText(pat.token, '令牌')">
+                              <Copy class="w-4 h-4 mr-1" />
+                              复制
+                            </Button>
+                            <Button variant="ghost" size="sm" class="text-destructive hover:text-destructive" @click="handleDeletePat(pat.id)">
+                              <Trash2 class="w-4 h-4 mr-1" />
+                              删除
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div v-else-if="activeTab === 'mcp'" class="space-y-8 animate-in fade-in slide-in-from-right-4 duration-300">
+                <div>
+                  <h3 class="text-2xl font-bold tracking-tight">MCP 服务</h3>
+                  <p class="text-muted-foreground text-sm mt-1 text-balance">启用 MCP (Model Context Protocol) 后，外部 AI Client（如 Claude Desktop）可直接搜索和操作你的 Iris Hub 数据。</p>
+                </div>
+
+                <div class="rounded-xl border bg-card p-5 space-y-4">
+                  <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-2">
+                      <Shield class="w-4 h-4 text-primary" />
+                      <h4 class="font-semibold">Personal access token</h4>
+                    </div>
+                    <Button v-if="pats.length === 0" size="sm" @click="activeTab = 'tokens'">
+                      <Plus class="w-4 h-4 mr-2" />
+                      创建令牌
+                    </Button>
+                  </div>
+                  <p class="text-sm text-muted-foreground">此访问令牌用于 MCP 服务的身份验证，请妥善保管。删除令牌将立即使连接失效。</p>
+                  <div v-if="pats.length > 0">
+                    <select v-model="selectedMcpToken" class="w-full rounded-md border bg-background px-3 py-2 text-sm">
+                      <option v-for="pat in pats" :key="pat.id" :value="pat.token">{{ pat.alias }} ({{ formatPatExpiry(pat.expires_at) }})</option>
+                    </select>
+                  </div>
+                  <div v-else class="rounded-lg border border-dashed p-4 text-center text-sm text-muted-foreground">
+                    未发现可用的访问令牌，请先创建一个。
+                  </div>
+                </div>
+
+                <div class="rounded-xl border bg-card p-5 space-y-4">
+                  <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-2">
+                      <Server class="w-4 h-4 text-primary" />
+                      <h4 class="font-semibold">Server Config</h4>
+                    </div>
+                    <Button size="sm" variant="outline" @click="copyText(mcpJsonConfig, 'MCP 配置')">
+                      <Copy class="w-4 h-4 mr-2" />
+                      Copy JSON
+                    </Button>
+                  </div>
+                  <pre class="bg-muted/50 rounded-lg p-4 text-xs font-mono overflow-x-auto border"><code>{{ mcpJsonConfig }}</code></pre>
+                </div>
+
+                <div class="rounded-xl border bg-card p-5 space-y-4">
+                  <div class="flex items-center gap-2">
+                    <BrainCircuit class="w-4 h-4 text-primary" />
+                    <h4 class="font-semibold">Support Tools</h4>
+                  </div>
+                  <div class="grid gap-3">
+                    <div class="rounded-lg border p-4">
+                      <div class="font-semibold text-sm">get_recent_items</div>
+                      <p class="text-xs text-muted-foreground mt-1">获取最近指定小时数内的信息流条目；支持按信息源类型（如 bilibili, github）过滤。</p>
+                    </div>
+                    <div class="rounded-lg border p-4">
+                      <div class="font-semibold text-sm">add_to_watch_later</div>
+                      <p class="text-xs text-muted-foreground mt-1">将指定条目加入"稍后再看"收藏列表，相当于在前端点击星标。</p>
+                    </div>
+                    <div class="rounded-lg border p-4">
+                      <div class="font-semibold text-sm">fetch_item_content</div>
+                      <p class="text-xs text-muted-foreground mt-1">获取指定条目的完整内容或服务器缓存的 AI 摘要，支持按文章/视频类型智能返回不同格式。</p>
+                    </div>
+                  </div>
                 </div>
               </div>
 

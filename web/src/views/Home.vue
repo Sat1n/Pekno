@@ -23,7 +23,8 @@ import {
   SheetTitle
 } from '@/components/ui/sheet'
 import { Github, Tv, FileText, MoreVertical, Sparkles, Bookmark, BookmarkCheck, ExternalLink, Trash2, Star, Loader2 } from 'lucide-vue-next'
-import { getItems, search, summarizeItem, getItemSummaryStatus, getStoredAuthUser, toggleItemStar, markItemsReadBatch, getActivePlugins, type RawItem, type SearchResult, type ActivePlugin } from '@/lib/api'
+import { getItems, search, summarizeItem, getItemSummaryStatus, getStoredAuthUser, toggleItemStar, markItemsReadBatch, getActivePlugins, getHoverBlocks, type RawItem, type SearchResult, type ActivePlugin, type HoverResponse } from '@/lib/api'
+import HoverPreview from '@/components/HoverPreview.vue'
 import { useToast } from '@/components/ui/toast/use-toast'
 import { Toaster } from '@/components/ui/toast'
 
@@ -96,6 +97,45 @@ const renderedSummary = computed(() => {
   const normalized = raw.replace(/\\n/g, '\n')
   return marked.parse(normalized) as string
 })
+
+const hoverTimers = new Map<string, number>()
+const hoverDataMap = ref<Record<string, HoverResponse>>({})
+const activeHoverItemId = ref<string | null>(null)
+
+function handleCardMouseEnter(item: LocalSearchResult) {
+  // 只在 list/grid 模式下，或者你有空间才显示，compact 先不用管
+  if (activeHoverItemId.value === item.id) return
+  
+  const timer = window.setTimeout(async () => {
+    activeHoverItemId.value = item.id
+    if (!hoverDataMap.value[item.id]) {
+      try {
+        const blocks = await getHoverBlocks(item.id)
+        if (blocks && blocks.length > 0) {
+          hoverDataMap.value[item.id] = blocks
+        } else {
+          // Empty state fallback or clear if not supported
+          activeHoverItemId.value = null
+        }
+      } catch (e) {
+        console.error("Failed to fetch hover blocks", e)
+        activeHoverItemId.value = null
+      }
+    }
+  }, 500)
+  hoverTimers.set(item.id, timer)
+}
+
+function handleCardMouseLeave(item: LocalSearchResult) {
+  const timer = hoverTimers.get(item.id)
+  if (timer) {
+    window.clearTimeout(timer)
+    hoverTimers.delete(item.id)
+  }
+  if (activeHoverItemId.value === item.id) {
+    activeHoverItemId.value = null
+  }
+}
 
 const { toast } = useToast()
 
@@ -617,12 +657,21 @@ watch(
         <Card
           :ref="(el) => setCardRef(item.id, ((el as any)?.$el ?? el) as Element | null)"
           :class="[
-            'bg-card text-card-foreground border-border transition-all cursor-pointer overflow-hidden group shadow-md flex flex-col relative',
-            isCardActive(item) ? 'border-primary ring-2 ring-primary/20' : 'hover:border-primary/20',
-            item.isStarred ? 'border-amber-300/60 shadow-amber-100/20' : ''
+            'bg-card text-card-foreground border-border transition-all cursor-pointer overflow-visible group flex flex-col relative',
+            isCardActive(item) ? 'border-primary ring-2 ring-primary/20 shadow-md' : 'hover:border-primary/20 shadow-sm hover:shadow-md',
+            item.isStarred ? 'border-amber-300/60 shadow-amber-100/20' : '',
+            layoutMode === 'compact' ? 'rounded-lg' : 'rounded-xl'
           ]"
           @click="handleCardClick(item)"
+          @mouseenter="handleCardMouseEnter(item)"
+          @mouseleave="handleCardMouseLeave(item)"
         >
+        <HoverPreview 
+          v-if="activeHoverItemId === item.id && hoverDataMap[item.id]"
+          :blocks="hoverDataMap[item.id] || []"
+          class="absolute z-[100] top-[80%] left-1/2 -translate-x-1/2 mt-2 cursor-auto"
+          @click.stop
+        />
         <div
           v-if="item.has_long_summary"
           class="absolute top-2 left-2 z-10"

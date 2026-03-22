@@ -103,6 +103,18 @@ class UserORM(Base):
     role: Mapped[str] = mapped_column(String, default="admin")
 
 
+class PersonalAccessTokenORM(Base):
+    """个人访问令牌表 (PAT)"""
+    __tablename__ = "personal_access_tokens"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)  # Acts as the JWT `jti` claim
+    user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    alias: Mapped[str] = mapped_column(String)
+    token: Mapped[str] = mapped_column(String)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now_in_app_timezone_naive)
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+
 class UserItemStateORM(Base):
     """用户与内容之间的个性化状态表"""
     __tablename__ = "user_item_states"

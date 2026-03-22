@@ -50,3 +50,11 @@ class BasePlugin(ABC):
     async def extract_text_for_ai(self, ctx: PluginContext, raw_data: Dict[str, Any]) -> str:
         """提取并返回用于交给大模型总结的纯文本语料"""
         pass
+
+    async def get_hover_blocks(self, item_url: str, user_config: dict) -> list[dict]:
+        """
+        获取 Server-Driven UI 的 Hover 积木数据。
+        默认返回空列表，表示该插件暂不支持 Hover 预览。
+        插件可以返回对应 Pydantic Schema (如 KVBlock, QuoteBlock) 序列化后的字典列表。
+        """
+        return []

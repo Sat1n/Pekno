@@ -46,7 +46,7 @@ export function getStoredAuthUser(): StoredAuthUser {
     return { id: null, username: null, role: null }
   }
 
-  const payloadText = decodeBase64Url(parts[1])
+  const payloadText = decodeBase64Url(parts[1] as string)
   if (!payloadText) {
     return { id: null, username: null, role: null }
   }
@@ -248,6 +248,43 @@ export async function toggleItemStar(itemId: string): Promise<{ item_id: string;
   const response = await apiClient.post(`/api/items/${itemId}/star`)
   return response.data
 }
+
+// ========== SDUI Hover API ==========
+export interface HoverBlockBase {
+  block_type: string
+}
+export interface KVBlock extends HoverBlockBase {
+  block_type: 'kv'
+  kv_data: Record<string, string | number | boolean>
+}
+export interface QuoteBlock extends HoverBlockBase {
+  block_type: 'quote'
+  author: string
+  avatar_url: string
+  content: string
+  date?: string
+}
+export interface MarkdownBlock extends HoverBlockBase {
+  block_type: 'markdown'
+  text: string
+}
+export interface ProgressItem {
+  label: string
+  value: number
+  color?: string
+}
+export interface ProgressBlock extends HoverBlockBase {
+  block_type: 'progress'
+  items: ProgressItem[]
+}
+export type HoverResponse = Array<KVBlock | QuoteBlock | MarkdownBlock | ProgressBlock>
+
+export async function getHoverBlocks(itemId: string): Promise<HoverResponse> {
+  const response = await apiClient.get<HoverResponse>(`/api/items/${itemId}/hover`)
+  return response.data
+}
+// ===================================
+
 
 export async function markItemsReadBatch(itemIds: string[]): Promise<{ status: string; updated_count: number }> {
   const response = await apiClient.post('/api/items/read_batch', {
@@ -473,4 +510,32 @@ export async function clearDataSource(sourceType: string): Promise<{ status: str
 export async function getGitHubSyncStatus(): Promise<{ status: 'idle' | 'running'; last_sync_time?: string }> {
   const response = await apiClient.get('/api/config/github/status')
   return response.data
+}
+
+// PAT Types
+export interface PATItem {
+  id: string
+  alias: string
+  token: string
+  created_at: string
+  expires_at: string | null
+}
+
+export interface PATCreateResponse {
+  token: string
+  pat: PATItem
+}
+
+export async function getPATs(): Promise<PATItem[]> {
+  const res = await apiClient.get('/api/auth/pat')
+  return res.data
+}
+
+export async function createPAT(alias: string, expires_days: number | null): Promise<PATCreateResponse> {
+  const res = await apiClient.post('/api/auth/pat', { alias, expires_days })
+  return res.data
+}
+
+export async function deletePAT(id: string): Promise<void> {
+  await apiClient.delete(`/api/auth/pat/${id}`)
 }

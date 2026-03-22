@@ -56,8 +56,23 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> Dict[str, Any
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         username = payload.get("sub")
         role = payload.get("role")
+        token_type = payload.get("type", "access")
+        jti = payload.get("jti")
+
         if not username:
             raise credentials_exception
+            
+        if token_type == "pat":
+            if not jti:
+                raise credentials_exception
+            from shared.models import PersonalAccessTokenORM
+            from shared.time_utils import now_in_app_timezone_naive
+            async with AsyncSessionLocal() as session:
+                pat = await session.get(PersonalAccessTokenORM, jti)
+                if not pat:
+                    raise credentials_exception
+                if pat.expires_at and pat.expires_at < now_in_app_timezone_naive():
+                    raise credentials_exception
     except JWTError:
         raise credentials_exception
 

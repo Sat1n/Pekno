@@ -1,5 +1,6 @@
 import re
 from typing import List, Dict, Any
+import httpx
 from shared.plugins.base import BasePlugin, PluginContext
 
 class GitHubStarsPlugin(BasePlugin):
@@ -145,3 +146,73 @@ class GitHubStarsPlugin(BasePlugin):
                     if is_valid_img(abs_url):
                         return abs_url
         return None
+
+    async def get_hover_blocks(self, item_url: str, user_config: dict) -> list[dict]:
+        """为 GitHub 仓库生成动态 Hover SDUI 数据"""
+        match = re.search(r'github\.com/([^/]+)/([^/]+)', item_url)
+        if not match:
+            return []
+            
+        owner = match.group(1)
+        repo = match.group(2).rstrip('/')
+        
+        headers = {
+            'Accept': 'application/vnd.github.v3+json',
+            'User-Agent': 'Iris-Hub/1.0'
+        }
+        token = user_config.get('token')
+        if token:
+            headers['Authorization'] = f'Bearer {token}'
+            
+        async with httpx.AsyncClient() as client:
+            # 1. Fetch Repository Details
+            repo_res = await client.get(f'https://api.github.com/repos/{owner}/{repo}', headers=headers)
+            if repo_res.status_code != 200:
+                self._log_warning(f"获取 GitHub Repo 失败: {repo_res.status_code}")
+                return []
+            repo_data = repo_res.json()
+            
+            # 2. Fetch Languages
+            lang_res = await client.get(f'https://api.github.com/repos/{owner}/{repo}/languages', headers=headers)
+            lang_data = lang_res.json() if lang_res.status_code == 200 else {}
+            
+        blocks = []
+        
+        # Assemble KVBlock
+        kv_block = {
+            "block_type": "kv",
+            "kv_data": {
+                "Stars": repo_data.get("stargazers_count", 0),
+                "Forks": repo_data.get("forks_count", 0),
+                "Issues": repo_data.get("open_issues_count", 0)
+            }
+        }
+        blocks.append(kv_block)
+        
+        # Assemble ProgressBlock
+        if lang_data:
+            total_bytes = sum(lang_data.values())
+            progress_items = []
+            if total_bytes > 0:
+                for lang, bytes_count in sorted(lang_data.items(), key=lambda x: x[1], reverse=True):
+                    percentage = (bytes_count / total_bytes) * 100
+                    if percentage >= 1.0: # Filter out < 1%
+                        progress_items.append({
+                            "label": lang,
+                            "value": percentage
+                        })
+                
+                if progress_items:
+                    progress_block = {
+                        "block_type": "progress",
+                        "items": progress_items
+                    }
+                    blocks.append(progress_block)
+                    
+        return blocks
+        
+    def _log_warning(self, msg: str):
+        # A simple fallback logger since we don't have ctx here
+        import logging
+        logging.getLogger("uvicorn.error").warning(msg)
+

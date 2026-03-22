@@ -201,3 +201,56 @@ async def get_item_summary_status(item_id: str, current_user=Depends(get_current
         "item_id": item_id,
         "status": "pending",
     }
+
+
+from shared.schemas import HoverResponse
+from shared.plugins.manager import plugin_manager
+from shared.config import ConfigManager
+
+@router.get("/{item_id}/hover", response_model=HoverResponse)
+async def get_item_hover_blocks(item_id: str, current_user=Depends(get_current_user)):
+    """获取条目的 Server-Driven UI Hover 预览积木"""
+    async with AsyncSessionLocal() as session:
+        # Check if the user has access to this item
+        result = await session.execute(
+            select(ItemORM)
+            .join(UserItemStateORM, UserItemStateORM.item_id == ItemORM.id)
+            .where(
+                UserItemStateORM.user_id == current_user["id"],
+                ItemORM.id == item_id,
+            )
+        )
+        item = result.scalar_one_or_none()
+
+    if not item:
+        raise HTTPException(status_code=404, detail="条目不存在或您无权访问")
+
+    # Load the plugin by scanning source_type
+    plugin = None
+    for p in plugin_manager.plugins.values():
+        manifest = getattr(p, "_manifest", {}) or p.manifest or {}
+        if manifest.get("source_type") == item.source_type:
+            plugin = p
+            break
+            
+    if not plugin:
+        # If plugin logic is missing or disabled, ignore
+        return []
+
+    manifest = getattr(plugin, "_manifest", {}) or plugin.manifest or {}
+    plugin_id = manifest.get("id")
+
+    # Get plugin config for the user (explicitly token for now) using the REAL plugin_id
+    token = await ConfigManager.get_config(
+        plugin_id=plugin_id, key="token", user_id=current_user["id"]
+    )
+    user_config_dict = {"token": token} if token else {}
+
+    try:
+        blocks = await plugin.get_hover_blocks(item_url=item.raw_link, user_config=user_config_dict)
+        return blocks
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"获取 Hover 信息失败: {str(e)}")
+

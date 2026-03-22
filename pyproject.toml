@@ -12,6 +12,7 @@ dependencies = [
     "httpx>=0.28.1",
     "langchain>=1.2.10",
     "langchain-ollama>=1.0.1",
+    "mcp[fastapi]>=1.0.0",
     "openai>=2.24.0",
     "passlib[bcrypt]>=1.7.4",
     "pgvector>=0.4.2",
