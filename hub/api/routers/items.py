@@ -225,6 +225,11 @@ async def get_item_hover_blocks(item_id: str, current_user=Depends(get_current_u
     if not item:
         raise HTTPException(status_code=404, detail="条目不存在或您无权访问")
 
+    # Pre-computed fast track: Does this item's metadata already contain the hover block?
+    metadata_extra = item.metadata_extra or {}
+    if "hover_blocks" in metadata_extra:
+        return metadata_extra["hover_blocks"]
+
     # Load the plugin by scanning source_type
     plugin = None
     for p in plugin_manager.plugins.values():

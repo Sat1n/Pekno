@@ -88,6 +88,34 @@ class GitHubStarsPlugin(BasePlugin):
             cover_url = self._extract_cover_url(readme_content, owner, repo_name_only)
             if cover_url:
                 raw_data['metadata_extra']['cover_url'] = cover_url
+                
+            # ✨ 新增：预计算 Hover Blocks
+            try:
+                lang_data = await ctx.http.get_repo_languages(owner, repo_name_only)
+                blocks = []
+                kv_block = {
+                    "block_type": "kv",
+                    "kv_data": {
+                        "Stars": raw_data.get("stargazers_count", raw_data.get("metadata_extra", {}).get("stars", 0)),
+                        "Forks": raw_data.get("forks_count", 0),
+                        "Issues": raw_data.get("open_issues_count", 0)
+                    }
+                }
+                blocks.append(kv_block)
+                if lang_data:
+                    total_bytes = sum(lang_data.values())
+                    if total_bytes > 0:
+                        progress_items = []
+                        for lang, bytes_count in sorted(lang_data.items(), key=lambda x: x[1], reverse=True):
+                            percentage = (bytes_count / total_bytes) * 100
+                            if percentage >= 1.0:
+                                progress_items.append({"label": lang, "value": percentage})
+                        if progress_items:
+                            blocks.append({"block_type": "progress", "items": progress_items})
+                
+                raw_data['metadata_extra']['hover_blocks'] = blocks
+            except Exception as e:
+                ctx.log.warning(f"⚠️ 预计算 Hover Block 发生错误: {e}")
             
             return readme_content if readme_content else raw_data.get('description', '')
         except Exception as e:

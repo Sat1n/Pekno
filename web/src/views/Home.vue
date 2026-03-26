@@ -669,7 +669,7 @@ watch(
         <HoverPreview 
           v-if="activeHoverItemId === item.id && hoverDataMap[item.id]"
           :blocks="hoverDataMap[item.id] || []"
-          class="absolute z-[100] top-[80%] left-1/2 -translate-x-1/2 mt-2 cursor-auto"
+          class="absolute z-[100] top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 cursor-auto pointer-events-auto"
           @click.stop
         />
         <div

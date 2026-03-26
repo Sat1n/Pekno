@@ -181,6 +181,8 @@ async def summarize_repo_task(item_id: str, task_id: str):
 
         async with AsyncSessionLocal() as session:
             new_metadata_extra = dict(item.metadata_extra) if item.metadata_extra else {}
+            # Integrate injected variables collected during extract_text_for_ai
+            new_metadata_extra.update(raw_data.get("metadata_extra", {}))
             new_metadata_extra["has_long_summary"] = True
             
             await session.execute(

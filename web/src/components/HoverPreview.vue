@@ -12,7 +12,7 @@ const langColors = [
 </script>
 
 <template>
-  <div class="hover-preview-container w-72 bg-card/95 backdrop-blur-md border border-border/60 rounded-xl shadow-xl overflow-hidden p-4 space-y-4 animate-in fade-in zoom-in-95 duration-200">
+  <div class="hover-preview-container w-72 bg-card/85 backdrop-blur-2xl border border-border/50 rounded-xl shadow-2xl overflow-hidden p-4 space-y-4 animate-in fade-in zoom-in-95 duration-300">
     
     <template v-for="(block, index) in blocks" :key="index">
       

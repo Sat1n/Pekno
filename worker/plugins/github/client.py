@@ -88,3 +88,16 @@ class GitHubClient:
             except Exception as e:
                 worker_log.warning(f"❌ 获取 README 失败: {e}")
                 return "", ""
+
+    async def get_repo_languages(self, owner: str, repo: str) -> Dict[str, int]:
+        """获取仓库语言分布"""
+        url = f"{self.base_url}/repos/{owner}/{repo}/languages"
+        
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.get(url, headers=self.headers)
+                response.raise_for_status()
+                return response.json()
+            except Exception as e:
+                worker_log.warning(f"❌ 获取 Languages 失败: {e}")
+                return {}

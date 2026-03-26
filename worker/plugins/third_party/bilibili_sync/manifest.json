@@ -33,6 +33,13 @@
       "default": false,
       "description": "是否对视频简介进行 AI 总结（消耗 Token）",
       "required": false
+    },
+    "cookie": {
+      "type": "string",
+      "label": "B站 Cookie (SESSDATA)",
+      "description": "填入登录后的 Cookie 信息以获取更高权限的数据 (如评论)",
+      "secret": true,
+      "required": false
     }
   }
 }

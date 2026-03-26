@@ -112,5 +112,90 @@ class BilibiliPlugin(BasePlugin):
         
         return text
 
+    async def get_hover_blocks(self, item_url: str, user_config: Dict[str, Any]) -> List[Dict[str, Any]]:
+        import httpx
+        import time
+        
+        # 提取 BVID
+        bv_match = re.search(r'(BV[a-zA-Z0-9]+)', item_url)
+        if not bv_match:
+            return []
+            
+        bvid = bv_match.group(1)
+        cookie = user_config.get("cookie", "")
+        
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Referer": "https://www.bilibili.com/"
+        }
+        if cookie:
+            headers["Cookie"] = cookie
+            
+        blocks = []
+        aid = None
+        view_api = f"https://api.bilibili.com/x/web-interface/view?bvid={bvid}"
+        
+        async with httpx.AsyncClient() as client:
+            # 1. 获取视频底层数据 (投币 点赞 播放量) 和 aid
+            try:
+                resp1 = await client.get(view_api, headers=headers, timeout=10.0)
+                resp1.raise_for_status()
+                data1 = resp1.json()
+                
+                if data1.get("code") == 0 and "data" in data1:
+                    stat = data1["data"].get("stat", {})
+                    aid = data1["data"].get("aid")
+                    
+                    blocks.append({
+                        "block_type": "kv",
+                        "kv_data": {
+                            "播放": self._format_num(stat.get("view", 0)),
+                            "点赞": self._format_num(stat.get("like", 0)),
+                            "投币": self._format_num(stat.get("coin", 0))
+                        }
+                    })
+            except Exception as e:
+                pass
+                
+            # 2. 抓取热评数据
+            if aid:
+                reply_api = f"https://api.bilibili.com/x/v2/reply?type=1&oid={aid}&sort=1"
+                try:
+                    resp2 = await client.get(reply_api, headers=headers, timeout=10.0)
+                    resp2.raise_for_status()
+                    data2 = resp2.json()
+                    
+                    if data2.get("code") == 0 and data2.get("data"):
+                        reply_data = data2["data"]
+                        # 优先读取 hots 热评数组，如果为空再读 replies 普通数组
+                        comments = reply_data.get("hots") or reply_data.get("replies") or []
+                        
+                        # 取前3条
+                        for item in comments[:3]:
+                            member = item.get("member", {})
+                            content = item.get("content", {})
+                            
+                            date_str = ""
+                            ctime = item.get("ctime")
+                            if ctime:
+                                date_str = time.strftime("%Y-%m-%d", time.localtime(ctime))
+                                
+                            blocks.append({
+                                "block_type": "quote",
+                                "author": member.get("uname", "未知用户"),
+                                "avatar_url": member.get("avatar", ""),
+                                "content": content.get("message", "无内容"),
+                                "date": date_str
+                            })
+                except Exception as e:
+                    pass
+                    
+        return blocks
+
+    def _format_num(self, num: int) -> str:
+        if num >= 10000:
+            return f"{num/10000:.1f}w"
+        return str(num)
+
 # 铁律：末尾必须暴露 plugin 实例
 plugin = BilibiliPlugin()

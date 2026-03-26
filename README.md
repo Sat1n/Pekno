@@ -82,6 +82,39 @@ class MyPlugin(BasePlugin):
 plugin = MyPlugin()
 ```
 
+### Server-Driven UI (Hover Blocks)
+
+Iris supports dynamically rendering rich Hover UIs directly from your plugin without any Vue frontend modifications. 
+
+By providing a JSON array of predefined "Blocks" (`KVBlock`, `ProgressBlock`, `MarkdownBlock`, `QuoteBlock`), the frontend will automatically construct Native elements floating over your item's card.
+
+**Method 1: Pre-computed (Recommended)**
+Compute the blocks during the background synchronization phase (for example, inside `extract_text_for_ai`) and save them into the item's metadata so they render instantly with zero network delay.
+
+```python
+    async def extract_text_for_ai(self, ctx: PluginContext, raw_data: dict) -> str:
+        raw_data.setdefault("metadata_extra", {})["hover_blocks"] = [
+            {
+                "block_type": "kv",
+                "kv_data": {"Stars": 100, "Forks": 20}
+            }
+        ]
+        return raw_data.get("content", "")
+```
+
+**Method 2: Real-time API Loading**
+For highly dynamic data, you can implement the `get_hover_blocks` signature in your plugin. The Hub will proxy the frontend's hover request to this method if no pre-computed cache exists.
+
+```python
+    async def get_hover_blocks(self, item_url: str, user_config: dict) -> list[dict]:
+        return [
+            {
+                "block_type": "markdown",
+                "text": "**Real-time** fetched content from specific URL!"
+            }
+        ]
+```
+
 ### Runtime architecture
 
 - `worker` executes queued tasks.
