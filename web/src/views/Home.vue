@@ -194,7 +194,7 @@ function normalizeRawItem(item: RawItem, index: number): LocalSearchResult {
   return {
     id: item.id,
     title: item.title,
-    summary: item.content_text || '暂无描述',
+    summary: item.summary || item.content_text || '暂无描述',
     long_summary: hasLongSummary ? item.summary || undefined : undefined,
     has_long_summary: hasLongSummary,
     cover_url: typeof metadata.cover_url === 'string' ? metadata.cover_url : undefined,

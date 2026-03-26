@@ -13,9 +13,12 @@ from shared.plugins.manager import plugin_manager
 from hub.core.security import get_current_user
 from hub.core.init_db import ensure_runtime_tables
 
+from hub.core.media.checker import check_media_dependencies
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """系统启动时动态加载插件"""
+    """系统启动时动态加载插件以及执行环境巡检"""
+    check_media_dependencies()
     await ensure_runtime_tables()
     async with AsyncSessionLocal() as session:
         await plugin_manager.load_enabled_plugins(session)

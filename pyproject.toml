@@ -26,6 +26,7 @@ dependencies = [
     "tzdata>=2025.3",
     "uvicorn>=0.41.0",
     "dotenv>=0.9.9",
+    "yt-dlp[curl-cffi,default]>=2026.3.17",
 ]
 
 [tool.pytest.ini_options]
