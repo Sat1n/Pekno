@@ -1,6 +1,7 @@
 import yt_dlp
 from yt_dlp.networking.impersonate import ImpersonateTarget
 from typing import Dict, Any, Optional
+from pathlib import Path
 
 class YTDlpService:
     @staticmethod
@@ -43,14 +44,18 @@ class YTDlpService:
             return ydl.extract_info(url, download=False)
 
     @staticmethod
-    def download_audio(url: str, output_path: str, cookies: Optional[Dict[str, str]] = None) -> None:
+    def download_audio(url: str, output_path: str, cookies: Optional[Dict[str, str]] = None) -> str:
         """
         下载最佳音质，并依靠 ffmpeg 强制封构为 MP3
         """
+        target_path = Path(output_path)
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        base_path = target_path.with_suffix("")
+
         opts = YTDlpService._get_base_opts()
         opts.update({
             'format': 'bestaudio/best',
-            'outtmpl': output_path,
+            'outtmpl': str(base_path) + '.%(ext)s',
             'postprocessors': [{
                 'key': 'FFmpegExtractAudio',
                 'preferredcodec': 'mp3',
@@ -61,17 +66,41 @@ class YTDlpService:
             YTDlpService._apply_cookies(ydl, cookies)
             ydl.download([url])
 
+        expected_path = base_path.with_suffix(".mp3")
+        if expected_path.exists():
+            return str(expected_path)
+
+        candidates = sorted(expected_path.parent.glob(f"{base_path.name}.*"))
+        if candidates:
+            return str(candidates[0])
+
+        raise FileNotFoundError(f"yt-dlp 未在预期位置生成音频文件: {expected_path}")
+
     @staticmethod
-    def download_video_1080p(url: str, output_path: str, cookies: Optional[Dict[str, str]] = None) -> None:
+    def download_video_1080p(url: str, output_path: str, cookies: Optional[Dict[str, str]] = None) -> str:
         """
         精准切分视频源，硬锁定最高 1080p (防止 4K/8K 文件爆炸)，混入本地 ffmpeg 将音轨缝合入 mp4
         """
+        target_path = Path(output_path)
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        base_path = target_path.with_suffix("")
+
         opts = YTDlpService._get_base_opts()
         opts.update({
             'format': 'bestvideo[height<=1080]+bestaudio/best',
             'merge_output_format': 'mp4',
-            'outtmpl': output_path,
+            'outtmpl': str(base_path) + '.%(ext)s',
         })
         with yt_dlp.YoutubeDL(opts) as ydl:
             YTDlpService._apply_cookies(ydl, cookies)
             ydl.download([url])
+
+        expected_path = base_path.with_suffix(".mp4")
+        if expected_path.exists():
+            return str(expected_path)
+
+        candidates = sorted(expected_path.parent.glob(f"{base_path.name}.*"))
+        if candidates:
+            return str(candidates[0])
+
+        raise FileNotFoundError(f"yt-dlp 未在预期位置生成视频文件: {expected_path}")

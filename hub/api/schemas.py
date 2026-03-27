@@ -52,6 +52,7 @@ class FrontendSearchItem(BaseModel):
     source: str
     tags: List[str] = []
     time: str
+    keyframes: Optional[List[str]] = None
     
     class Config:
         from_attributes = True

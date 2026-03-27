@@ -184,12 +184,12 @@ async def summarize_repo_task(item_id: str, task_id: str):
             # Integrate injected variables collected during extract_text_for_ai
             new_metadata_extra.update(raw_data.get("metadata_extra", {}))
             new_metadata_extra["has_long_summary"] = True
+            new_metadata_extra["long_summary"] = summary
             
             await session.execute(
                 ItemORM.__table__.update()
                 .where(ItemORM.id == item_id)
                 .values(
-                    summary=summary,
                     metadata_extra=new_metadata_extra
                 )
             )

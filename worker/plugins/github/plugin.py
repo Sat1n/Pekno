@@ -44,26 +44,34 @@ class GitHubStarsPlugin(BasePlugin):
 
     def normalize_item(self, raw_data: Dict[str, Any]) -> Dict[str, Any]:
         """清洗原始 JSON 数据为 Iris 标准化模型字典"""
-        repo_name = raw_data.get('full_name', '')
-        repo_name_only = raw_data.get('name', '')
-        owner = raw_data.get('owner', {}).get('login', '')
         repo_id = raw_data.get('id', '')
-        html_url = raw_data.get('html_url', '')
-        description = raw_data.get('description') or ""
+        owner = raw_data.get('owner', {}).get('login', '')
+        repo = raw_data.get('name', '') # Assuming 'repo' refers to the repository name only
+        uid = f"gh_{repo_id}"
+        tags = [] # Assuming tags should be an empty list or derived elsewhere if needed
+
+        metadata_extra = {
+            "stars": raw_data.get("stargazers_count", 0),
+            "owner": owner,
+            "repo": repo,
+            "pushed_at": raw_data.get("pushed_at"),
+            "lang": raw_data.get("language")
+        }
+
+        # Retrieve any previously computed hover blocks during fetch
+        hover_blocks = raw_data.get("metadata_extra", {}).get("hover_blocks")
+        if hover_blocks is not None:
+            metadata_extra["hover_blocks"] = hover_blocks
 
         return {
-            "id": f"gh_{repo_id}",
-            "title": repo_name,
-            "raw_link": html_url,
+            "id": uid,
+            "title": f"{owner}/{repo}",
             "source_type": "github_star",
-            "content_text": description,
-            "metadata_extra": {
-                "lang": raw_data.get("language"),
-                "stars": raw_data.get("stargazers_count"),
-                "pushed_at": raw_data.get("pushed_at"),
-                "owner": owner,
-                "repo": repo_name_only
-            }
+            "raw_link": raw_data.get("html_url", ""),
+            "content_text": raw_data.get("description", ""),
+            "intent": "article",
+            "tags": tags,
+            "metadata_extra": metadata_extra
         }
 
     async def extract_text_for_ai(self, ctx: PluginContext, raw_data: Dict[str, Any]) -> str:

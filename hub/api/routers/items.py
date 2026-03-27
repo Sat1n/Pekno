@@ -14,6 +14,7 @@ router = APIRouter(prefix="/api/items", tags=["Items"])
 
 
 def _to_item_response(item: ItemORM, state: Optional[UserItemStateORM]) -> ItemResponse:
+    metadata = item.metadata_extra or {}
     return ItemResponse(
         id=item.id,
         title=item.title,
@@ -24,7 +25,7 @@ def _to_item_response(item: ItemORM, state: Optional[UserItemStateORM]) -> ItemR
         tags=item.tags or [],
         intent=item.intent,
         created_at=item.created_at,
-        metadata_extra=item.metadata_extra or {},
+        metadata_extra=metadata,
         is_read=bool(state.is_read) if state else False,
         is_starred=bool(state.is_starred) if state else False,
     )
@@ -149,25 +150,35 @@ async def delete_item(item_id: str, current_user=Depends(get_current_user)):
 @router.post("/{item_id}/summarize")
 async def summarize_item(item_id: str, current_user=Depends(get_current_user)):
     async with AsyncSessionLocal() as session:
-        link = await session.execute(
-            select(UserItemStateORM).where(
+        result = await session.execute(
+            select(ItemORM)
+            .join(UserItemStateORM, UserItemStateORM.item_id == ItemORM.id)
+            .where(
                 UserItemStateORM.user_id == current_user["id"],
-                UserItemStateORM.item_id == item_id,
+                ItemORM.id == item_id,
             )
         )
-        if link.scalar_one_or_none() is None:
+        item = result.scalar_one_or_none()
+        if not item:
             raise HTTPException(status_code=404, detail="当前用户无权访问该条目")
 
-    from worker.plugins.pipeline import summarize_repo_task
     import uuid
-
     task_id = str(uuid.uuid4())
-    await summarize_repo_task.kiq(item_id, task_id)
+
+    if item.intent == "video":
+        from worker.tasks import process_multimedia_task
+        # Note: process_multimedia_task currently expects item_id and url
+        await process_multimedia_task.kiq(item_id, item.raw_link)
+        msg = "AI 多媒体分析管线已启动，正在剥离音轨并生成胶卷快照，请稍后..."
+    else:
+        from worker.plugins.pipeline import summarize_repo_task
+        await summarize_repo_task.kiq(item_id, task_id)
+        msg = "AI 深度总结任务已启动，请稍后查询结果"
 
     return {
         "status": "accepted",
         "task_id": task_id,
-        "message": "AI 总结任务已启动，请稍后查询结果",
+        "message": msg,
     }
 
 
@@ -194,7 +205,7 @@ async def get_item_summary_status(item_id: str, current_user=Depends(get_current
         return {
             "item_id": item_id,
             "status": "completed",
-            "summary": item.summary,
+            "summary": metadata.get("long_summary") or item.summary,
         }
 
     return {
@@ -258,4 +269,3 @@ async def get_item_hover_blocks(item_id: str, current_user=Depends(get_current_u
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"获取 Hover 信息失败: {str(e)}")
-

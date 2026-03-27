@@ -60,5 +60,7 @@ Thumbs.db
 .env.test.local
 .env.production.local
 data/
+data/cache/
+tests/output/
 !web/src/lib/
 !web/src/lib/**

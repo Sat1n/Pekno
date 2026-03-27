@@ -36,10 +36,15 @@ app.add_middleware(
 
 search_service = SearchService()
 
-# 注册路由
 from hub.api import data
 from hub.api.routers import admin, auth, items, plugins
 from hub.api.routers.mcp import mcp_app
+import os
+from fastapi.staticfiles import StaticFiles
+
+# 确保存储目录存在并挂载静态目录，专门用于对外暴露关键帧等媒体素材
+os.makedirs(os.path.join("data", "static", "keyframes"), exist_ok=True)
+app.mount("/api/static", StaticFiles(directory="data/static"), name="static")
 
 app.include_router(data.router, prefix="/api")
 app.include_router(plugins.router)
@@ -90,6 +95,19 @@ async def hybrid_search_api(
                 if not tags:
                     tags = ["未分类"]
                 
+            # 转换为前端格式
+            search_results = []
+            for idx, item in enumerate(items):
+                metadata = item.metadata_extra or {}
+                lang = metadata.get("lang")
+                pushed_at = metadata.get("pushed_at")
+                
+                tags = list(item.tags) if item.tags else []
+                if lang and lang not in tags:
+                    tags.insert(0, lang)
+                if not tags:
+                    tags = ["未分类"]
+                
                 # 强制卡片的 summary 只使用原始短描述
                 summary = item.content_text or "暂无描述"
                 time_str = format_github_time(pushed_at) if pushed_at else format_time_ago(item.created_at)
@@ -97,7 +115,8 @@ async def hybrid_search_api(
                 author = metadata.get("up_name") or metadata.get("author")
                 has_long_summary = metadata.get("has_long_summary", False)
                 # 长总结独立赋值 (item.summary 里面存的才是大模型生成的 Markdown)
-                long_summary = item.summary if has_long_summary else None
+                long_summary = metadata.get("long_summary") if has_long_summary else None
+                keyframes = metadata.get("keyframes")
                 
                 source_map = {
                     "github_star": "github",
@@ -120,7 +139,8 @@ async def hybrid_search_api(
                     score=round(score, 2),
                     source=source,
                     tags=tags[:5],
-                    time=time_str
+                    time=time_str,
+                    keyframes=keyframes
                 ))
             return search_results
     
@@ -154,7 +174,8 @@ async def hybrid_search_api(
         # has_long_summary: 获取 AI 长摘要缓存标识
         has_long_summary = metadata.get("has_long_summary", False)
         # 长总结独立赋值 (item.summary 里面存的才是大模型生成的 Markdown)
-        long_summary = item.summary if has_long_summary else None
+        long_summary = metadata.get("long_summary") if has_long_summary else None
+        keyframes = metadata.get("keyframes")
         
         # source：根据 source_type 映射
         source_map = {
@@ -178,7 +199,8 @@ async def hybrid_search_api(
             score=round(score, 2),
             source=source,
             tags=tags[:5],
-            time=time_str
+            time=time_str,
+            keyframes=keyframes
         ))
     
     return search_results
@@ -251,7 +273,8 @@ async def search_github_items(
             # has_long_summary: 获取 AI 长摘要缓存标识
             has_long_summary = metadata.get("has_long_summary", False)
             # 长总结独立赋值 (item.summary 里面存的才是大模型生成的 Markdown)
-            long_summary = item.summary if has_long_summary else None
+            long_summary = metadata.get("long_summary") if has_long_summary else None
+            keyframes = metadata.get("keyframes")
 
             search_results.append({
                 "id": item.id,
@@ -264,7 +287,8 @@ async def search_github_items(
                 "score": round(score, 2),
                 "source": "github",
                 "tags": tags[:5],  # 最多显示 5 个标签
-                "time": time_str
+                "time": time_str,
+                "keyframes": keyframes
             })
         
         # 按 stars 数量降序排列，然后取 limit 个
@@ -272,21 +296,7 @@ async def search_github_items(
         return search_results[:limit]
 
 
-@app.post("/api/sync/github")
-async def trigger_github_sync(req: SyncRequest, current_user=Depends(get_current_user)):
-    """手动触发 GitHub 同步任务"""
-    # 这里我们会调用之前写的 worker/plugins/github/task.py 逻辑
-    # 实际生产中这里应该是异步触发，不等待完成即返回 202
-    from worker.broker import broker
-    from worker.plugins.github.task import sync_github_stars_task
-    await sync_github_stars_task.kiq(limit=req.limit if req.limit else 10)
-    return {"status": "accepted"}
-
-
 # ========== 配置管理 API: 由通用插件引擎 (/api/plugins) 接管 ==========
-
-
-def format_time_ago(dt: datetime) -> str:
     """格式化时间为相对描述"""
     now = datetime.now()
     diff = now - dt

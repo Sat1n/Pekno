@@ -27,6 +27,8 @@ dependencies = [
     "uvicorn>=0.41.0",
     "dotenv>=0.9.9",
     "yt-dlp[curl-cffi,default]>=2026.3.17",
+    "faster-whisper>=1.2.1",
+    "ctranslate2>=4.7.1",
 ]
 
 [tool.pytest.ini_options]

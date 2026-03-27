@@ -14,6 +14,14 @@ MODEL_SETTINGS_NAMESPACE = "__model_settings__"
 
 MODEL_PROVIDER_CATALOG: List[Dict[str, Any]] = [
     {
+        "id": "local_whisper",
+        "name": "Local (Faster-Whisper)",
+        "description": "本地高性能语音转写引擎，基于 CTranslate2 深度优化，无需网络即可硬解语音流。",
+        "badge": "本地优先",
+        "capabilities": ["Speech"],
+        "config_fields": [],
+    },
+    {
         "id": "ollama",
         "name": "Ollama",
         "description": "连接本地或局域网 Ollama，适合离线推理与自托管场景。",
@@ -122,6 +130,17 @@ MODEL_PROVIDER_CATALOG: List[Dict[str, Any]] = [
             {"key": "api_key", "label": "API Key", "type": "string", "secret": True, "default": ""},
         ],
     },
+    {
+        "id": "huggingface",
+        "name": "Hugging Face",
+        "description": "全球最大开源AI社区，提供海量模型。配置 Access Token 可以在下载 Whisper 等重量级模型时解除频率限制并极大获得加速体验。",
+        "badge": "开源生态",
+        "capabilities": ["Speech", "Vision"],
+        "config_fields": [
+            {"key": "api_key", "label": "HF Access Token", "type": "string", "secret": True, "default": ""},
+            {"key": "endpoint", "label": "下载镜像 / Endpoint", "type": "string", "default": ""},
+        ],
+    },
 ]
 
 MODEL_ASSIGNMENT_DEFINITIONS: List[Dict[str, Any]] = [
@@ -169,11 +188,11 @@ MODEL_ASSIGNMENT_DEFINITIONS: List[Dict[str, Any]] = [
         "key": "speech_to_text",
         "label": "语音转文字引擎",
         "description": "为后续视频音轨抽取与播客内容处理预留，将语音内容转换为可检索文本。",
-        "group": "多模态占位",
-        "status": "planned",
+        "group": "核心多模态",
+        "status": "active",
         "task_type": "speech",
-        "default_provider": "dashscope",
-        "default_model": "paraformer-realtime-v2",
+        "default_provider": "local_whisper",
+        "default_model": "small",
     },
     {
         "key": "image_understanding",

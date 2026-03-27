@@ -22,7 +22,7 @@ import {
   SheetHeader,
   SheetTitle
 } from '@/components/ui/sheet'
-import { Github, Tv, FileText, MoreVertical, Sparkles, Bookmark, BookmarkCheck, ExternalLink, Trash2, Star, Loader2 } from 'lucide-vue-next'
+import { Github, Tv, FileText, MoreVertical, Sparkles, Bookmark, BookmarkCheck, ExternalLink, Trash2, Star, Loader2, Download, X } from 'lucide-vue-next'
 import { getItems, search, summarizeItem, getItemSummaryStatus, getStoredAuthUser, toggleItemStar, markItemsReadBatch, getActivePlugins, getHoverBlocks, type RawItem, type SearchResult, type ActivePlugin, type HoverResponse } from '@/lib/api'
 import HoverPreview from '@/components/HoverPreview.vue'
 import { useToast } from '@/components/ui/toast/use-toast'
@@ -35,6 +35,7 @@ interface LocalSearchResult extends SearchResult {
   displayTags?: string[]
   isRead: boolean
   isStarred: boolean
+  keyframes?: string[]
 }
 
 const savedLayout = (localStorage.getItem('pekno-layout') as 'list' | 'grid' | 'compact') || 'list'
@@ -50,6 +51,10 @@ const selectedItem = ref<LocalSearchResult | null>(null)
 const isSummarizing = ref(false)
 const currentTaskId = ref<string | null>(null)
 const pollInterval = ref<number | undefined>(undefined)
+const pendingSummaryItemId = ref<string | null>(null)
+const keyframePreviewUrl = ref<string | null>(null)
+const keyframePreviewLabel = ref<string>('')
+const keyframePreviewIndex = ref<number>(0)
 const route = useRoute()
 const currentUsername = computed(() => getStoredAuthUser().username || '管理员')
 const initialAnchorItemId = ref<string | null>(null)
@@ -194,8 +199,8 @@ function normalizeRawItem(item: RawItem, index: number): LocalSearchResult {
   return {
     id: item.id,
     title: item.title,
-    summary: item.summary || item.content_text || '暂无描述',
-    long_summary: hasLongSummary ? item.summary || undefined : undefined,
+    summary: item.content_text || item.summary || '暂无描述',
+    long_summary: hasLongSummary ? (typeof metadata.long_summary === 'string' ? metadata.long_summary : item.summary || undefined) : undefined,
     has_long_summary: hasLongSummary,
     cover_url: typeof metadata.cover_url === 'string' ? metadata.cover_url : undefined,
     score: Math.max(0.5, 1 - index * 0.03),
@@ -207,6 +212,7 @@ function normalizeRawItem(item: RawItem, index: number): LocalSearchResult {
     raw_link: item.raw_link || '#',
     isRead: Boolean(item.is_read),
     isStarred: Boolean(item.is_starred),
+    keyframes: metadata.keyframes || [],
   }
 }
 
@@ -220,6 +226,7 @@ function normalizeSearchResult(item: SearchResult): LocalSearchResult {
     raw_link: item.raw_link || (item.source === 'github' ? `https://github.com/${item.title}` : '#'),
     isRead: Boolean(item.is_read),
     isStarred: Boolean(item.is_starred),
+    keyframes: (item as any).keyframes || [],
   }
 }
 
@@ -334,6 +341,12 @@ function handleCardClick(item: LocalSearchResult) {
 function handleAISummary(item: LocalSearchResult) {
   selectedItem.value = item
   isSheetOpen.value = true
+  isSummarizing.value = pendingSummaryItemId.value === item.id
+
+  if (pendingSummaryItemId.value === item.id) {
+    startPollingSummaryStatus(item.id)
+    return
+  }
 
   if (!item.has_long_summary) {
     setTimeout(() => {
@@ -369,14 +382,63 @@ function handleClearRecord() {
   selectedItem.value = null
 }
 
+function getKeyframeAbsoluteUrl(frameUrl: string) {
+  if (frameUrl.startsWith('http://') || frameUrl.startsWith('https://')) {
+    return frameUrl
+  }
+  return `http://127.0.0.1:8001${frameUrl}`
+}
+
+function openKeyframePreview(frameUrl: string, index: number) {
+  keyframePreviewUrl.value = getKeyframeAbsoluteUrl(frameUrl)
+  keyframePreviewLabel.value = `高光截图 ${index + 1}`
+  keyframePreviewIndex.value = index
+}
+
+function closeKeyframePreview() {
+  keyframePreviewUrl.value = null
+  keyframePreviewLabel.value = ''
+  keyframePreviewIndex.value = 0
+}
+
+async function downloadKeyframe(frameUrl: string, index: number) {
+  try {
+    const absoluteUrl = getKeyframeAbsoluteUrl(frameUrl)
+    const response = await fetch(absoluteUrl)
+    const blob = await response.blob()
+    const objectUrl = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = objectUrl
+    link.download = `iris-keyframe-${selectedItem.value?.id || 'frame'}-${index + 1}.jpg`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(objectUrl)
+  } catch (error) {
+    console.error('保存关键帧失败:', error)
+    toast({
+      title: '保存失败',
+      description: '无法保存这张高光截图，请稍后重试',
+      variant: 'destructive',
+    })
+  }
+}
+
 async function handleGenerateSummary() {
   if (!selectedItem.value || isSummarizing.value) return
 
   try {
     isSummarizing.value = true
     const itemId = selectedItem.value.id
+
+    if (pendingSummaryItemId.value === itemId) {
+      startPollingSummaryStatus(itemId)
+      return
+    }
+
     const response = await summarizeItem(itemId)
     currentTaskId.value = response.task_id
+    pendingSummaryItemId.value = itemId
 
     toast({
       title: '🔄 AI 总结生成中',
@@ -409,7 +471,8 @@ function startPollingSummaryStatus(itemId: string) {
           clearInterval(pollInterval.value)
           pollInterval.value = undefined
         }
-        isSummarizing.value = false
+        pendingSummaryItemId.value = null
+        isSummarizing.value = selectedItem.value?.id === itemId ? false : isSummarizing.value
         await loadData(searchQuery.value)
 
         if (selectedItem.value && selectedItem.value.id === itemId) {
@@ -423,6 +486,13 @@ function startPollingSummaryStatus(itemId: string) {
           title: '✨ AI 总结完成',
           description: '已为仓库生成 AI 总结',
         })
+      } else if (status.status === 'not_found') {
+        if (pollInterval.value !== undefined) {
+          clearInterval(pollInterval.value)
+          pollInterval.value = undefined
+        }
+        pendingSummaryItemId.value = null
+        isSummarizing.value = false
       }
     } catch (error) {
       console.error('查询总结状态失败:', error)
@@ -432,11 +502,10 @@ function startPollingSummaryStatus(itemId: string) {
 
 watch(isSheetOpen, (newVal) => {
   if (!newVal) {
-    if (pollInterval.value !== undefined) {
-      clearInterval(pollInterval.value)
-      pollInterval.value = undefined
-    }
     isSummarizing.value = false
+    closeKeyframePreview()
+  } else if (selectedItem.value && pendingSummaryItemId.value === selectedItem.value.id) {
+    isSummarizing.value = true
   }
 })
 
@@ -781,7 +850,11 @@ watch(
   </MainLayout>
 
   <Sheet v-model:open="isSheetOpen">
-    <SheetContent class="w-full sm:max-w-xl p-0 flex flex-col h-full max-h-screen" side="right">
+    <SheetContent
+      class="w-full sm:max-w-xl p-0 flex flex-col h-full max-h-screen"
+      side="right"
+      @interact-outside="(event) => { if (keyframePreviewUrl) event.preventDefault() }"
+    >
       <SheetHeader class="p-6 border-b border-border shrink-0">
         <div class="flex items-start justify-between">
           <div class="flex-1 min-w-0">
@@ -820,6 +893,34 @@ watch(
             </div>
           </div>
 
+          <div v-if="selectedItem?.keyframes?.length" class="mt-4">
+            <h4 class="font-medium mb-3">高光胶卷快照</h4>
+            <div class="overflow-x-auto pb-4">
+              <div class="inline-flex min-w-max gap-3 pr-2">
+                <div
+                  v-for="(frameUrl, index) in selectedItem.keyframes"
+                  :key="index"
+                  class="group relative shrink-0 w-48 h-28 rounded-lg overflow-hidden shadow-sm hover:shadow-md transition-all duration-300 hover:scale-[1.03] cursor-zoom-in"
+                  @click="openKeyframePreview(frameUrl, index)"
+                >
+                  <img :src="getKeyframeAbsoluteUrl(frameUrl)" class="w-full h-full object-cover rounded-lg" />
+                  <div class="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors duration-200" />
+                  <div class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex gap-2">
+                    <Button
+                      size="icon"
+                      variant="secondary"
+                      class="h-7 w-7"
+                      @click.stop="downloadKeyframe(frameUrl, index)"
+                    >
+                      <Download class="w-3.5 h-3.5" />
+                    </Button>
+                  </div>
+                  <Badge variant="secondary" class="absolute bottom-1 right-1 text-[10px] px-1.5 py-0 opacity-80 backdrop-blur-sm shadow-sm">Keyframe</Badge>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <Separator />
 
           <div>
@@ -828,21 +929,6 @@ watch(
               <Badge v-for="tag in selectedItem?.tags" :key="tag" variant="secondary">
                 {{ tag }}
               </Badge>
-            </div>
-          </div>
-
-          <Separator />
-
-          <div>
-            <div class="flex items-center gap-2 mb-3">
-              <div class="w-5 h-5 rounded-full bg-primary/10 flex items-center justify-center">
-                <span class="text-xs">💬</span>
-              </div>
-              <h4 class="font-medium">针对此内容提问</h4>
-            </div>
-            <div class="bg-muted/30 rounded-lg p-4 text-center text-muted-foreground text-sm">
-              <p>对话功能开发中...</p>
-              <p class="text-xs mt-1">即将支持针对此内容进行 AI 问答</p>
             </div>
           </div>
         </div>
@@ -872,6 +958,37 @@ watch(
   </Sheet>
 
   <Toaster />
+
+  <div
+    v-if="keyframePreviewUrl"
+    class="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-6"
+    @click.self="closeKeyframePreview"
+  >
+    <div class="relative w-full max-w-6xl">
+      <div class="absolute right-0 top-0 z-10 flex gap-2">
+        <Button
+          variant="secondary"
+          class="bg-background/90 backdrop-blur-sm"
+          @click="downloadKeyframe(keyframePreviewUrl, keyframePreviewIndex)"
+        >
+          <Download class="w-4 h-4 mr-2" />
+          保存截图
+        </Button>
+        <Button
+          size="icon"
+          variant="secondary"
+          class="bg-background/90 backdrop-blur-sm"
+          @click="closeKeyframePreview"
+        >
+          <X class="w-4 h-4" />
+        </Button>
+      </div>
+      <div class="rounded-2xl overflow-hidden border border-white/10 shadow-2xl bg-black">
+        <img :src="keyframePreviewUrl" :alt="keyframePreviewLabel" class="w-full max-h-[85vh] object-contain" />
+      </div>
+      <p class="mt-3 text-center text-sm text-white/80">{{ keyframePreviewLabel }}</p>
+    </div>
+  </div>
 </template>
 
 <style scoped>

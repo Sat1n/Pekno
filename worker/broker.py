@@ -24,3 +24,7 @@ async def startup_event(state: TaskiqState):
         await plugin_manager.load_enabled_plugins(session)
         
     hub_log.info("✅ Worker 插件装载完毕！")
+
+# 必须在这里导入具体的 tasks 模块，否则 TaskIQ 无法在启动时发现并注册这些任务
+import worker.tasks
+import worker.plugins.pipeline
