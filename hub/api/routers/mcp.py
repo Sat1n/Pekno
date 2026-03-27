@@ -11,6 +11,7 @@ functionality — all MCP operations complete successfully before this fires.
 import json
 import logging
 from datetime import timedelta
+from typing import Any
 
 from starlette.applications import Starlette
 from starlette.routing import Route
@@ -24,12 +25,14 @@ from mcp.types import Tool, TextContent
 from shared.database import AsyncSessionLocal
 from shared.models import ItemORM, UserItemStateORM
 from hub.core.security import SECRET_KEY, ALGORITHM
+from hub.core.search import SearchService
 from shared.time_utils import now_in_app_timezone_naive
 from sqlalchemy import select, and_, desc
 
 from jose import jwt as jose_jwt
 
 logger = logging.getLogger("iris-mcp")
+search_service = SearchService()
 
 # Shared transport for all sessions
 sse_transport = SseServerTransport("/messages")
@@ -42,6 +45,30 @@ def create_mcp_server(user_id: str, username: str) -> Server:
     @server.list_tools()
     async def handle_list_tools():
         return [
+            Tool(
+                name="search_knowledge_base",
+                description="Search the user's personal knowledge base using the latest hybrid RRF search pipeline. Returns id, title, source_type, and summary.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "Search query text"},
+                        "limit": {"type": "integer", "description": "Maximum number of results to return"},
+                        "source_type": {"type": "string", "description": "Optional: filter by source type"}
+                    },
+                    "required": ["query"]
+                }
+            ),
+            Tool(
+                name="read_item_content",
+                description="Read full content for a specific item. For articles, returns content_text. For videos, prefers the timestamped Whisper transcript if available, otherwise falls back to summary.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "item_id": {"type": "string", "description": "The ID of the item"}
+                    },
+                    "required": ["item_id"]
+                }
+            ),
             Tool(
                 name="get_recent_items",
                 description="Get recent information feed items from the past N hours. Optionally filter by source_type (e.g. 'github_star', 'bilibili').",
@@ -67,26 +94,30 @@ def create_mcp_server(user_id: str, username: str) -> Server:
             ),
             Tool(
                 name="fetch_item_content",
-                description="Fetch the full content or server-cached AI summary for a specific item.",
+                description="Backward-compatible alias of read_item_content.",
                 inputSchema={
                     "type": "object",
                     "properties": {
                         "item_id": {"type": "string", "description": "The ID of the item"},
-                        "request_server_summary": {"type": "boolean", "description": "If true, return server-cached summary if available"}
+                        "request_server_summary": {"type": "boolean", "description": "Legacy flag, ignored when richer content is available"}
                     },
-                    "required": ["item_id", "request_server_summary"]
+                    "required": ["item_id"]
                 }
             ),
         ]
 
     @server.call_tool()
     async def handle_call_tool(name: str, arguments: dict):
-        if name == "get_recent_items":
+        if name == "search_knowledge_base":
+            return await _search_knowledge_base(user_id, arguments)
+        elif name == "read_item_content":
+            return await _read_item_content(user_id, arguments)
+        elif name == "get_recent_items":
             return await _get_recent_items(user_id, arguments)
         elif name == "add_to_watch_later":
             return await _add_to_watch_later(user_id, arguments)
         elif name == "fetch_item_content":
-            return await _fetch_item_content(user_id, arguments)
+            return await _read_item_content(user_id, arguments)
         else:
             return [TextContent(type="text", text=f"Error: Unknown tool '{name}'")]
 
@@ -113,8 +144,37 @@ async def _get_recent_items(user_id: str, args: dict):
         result = await session.execute(stmt)
         items = result.scalars().all()
 
-        arr = [{"id": i.id, "title": i.title, "source": i.source_type, "summary": i.content_text} for i in items]
+        arr = [{"id": i.id, "title": i.title, "source_type": i.source_type, "summary": i.content_text or i.summary} for i in items]
         return [TextContent(type="text", text=json.dumps(arr, ensure_ascii=False, indent=2))]
+
+
+async def _search_knowledge_base(user_id: str, args: dict):
+    query = str(args.get("query", "")).strip()
+    limit = int(args.get("limit", 8) or 8)
+    source_type = args.get("source_type")
+
+    if not query:
+        return [TextContent(type="text", text="Error: query is required.")]
+
+    results = await search_service.hybrid_search(
+        query_text=query,
+        user_id=user_id,
+        limit=max(1, min(limit, 20)),
+        source_type=source_type,
+    )
+
+    payload = []
+    for item, _score in results:
+        payload.append(
+            {
+                "id": item.id,
+                "title": item.title,
+                "source_type": item.source_type,
+                "summary": item.content_text or item.summary or "",
+            }
+        )
+
+    return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))]
 
 
 async def _add_to_watch_later(user_id: str, args: dict):
@@ -134,9 +194,37 @@ async def _add_to_watch_later(user_id: str, args: dict):
         return [TextContent(type="text", text=f"Success: Item {item_id} added to Watch Later")]
 
 
-async def _fetch_item_content(user_id: str, args: dict):
+def _format_timestamped_transcript(raw_transcript: Any) -> str | None:
+    if not raw_transcript:
+        return None
+
+    try:
+        segments = json.loads(raw_transcript) if isinstance(raw_transcript, str) else raw_transcript
+    except Exception:
+        return None
+
+    if not isinstance(segments, list):
+        return None
+
+    lines: list[str] = []
+    for segment in segments:
+        if not isinstance(segment, dict):
+            continue
+        text = str(segment.get("text", "")).strip()
+        if not text:
+            continue
+        start = float(segment.get("start", 0) or 0)
+        total_seconds = max(0, int(start))
+        minutes, seconds = divmod(total_seconds, 60)
+        hours, minutes = divmod(minutes, 60)
+        timestamp = f"{hours:02d}:{minutes:02d}:{seconds:02d}" if hours > 0 else f"{minutes:02d}:{seconds:02d}"
+        lines.append(f"[{timestamp}] {text}")
+
+    return "\n".join(lines).strip() or None
+
+
+async def _read_item_content(user_id: str, args: dict):
     item_id = args.get("item_id", "")
-    request_summary = args.get("request_server_summary", False)
 
     async with AsyncSessionLocal() as session:
         result = await session.execute(
@@ -149,19 +237,21 @@ async def _fetch_item_content(user_id: str, args: dict):
         if not item:
             return [TextContent(type="text", text="Error: Item not found.")]
 
-        if request_summary and item.summary:
-            return [TextContent(type="text", text=f"[Server Cached Summary]\n{item.summary}")]
+        metadata = item.metadata_extra or {}
 
         if item.intent == "article":
-            text = item.content_text or "No text available."
+            text = item.content_text or item.summary or "No text available."
         elif item.intent == "video":
-            meta = item.metadata_extra or {}
-            up_name = meta.get("up_name", "Unknown UP")
-            text = (
-                f"Title: {item.title}\nAuthor: {up_name}\nDescription: {item.content_text}\n\n"
-                "[System Note: Iris Hub direct audio/video transcription (Whisper) is still under development. "
-                "Please have the Agent reason and summarize based solely on the video title and description above.]"
-            )
+            transcript_text = _format_timestamped_transcript(metadata.get("raw_transcript"))
+            if transcript_text:
+                text = transcript_text
+            else:
+                text = (
+                    metadata.get("long_summary")
+                    or item.summary
+                    or item.content_text
+                    or "No transcript or summary available."
+                )
         else:
             text = item.content_text or "No text available."
 
