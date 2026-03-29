@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from anyio import ClosedResourceError
 from mcp.server.lowlevel import Server
 from mcp.server.sse import SseServerTransport
+from mcp.server.streamable_http import StreamableHTTPServerTransport
 from mcp.types import TextContent
 from starlette.requests import Request
 
@@ -70,6 +72,49 @@ async def _send_status(send, status: int, body: str) -> None:
 
 
 class MCPServerApp:
+    def __init__(self) -> None:
+        self._streamable_http_transport: StreamableHTTPServerTransport | None = None
+        self._streamable_connect_cm = None
+        self._streamable_server_task: asyncio.Task | None = None
+        self._streamable_lock = asyncio.Lock()
+
+    async def _ensure_streamable_ready(self) -> None:
+        transport = self._streamable_http_transport
+        server_task = self._streamable_server_task
+        if transport is not None and server_task is not None and not server_task.done():
+            return
+
+        async with self._streamable_lock:
+            transport = self._streamable_http_transport
+            server_task = self._streamable_server_task
+            if transport is not None and server_task is not None and not server_task.done():
+                return
+
+            transport = StreamableHTTPServerTransport(
+                mcp_session_id=None,
+                is_json_response_enabled=True,
+            )
+            connect_cm = transport.connect()
+            read_stream, write_stream = await connect_cm.__aenter__()
+
+            self._streamable_http_transport = transport
+            self._streamable_connect_cm = connect_cm
+            self._streamable_server_task = asyncio.create_task(
+                server.run(
+                    read_stream,
+                    write_stream,
+                    server.create_initialization_options(),
+                )
+            )
+
+    async def handle_streamable_http(self, scope, receive, send) -> None:
+        await self._ensure_streamable_ready()
+        transport = self._streamable_http_transport
+        if transport is None:
+            await _send_status(send, 500, "Streamable HTTP transport is unavailable")
+            return
+        await transport.handle_request(scope, receive, send)
+
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http":
             await _send_status(send, 404, "Not found")
@@ -86,6 +131,10 @@ class MCPServerApp:
         if path.endswith("/messages") and method == "POST":
             request = Request(scope, receive, send)
             await handle_messages(request)
+            return
+
+        if path.endswith("/v2/stream") and method in {"GET", "POST", "DELETE"}:
+            await self.handle_streamable_http(scope, receive, send)
             return
 
         await _send_status(send, 404, "Not found")
