@@ -38,7 +38,8 @@ search_service = SearchService()
 
 from hub.api import data
 from hub.api.routers import admin, auth, items, plugins
-from hub.api.routers.mcp import mcp_app
+from hub.api.mcp import mcp_app
+from hub.api.middlewares.mcp_auth import MCPAuthMiddleware
 import os
 from fastapi.staticfiles import StaticFiles
 
@@ -51,7 +52,8 @@ app.include_router(plugins.router)
 app.include_router(auth.router)
 app.include_router(items.router)
 app.include_router(admin.router)
-app.mount("/api/mcp", mcp_app)
+protected_mcp_app = MCPAuthMiddleware(mcp_app)
+app.mount("/api/mcp", protected_mcp_app)
 
 
 @app.get("/api/search", response_model=List[FrontendSearchItem])

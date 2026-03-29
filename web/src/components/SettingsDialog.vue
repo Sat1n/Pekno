@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Blocks, User, ChevronRight, Database, Trash2, Loader2, HardDrive, Puzzle, Plus, MailPlus, LogOut, KeyRound, Copy, BrainCircuit, SlidersHorizontal, Cpu, Save, Search, Sparkles, GalleryVerticalEnd, Shield, Server } from 'lucide-vue-next'
 import { usePluginStore } from '@/store/usePluginStore'
-import { changePassword, clearStoredToken, createInvitationCode, getDataSources, getInvitationCodes, getModelAssignments, getModelProviders, getStoredAuthUser, clearDataSource, saveModelAssignments, saveModelProvider, getPATs, createPAT, deletePAT, type DataSourceStat, type InvitationCodeInfo, type ModelAssignmentInfo, type ModelProviderInfo, type PATItem } from '@/lib/api'
+import { changePassword, clearStoredToken, createInvitationCode, getDataSources, getInvitationCodes, getModelProviders, getStoredAuthUser, clearDataSource, saveModelAssignments, saveModelProvider, getPATs, createPAT, deletePAT, type DataSourceStat, type InvitationCodeInfo, type ModelAssignmentInfo, type ModelProviderInfo, type PATItem } from '@/lib/api'
 import { useToast } from '@/components/ui/toast/use-toast'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import PluginInstallDialog from './PluginInstallDialog.vue'
@@ -51,9 +51,29 @@ const isLoadingPats = ref(false)
 const isCreatingPat = ref(false)
 const newPatAlias = ref('')
 const newPatExpiry = ref<number | null>(null)
+const newPatScopes = ref<string[]>(['read:knowledge', 'write:star'])
+const newPatIsAdmin = ref(false)
 const justCreatedToken = ref<string | null>(null)
 const selectedMcpToken = ref('')
 const isChangingPassword = ref(false)
+
+const availablePatScopes = [
+  {
+    value: 'read:knowledge',
+    label: '知识读取',
+    description: '允许 Agent 搜索知识库与读取内容详情',
+  },
+  {
+    value: 'write:star',
+    label: '收藏写入',
+    description: '允许将条目标记为收藏/稍后再看',
+  },
+  {
+    value: 'write:system_config',
+    label: '系统配置写入',
+    description: '允许修改插件底层配置。仅建议与管理员令牌一起使用。',
+  },
+]
 
 const isClearDialogOpen = ref(false)
 const sourceToClear = ref('')
@@ -165,8 +185,9 @@ async function loadModelSettings() {
     modelProviders.value = providerState.providers
     modelAssignments.value = providerState.assignments
     const hasSelectedProvider = providerState.providers.some((provider) => provider.id === selectedProviderId.value)
-    if (!hasSelectedProvider && providerState.providers.length > 0) {
-      selectedProviderId.value = providerState.providers[0].id
+    const firstProvider = providerState.providers[0]
+    if (!hasSelectedProvider && firstProvider) {
+      selectedProviderId.value = firstProvider.id
     }
     providerDraft.value = { ...(selectedProvider.value?.config || {}) }
   } catch (error) {
@@ -225,8 +246,9 @@ watch(selectedProvider, (provider) => {
 watch(filteredProviders, (providers) => {
   if (providers.length === 0) return
   const exists = providers.some((provider) => provider.id === selectedProviderId.value)
+  const firstProvider = providers[0]
   if (!exists) {
-    selectedProviderId.value = providers[0].id
+    selectedProviderId.value = firstProvider?.id || selectedProviderId.value
   }
 })
 
@@ -382,13 +404,22 @@ async function handleCreatePat() {
     toast({ title: '请输入令牌别名', variant: 'destructive' })
     return
   }
+  if (newPatScopes.value.length === 0) {
+    toast({ title: '请至少选择一个权限', variant: 'destructive' })
+    return
+  }
   isCreatingPat.value = true
   try {
-    const res = await createPAT(newPatAlias.value.trim(), newPatExpiry.value)
+    const res = await createPAT(newPatAlias.value.trim(), newPatExpiry.value, {
+      is_admin: newPatIsAdmin.value,
+      scopes: newPatScopes.value,
+    })
     justCreatedToken.value = res.token
     pats.value.unshift(res.pat)
     newPatAlias.value = ''
     newPatExpiry.value = null
+    newPatScopes.value = ['read:knowledge', 'write:star']
+    newPatIsAdmin.value = false
     toast({ title: '令牌已创建', description: '请立即复制并妥善保管，关闭后将无法再次查看完整令牌。' })
   } catch (error: any) {
     toast({ title: '创建失败', description: error?.response?.data?.detail || '请稍后重试', variant: 'destructive' })
@@ -435,6 +466,28 @@ function formatPatExpiry(expiresAt: string | null): string {
   if (!expiresAt) return '永久有效'
   const d = new Date(expiresAt)
   return d.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' }) + ' 过期'
+}
+
+function formatPatLastUsed(lastUsedAt: string | null): string {
+  if (!lastUsedAt) return '从未使用'
+  const d = new Date(lastUsedAt)
+  return d.toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+function formatPatScopes(scopes: string[]): string {
+  if (!scopes || scopes.length === 0) return '无权限'
+  const labels: Record<string, string> = {
+    'read:knowledge': '知识读取',
+    'write:star': '收藏写入',
+    'write:system_config': '系统配置写入',
+  }
+  return scopes.map((scope) => labels[scope] || scope).join(' / ')
 }
 </script>
 
@@ -852,6 +905,34 @@ function formatPatExpiry(expiresAt: string | null): string {
                       创建令牌
                     </Button>
                   </div>
+                  <div class="grid gap-3 md:grid-cols-2">
+                    <label
+                      v-for="scope in availablePatScopes"
+                      :key="scope.value"
+                      class="flex items-start gap-3 rounded-lg border p-3 cursor-pointer hover:bg-muted/30 transition-colors"
+                    >
+                      <input
+                        v-model="newPatScopes"
+                        :value="scope.value"
+                        type="checkbox"
+                        class="mt-1"
+                      />
+                      <div>
+                        <div class="font-medium text-sm">{{ scope.label }}</div>
+                        <p class="text-xs text-muted-foreground mt-1">{{ scope.description }}</p>
+                      </div>
+                    </label>
+                  </div>
+                  <label
+                    v-if="isAdmin"
+                    class="flex items-start gap-3 rounded-lg border p-3 cursor-pointer hover:bg-muted/30 transition-colors"
+                  >
+                    <input v-model="newPatIsAdmin" type="checkbox" class="mt-1" />
+                    <div>
+                      <div class="font-medium text-sm">管理员令牌</div>
+                      <p class="text-xs text-muted-foreground mt-1">令牌将以管理员身份访问系统，请仅用于受信任的本地 Agent 或服务。</p>
+                    </div>
+                  </label>
                 </div>
 
                 <div v-if="justCreatedToken" class="rounded-xl border-2 border-green-500/40 bg-green-500/5 p-5 space-y-3">
@@ -882,6 +963,8 @@ function formatPatExpiry(expiresAt: string | null): string {
                     <thead class="bg-muted/40">
                       <tr class="text-left">
                         <th class="px-4 py-3 font-medium">别名</th>
+                        <th class="px-4 py-3 font-medium">权限</th>
+                        <th class="px-4 py-3 font-medium">最近使用</th>
                         <th class="px-4 py-3 font-medium">有效期</th>
                         <th class="px-4 py-3 font-medium">创建时间</th>
                         <th class="px-4 py-3 font-medium">操作</th>
@@ -889,7 +972,12 @@ function formatPatExpiry(expiresAt: string | null): string {
                     </thead>
                     <tbody>
                       <tr v-for="pat in pats" :key="pat.id" class="border-t">
-                        <td class="px-4 py-3 font-medium">{{ pat.alias }}</td>
+                        <td class="px-4 py-3">
+                          <div class="font-medium">{{ pat.alias }}</div>
+                          <div v-if="pat.is_admin" class="text-xs text-amber-600 mt-1">管理员</div>
+                        </td>
+                        <td class="px-4 py-3 text-muted-foreground">{{ formatPatScopes(pat.scopes) }}</td>
+                        <td class="px-4 py-3 text-muted-foreground">{{ formatPatLastUsed(pat.last_used_at) }}</td>
                         <td class="px-4 py-3 text-muted-foreground">{{ formatPatExpiry(pat.expires_at) }}</td>
                         <td class="px-4 py-3 text-muted-foreground">{{ new Date(pat.created_at).toLocaleDateString('zh-CN') }}</td>
                         <td class="px-4 py-3">

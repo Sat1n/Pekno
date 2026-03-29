@@ -50,6 +50,26 @@ END $$;
         await conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_configs_plugin_user_key ON configs (plugin_id, user_id, key)"))
         await conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_invitation_codes_code ON invitation_codes (code)"))
         await conn.execute(text("ALTER TABLE IF EXISTS invitation_codes ADD COLUMN IF NOT EXISTS used_by_user_id VARCHAR"))
+        await conn.execute(text("ALTER TABLE IF EXISTS personal_access_tokens ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT FALSE"))
+        await conn.execute(text("ALTER TABLE IF EXISTS personal_access_tokens ADD COLUMN IF NOT EXISTS scopes VARCHAR[]"))
+        await conn.execute(text("ALTER TABLE IF EXISTS personal_access_tokens ADD COLUMN IF NOT EXISTS last_used_at TIMESTAMP"))
+        await conn.execute(text("""
+            UPDATE personal_access_tokens pat
+            SET is_admin = CASE
+                WHEN u.role IN ('admin', 'super_admin') THEN TRUE
+                ELSE FALSE
+            END
+            FROM users u
+            WHERE pat.user_id = u.id
+              AND pat.is_admin IS NULL
+        """))
+        await conn.execute(text("""
+            UPDATE personal_access_tokens
+            SET scopes = ARRAY['read:knowledge', 'write:star']
+            WHERE scopes IS NULL
+        """))
+        await conn.execute(text("ALTER TABLE IF EXISTS personal_access_tokens ALTER COLUMN is_admin SET DEFAULT FALSE"))
+        await conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_personal_access_tokens_token ON personal_access_tokens (token)"))
         
         # 确保内置插件始终存在于注册表中 (即使不运行 init_db 也能在第一次启动时载入)
         hub_log.info("🌱 正在检查并补齐内置插件...")

@@ -1,4 +1,5 @@
 import os
+import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict
 
@@ -9,8 +10,9 @@ from passlib.context import CryptContext
 from sqlalchemy import select
 
 from shared.database import AsyncSessionLocal
-from shared.models import UserORM
+from shared.models import PersonalAccessTokenORM, UserORM
 from shared.secret_store import load_or_create_secret
+from shared.time_utils import now_in_app_timezone_naive
 
 pwd_context = CryptContext(
     schemes=["pbkdf2_sha256", "bcrypt_sha256", "bcrypt"],
@@ -45,6 +47,10 @@ def create_access_token(data: Dict[str, Any], expires_delta: timedelta | None = 
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 
+def generate_personal_access_token() -> str:
+    return f"pekno_pat_{secrets.token_urlsafe(24)}"
+
+
 async def get_current_user(token: str = Depends(oauth2_scheme)) -> Dict[str, Any]:
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -52,27 +58,35 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> Dict[str, Any
         headers={"WWW-Authenticate": "Bearer"},
     )
 
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        username = payload.get("sub")
-        role = payload.get("role")
-        token_type = payload.get("type", "access")
-        jti = payload.get("jti")
-
-        if not username:
-            raise credentials_exception
-            
-        if token_type == "pat":
-            if not jti:
-                raise credentials_exception
-            from shared.models import PersonalAccessTokenORM
-            from shared.time_utils import now_in_app_timezone_naive
-            async with AsyncSessionLocal() as session:
-                pat = await session.get(PersonalAccessTokenORM, jti)
+    if token.startswith("pekno_pat_"):
+        async with AsyncSessionLocal() as session:
+            async with session.begin():
+                result = await session.execute(
+                    select(PersonalAccessTokenORM).where(PersonalAccessTokenORM.token == token)
+                )
+                pat = result.scalar_one_or_none()
                 if not pat:
                     raise credentials_exception
                 if pat.expires_at and pat.expires_at < now_in_app_timezone_naive():
                     raise credentials_exception
+                user = await session.get(UserORM, pat.user_id)
+                if not user:
+                    raise credentials_exception
+                pat.last_used_at = now_in_app_timezone_naive()
+        return {
+            "id": user.id,
+            "username": user.username,
+            "role": "admin" if pat.is_admin else user.role,
+            "is_admin": bool(pat.is_admin),
+            "scopes": list(pat.scopes or []),
+        }
+
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username = payload.get("sub")
+        role = payload.get("role")
+        if not username:
+            raise credentials_exception
     except JWTError:
         raise credentials_exception
 
@@ -83,10 +97,13 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> Dict[str, Any
     if not user:
         raise credentials_exception
 
+    resolved_role = role or user.role
     return {
         "id": user.id,
         "username": user.username,
-        "role": role or user.role,
+        "role": resolved_role,
+        "is_admin": resolved_role in {"admin", "super_admin"},
+        "scopes": [],
     }
 
 

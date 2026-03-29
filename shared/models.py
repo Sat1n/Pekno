@@ -107,11 +107,14 @@ class PersonalAccessTokenORM(Base):
     """个人访问令牌表 (PAT)"""
     __tablename__ = "personal_access_tokens"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True)  # Acts as the JWT `jti` claim
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id", ondelete="CASCADE"), index=True)
     alias: Mapped[str] = mapped_column(String)
     token: Mapped[str] = mapped_column(String)
+    is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
+    scopes: Mapped[List[str]] = mapped_column(ARRAY(String), default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now_in_app_timezone_naive)
+    last_used_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
 

@@ -517,7 +517,10 @@ export interface PATItem {
   id: string
   alias: string
   token: string
+  is_admin: boolean
+  scopes: string[]
   created_at: string
+  last_used_at: string | null
   expires_at: string | null
 }
 
@@ -531,8 +534,17 @@ export async function getPATs(): Promise<PATItem[]> {
   return res.data
 }
 
-export async function createPAT(alias: string, expires_days: number | null): Promise<PATCreateResponse> {
-  const res = await apiClient.post('/api/auth/pat', { alias, expires_days })
+export async function createPAT(
+  alias: string,
+  expires_days: number | null,
+  options: { is_admin?: boolean; scopes?: string[] } = {}
+): Promise<PATCreateResponse> {
+  const res = await apiClient.post('/api/auth/pat', {
+    alias,
+    expires_days,
+    is_admin: options.is_admin ?? false,
+    scopes: options.scopes ?? ['read:knowledge', 'write:star'],
+  })
   return res.data
 }
 

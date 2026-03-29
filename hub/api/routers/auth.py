@@ -14,13 +14,14 @@ from hub.api.schemas import (
 from hub.core.security import (
     ACCESS_TOKEN_EXPIRE_MINUTES,
     create_access_token,
+    generate_personal_access_token,
     get_current_user,
     get_password_hash,
     verify_password,
 )
 from shared.database import AsyncSessionLocal
 from shared.models import InvitationCodeORM, UserORM, PersonalAccessTokenORM
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
 from shared.time_utils import now_in_app_timezone_naive
 import uuid
@@ -28,12 +29,17 @@ import uuid
 class PATCreateRequest(BaseModel):
     alias: str
     expires_days: Optional[int] = None
+    is_admin: Optional[bool] = None
+    scopes: list[str] = Field(default_factory=lambda: ["read:knowledge", "write:star"])
 
 class PATResponse(BaseModel):
     id: str
     alias: str
     token: str
+    is_admin: bool
+    scopes: list[str]
     created_at: str
+    last_used_at: Optional[str]
     expires_at: Optional[str]
 
 class PATCreateResponse(BaseModel):
@@ -176,7 +182,10 @@ async def get_pats(current_user=Depends(get_current_user)):
                 id=p.id,
                 alias=p.alias,
                 token=p.token,
+                is_admin=p.is_admin,
+                scopes=list(p.scopes or []),
                 created_at=p.created_at.isoformat(),
+                last_used_at=p.last_used_at.isoformat() if p.last_used_at else None,
                 expires_at=p.expires_at.isoformat() if p.expires_at else None
             ) for p in pats
         ]
@@ -191,10 +200,10 @@ async def create_pat(payload: PATCreateRequest, current_user=Depends(get_current
         delta = timedelta(days=payload.expires_days)
         expires_at = now_in_app_timezone_naive() + delta
 
-    token = create_access_token(
-        data={"sub": current_user["username"], "role": current_user["role"], "uid": current_user["id"], "type": "pat", "jti": jti},
-        expires_delta=delta
-    )
+    token = generate_personal_access_token()
+    can_issue_admin_pat = current_user["role"] in {"admin", "super_admin"}
+    is_admin = bool(payload.is_admin and can_issue_admin_pat)
+    scopes = payload.scopes or ["read:knowledge", "write:star"]
         
     async with AsyncSessionLocal() as session:
         async with session.begin():
@@ -203,6 +212,8 @@ async def create_pat(payload: PATCreateRequest, current_user=Depends(get_current
                 user_id=current_user["id"],
                 alias=payload.alias,
                 token=token,
+                is_admin=is_admin,
+                scopes=scopes,
                 expires_at=expires_at
             )
             session.add(pat)
@@ -213,7 +224,10 @@ async def create_pat(payload: PATCreateRequest, current_user=Depends(get_current
             id=jti,
             alias=payload.alias,
             token=token,
+            is_admin=is_admin,
+            scopes=scopes,
             created_at=now_in_app_timezone_naive().isoformat(),
+            last_used_at=None,
             expires_at=expires_at.isoformat() if expires_at else None
         )
     )
