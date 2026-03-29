@@ -449,7 +449,7 @@ async function copyText(text: string, label: string = '内容') {
 
 const mcpJsonConfig = computed(() => {
   const token = selectedMcpToken.value || (pats.value.length > 0 ? (pats.value[0]?.token ?? '') : '')
-  const baseUrl = 'http://localhost:8001'
+  const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:8001'
   return JSON.stringify({
     "mcpServers": {
       "iris-hub": {
@@ -461,6 +461,13 @@ const mcpJsonConfig = computed(() => {
     }
   }, null, 2)
 })
+
+const mcpBaseUrl = computed(() => {
+  return typeof window !== 'undefined' ? window.location.origin : 'http://localhost:8001'
+})
+
+const mcpStreamableEndpoint = computed(() => `${mcpBaseUrl.value}/api/mcp/v2/stream`)
+const mcpLegacySseEndpoint = computed(() => `${mcpBaseUrl.value}/api/mcp/sse`)
 
 function formatPatExpiry(expiresAt: string | null): string {
   if (!expiresAt) return '永久有效'
@@ -998,68 +1005,109 @@ function formatPatScopes(scopes: string[]): string {
                 </div>
               </div>
 
-              <div v-else-if="activeTab === 'mcp'" class="space-y-8 animate-in fade-in slide-in-from-right-4 duration-300">
-                <div>
-                  <h3 class="text-2xl font-bold tracking-tight">MCP 服务</h3>
-                  <p class="text-muted-foreground text-sm mt-1 text-balance">启用 MCP (Model Context Protocol) 后，外部 AI Client（如 Claude Desktop）可直接搜索和操作你的 Iris Hub 数据。</p>
-                </div>
+              <div v-else-if="activeTab === 'mcp'" class="animate-in fade-in slide-in-from-right-4 duration-300">
+                <ScrollArea class="max-h-[calc(90vh-10rem)] pr-4">
+                  <div class="space-y-8">
+                    <div>
+                      <h3 class="text-2xl font-bold tracking-tight">MCP 服务</h3>
+                      <p class="text-muted-foreground text-sm mt-1 text-balance">启用 MCP (Model Context Protocol) 后，外部 AI Client（如 Claude Desktop）可直接搜索和操作你的 Iris Hub 数据。</p>
+                    </div>
 
-                <div class="rounded-xl border bg-card p-5 space-y-4">
-                  <div class="flex items-center justify-between">
-                    <div class="flex items-center gap-2">
-                      <Shield class="w-4 h-4 text-primary" />
-                      <h4 class="font-semibold">Personal access token</h4>
-                    </div>
-                    <Button v-if="pats.length === 0" size="sm" @click="activeTab = 'tokens'">
-                      <Plus class="w-4 h-4 mr-2" />
-                      创建令牌
-                    </Button>
-                  </div>
-                  <p class="text-sm text-muted-foreground">此访问令牌用于 MCP 服务的身份验证，请妥善保管。删除令牌将立即使连接失效。</p>
-                  <div v-if="pats.length > 0">
-                    <select v-model="selectedMcpToken" class="w-full rounded-md border bg-background px-3 py-2 text-sm">
-                      <option v-for="pat in pats" :key="pat.id" :value="pat.token">{{ pat.alias }} ({{ formatPatExpiry(pat.expires_at) }})</option>
-                    </select>
-                  </div>
-                  <div v-else class="rounded-lg border border-dashed p-4 text-center text-sm text-muted-foreground">
-                    未发现可用的访问令牌，请先创建一个。
-                  </div>
-                </div>
+                    <div class="rounded-xl border bg-card p-5 space-y-4">
+                      <div class="flex items-center gap-2">
+                        <Server class="w-4 h-4 text-primary" />
+                        <h4 class="font-semibold">连接方式</h4>
+                      </div>
+                      <div class="grid gap-4 md:grid-cols-2">
+                        <div class="rounded-lg border p-4 space-y-3">
+                          <div>
+                            <div class="text-sm font-semibold">推荐：Streamable HTTP</div>
+                            <p class="text-xs text-muted-foreground mt-1">适合新一代 Agent 平台、云端网关与支持新版 MCP 单端点协议的客户端。</p>
+                          </div>
+                          <div class="rounded-md border bg-muted/40 px-3 py-2 font-mono text-xs break-all">{{ mcpStreamableEndpoint }}</div>
+                          <Button size="sm" variant="outline" @click="copyText(mcpStreamableEndpoint, 'Streamable HTTP Endpoint')">
+                            <Copy class="w-4 h-4 mr-2" />
+                            复制 Endpoint
+                          </Button>
+                        </div>
 
-                <div class="rounded-xl border bg-card p-5 space-y-4">
-                  <div class="flex items-center justify-between">
-                    <div class="flex items-center gap-2">
-                      <Server class="w-4 h-4 text-primary" />
-                      <h4 class="font-semibold">Server Config</h4>
+                        <div class="rounded-lg border p-4 space-y-3">
+                          <div>
+                            <div class="text-sm font-semibold">兼容：Legacy SSE</div>
+                            <p class="text-xs text-muted-foreground mt-1">适合仍使用旧版 MCP SSE 协议的客户端，通常还会配合下方 JSON 配置一起使用。</p>
+                          </div>
+                          <div class="rounded-md border bg-muted/40 px-3 py-2 font-mono text-xs break-all">{{ mcpLegacySseEndpoint }}</div>
+                          <Button size="sm" variant="outline" @click="copyText(mcpLegacySseEndpoint, 'Legacy SSE Endpoint')">
+                            <Copy class="w-4 h-4 mr-2" />
+                            复制 Endpoint
+                          </Button>
+                        </div>
+                      </div>
+                      <div class="rounded-lg border border-dashed bg-muted/20 p-4 text-xs text-muted-foreground leading-6">
+                        所有 MCP 请求都需要在请求头中携带 <span class="font-mono text-foreground">Authorization: Bearer pekno_pat_xxx</span>。
+                        如果你的客户端支持新版协议，优先使用 Streamable HTTP；只有在客户端明确要求 SSE 时，再使用 Legacy SSE。
+                      </div>
                     </div>
-                    <Button size="sm" variant="outline" @click="copyText(mcpJsonConfig, 'MCP 配置')">
-                      <Copy class="w-4 h-4 mr-2" />
-                      Copy JSON
-                    </Button>
-                  </div>
-                  <pre class="bg-muted/50 rounded-lg p-4 text-xs font-mono overflow-x-auto border"><code>{{ mcpJsonConfig }}</code></pre>
-                </div>
 
-                <div class="rounded-xl border bg-card p-5 space-y-4">
-                  <div class="flex items-center gap-2">
-                    <BrainCircuit class="w-4 h-4 text-primary" />
-                    <h4 class="font-semibold">Support Tools</h4>
+                    <div class="rounded-xl border bg-card p-5 space-y-4">
+                      <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-2">
+                          <Shield class="w-4 h-4 text-primary" />
+                          <h4 class="font-semibold">Personal access token</h4>
+                        </div>
+                        <Button v-if="pats.length === 0" size="sm" @click="activeTab = 'tokens'">
+                          <Plus class="w-4 h-4 mr-2" />
+                          创建令牌
+                        </Button>
+                      </div>
+                      <p class="text-sm text-muted-foreground">此访问令牌用于 MCP 服务的身份验证，请妥善保管。删除令牌将立即使连接失效。</p>
+                      <div v-if="pats.length > 0">
+                        <select v-model="selectedMcpToken" class="w-full rounded-md border bg-background px-3 py-2 text-sm">
+                          <option v-for="pat in pats" :key="pat.id" :value="pat.token">{{ pat.alias }} ({{ formatPatExpiry(pat.expires_at) }})</option>
+                        </select>
+                      </div>
+                      <div v-else class="rounded-lg border border-dashed p-4 text-center text-sm text-muted-foreground">
+                        未发现可用的访问令牌，请先创建一个。
+                      </div>
+                    </div>
+
+                    <div class="rounded-xl border bg-card p-5 space-y-4">
+                      <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-2">
+                          <Server class="w-4 h-4 text-primary" />
+                          <h4 class="font-semibold">Legacy SSE JSON 配置</h4>
+                        </div>
+                        <Button size="sm" variant="outline" @click="copyText(mcpJsonConfig, 'MCP 配置')">
+                          <Copy class="w-4 h-4 mr-2" />
+                          Copy JSON
+                        </Button>
+                      </div>
+                      <p class="text-xs text-muted-foreground">如果你的 MCP 客户端要求粘贴旧版 SSE 风格的 JSON 配置，可直接复制下面这一段。</p>
+                      <pre class="bg-muted/50 rounded-lg p-4 text-xs font-mono overflow-x-auto border"><code>{{ mcpJsonConfig }}</code></pre>
+                    </div>
+
+                    <div class="rounded-xl border bg-card p-5 space-y-4">
+                      <div class="flex items-center gap-2">
+                        <BrainCircuit class="w-4 h-4 text-primary" />
+                        <h4 class="font-semibold">Support Tools</h4>
+                      </div>
+                      <div class="grid gap-3">
+                        <div class="rounded-lg border p-4">
+                          <div class="font-semibold text-sm">get_recent_items</div>
+                          <p class="text-xs text-muted-foreground mt-1">获取最近指定小时数内的信息流条目；支持按信息源类型（如 bilibili, github）过滤。</p>
+                        </div>
+                        <div class="rounded-lg border p-4">
+                          <div class="font-semibold text-sm">add_to_watch_later</div>
+                          <p class="text-xs text-muted-foreground mt-1">将指定条目加入"稍后再看"收藏列表，相当于在前端点击星标。</p>
+                        </div>
+                        <div class="rounded-lg border p-4">
+                          <div class="font-semibold text-sm">fetch_item_content</div>
+                          <p class="text-xs text-muted-foreground mt-1">获取指定条目的完整内容或服务器缓存的 AI 摘要，支持按文章/视频类型智能返回不同格式。</p>
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                  <div class="grid gap-3">
-                    <div class="rounded-lg border p-4">
-                      <div class="font-semibold text-sm">get_recent_items</div>
-                      <p class="text-xs text-muted-foreground mt-1">获取最近指定小时数内的信息流条目；支持按信息源类型（如 bilibili, github）过滤。</p>
-                    </div>
-                    <div class="rounded-lg border p-4">
-                      <div class="font-semibold text-sm">add_to_watch_later</div>
-                      <p class="text-xs text-muted-foreground mt-1">将指定条目加入"稍后再看"收藏列表，相当于在前端点击星标。</p>
-                    </div>
-                    <div class="rounded-lg border p-4">
-                      <div class="font-semibold text-sm">fetch_item_content</div>
-                      <p class="text-xs text-muted-foreground mt-1">获取指定条目的完整内容或服务器缓存的 AI 摘要，支持按文章/视频类型智能返回不同格式。</p>
-                    </div>
-                  </div>
-                </div>
+                </ScrollArea>
               </div>
 
               <div v-else-if="activeTab === 'account'" class="space-y-8 animate-in fade-in slide-in-from-right-4 duration-300">
