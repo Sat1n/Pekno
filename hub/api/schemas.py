@@ -48,6 +48,10 @@ class FrontendSearchItem(BaseModel):
     has_long_summary: bool = False
     cover_url: Optional[str] = None
     author: Optional[str] = None
+    raw_link: Optional[str] = None
+    source_type: Optional[str] = None
+    intent: Optional[str] = None
+    metadata_extra: Optional[dict] = None
     score: float
     source: str
     tags: List[str] = []

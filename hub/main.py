@@ -45,7 +45,9 @@ from fastapi.staticfiles import StaticFiles
 
 # 确保存储目录存在并挂载静态目录，专门用于对外暴露关键帧等媒体素材
 os.makedirs(os.path.join("data", "static", "keyframes"), exist_ok=True)
+os.makedirs(os.path.join("data", "uploads"), exist_ok=True)
 app.mount("/api/static", StaticFiles(directory="data/static"), name="static")
+app.mount("/uploads", StaticFiles(directory="data/uploads"), name="uploads")
 
 app.include_router(data.router, prefix="/api")
 app.include_router(plugins.router)
@@ -123,7 +125,9 @@ async def hybrid_search_api(
                 source_map = {
                     "github_star": "github",
                     "bilibili": "bilibili",
+                    "bilibili_subscribed": "bilibili",
                     "article": "article",
+                    "upload": "upload",
                 }
                 source = source_map.get(item.source_type, item.source_type)
                 
@@ -138,6 +142,10 @@ async def hybrid_search_api(
                     has_long_summary=has_long_summary,
                     cover_url=cover_url,
                     author=author,
+                    raw_link=item.raw_link,
+                    source_type=item.source_type,
+                    intent=item.intent,
+                    metadata_extra=metadata,
                     score=round(score, 2),
                     source=source,
                     tags=tags[:5],
@@ -183,7 +191,9 @@ async def hybrid_search_api(
         source_map = {
             "github_star": "github",
             "bilibili": "bilibili",
+            "bilibili_subscribed": "bilibili",
             "article": "article",
+            "upload": "upload",
         }
         source = source_map.get(item.source_type, item.source_type)
         
@@ -198,6 +208,10 @@ async def hybrid_search_api(
             has_long_summary=has_long_summary,
             cover_url=cover_url,
             author=author,
+            raw_link=item.raw_link,
+            source_type=item.source_type,
+            intent=item.intent,
+            metadata_extra=metadata,
             score=round(score, 2),
             source=source,
             tags=tags[:5],

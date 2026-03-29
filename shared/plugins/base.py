@@ -51,6 +51,11 @@ class BasePlugin(ABC):
         """提取并返回用于交给大模型总结的纯文本语料"""
         pass
 
+    @abstractmethod
+    async def parse_single_item(self, url: str, ctx: PluginContext | None = None) -> Dict[str, Any]:
+        """针对单个 URL 解析并返回符合 Item 规范的字典。"""
+        pass
+
     async def get_hover_blocks(self, item_url: str, user_config: dict) -> list[dict]:
         """
         获取 Server-Driven UI 的 Hover 积木数据。

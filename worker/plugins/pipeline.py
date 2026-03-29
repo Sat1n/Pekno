@@ -11,6 +11,34 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 import datetime
 import re
+import inspect
+
+
+async def _build_plugin_context_for_user(plugin_id: str, plugin, user_id: str | None):
+    config_dict = {}
+    for key, schema in plugin.manifest.get("settings_schema", {}).items():
+        val = await ConfigManager.get_config(plugin_id, key, user_id=user_id)
+        if val is not None:
+            config_dict[key] = int(val) if schema.get("type") == "integer" else (val == "true" if schema.get("type") == "boolean" else val)
+        else:
+            config_dict[key] = schema.get("default")
+
+    import httpx
+    http_client = None
+    if plugin_id == "github_stars":
+        from worker.plugins.github.client import GitHubClient
+        token = config_dict.get("token")
+        if not token:
+            raise ValueError(f"[{plugin_id}] 未配置 Token，无法解析链接")
+        http_client = GitHubClient(token)
+    else:
+        http_client = httpx.AsyncClient(timeout=15.0)
+
+    return PluginContext(
+        config=config_dict,
+        http_client=http_client,
+        logger=worker_log
+    )
 
 @broker.task(task_name="run_plugin_pipeline")
 async def run_plugin_pipeline_task(plugin_id: str, limit: int = None, user_id: str | None = None):
@@ -39,36 +67,12 @@ async def run_plugin_pipeline_task(plugin_id: str, limit: int = None, user_id: s
 
     try:
         # 获取基础配置字典
-        config_dict = {}
-        for key, schema in plugin.manifest.get("settings_schema", {}).items():
-            val = await ConfigManager.get_config(plugin_id, key, user_id=user_id)
-            if val is not None:
-                config_dict[key] = int(val) if schema.get("type") == "integer" else (val == "true" if schema.get("type") == "boolean" else val)
-            else:
-                config_dict[key] = schema.get("default")
+        ctx = await _build_plugin_context_for_user(plugin_id, plugin, user_id)
+        config_dict = dict(ctx.config)
 
         # 覆写 limit
         if limit is not None:
             config_dict["sync_limit"] = limit
-
-        import httpx
-        http_client = None
-        if plugin_id == "github_stars":
-            from worker.plugins.github.client import GitHubClient
-            token = config_dict.get("token")
-            if not token:
-                worker_log.error(f"❌ [{plugin_id}] 未配置 Token，停止提取")
-                return
-            http_client = GitHubClient(token)
-        else:
-            # ✨ 为其他第三方插件提供通用异步客户端
-            http_client = httpx.AsyncClient(timeout=15.0)
-
-        ctx = PluginContext(
-            config=config_dict,
-            http_client=http_client,
-            logger=worker_log
-        )
 
         # 1. 抓取原始数据
         raw_items = await plugin.fetch_data(ctx)
@@ -139,6 +143,71 @@ async def run_plugin_pipeline_task(plugin_id: str, limit: int = None, user_id: s
     finally:
         await ConfigManager.set_config(plugin_id, ConfigKeys.SYNC_STATUS, "idle", user_id=user_id)
         await ConfigManager.set_config(plugin_id, ConfigKeys.LAST_SYNC_TIME, datetime.datetime.now().isoformat(), user_id=user_id)
+
+
+@broker.task(task_name="parse_single_plugin_item")
+async def parse_single_plugin_item_task(plugin_id: str, url: str, user_id: str, retention_days: int = -1):
+    plugin = plugin_manager.get_plugin(plugin_id)
+    if not plugin:
+        worker_log.warning(f"⚠️ 初次未找到插件 {plugin_id}，尝试重新加载注册表...")
+        async with AsyncSessionLocal() as session:
+            await plugin_manager.load_enabled_plugins(session)
+        plugin = plugin_manager.get_plugin(plugin_id)
+
+    if not plugin:
+        worker_log.error(f"❌ 找不到插件: {plugin_id} (单条解析失败)")
+        return
+
+    ctx = await _build_plugin_context_for_user(plugin_id, plugin, user_id)
+    try:
+        parse_signature = inspect.signature(plugin.parse_single_item)
+        if "ctx" in parse_signature.parameters:
+            parsed_item = await plugin.parse_single_item(url, ctx)
+        else:
+            parsed_item = await plugin.parse_single_item(url)
+
+        pipeline_raw_data = parsed_item.pop("_pipeline_raw_data", None)
+        if pipeline_raw_data is not None:
+            normalized = plugin.normalize_item(pipeline_raw_data)
+            ai_text = await plugin.extract_text_for_ai(ctx, pipeline_raw_data)
+            raw_metadata = dict(pipeline_raw_data.get("metadata_extra") or {})
+        else:
+            normalized = parsed_item
+            ai_text = normalized.get("content_text", "") or ""
+            raw_metadata = {}
+
+        normalized["raw_link"] = normalized.get("raw_link") or url
+        final_metadata = dict(normalized.get("metadata_extra") or {})
+        final_metadata.update(raw_metadata)
+        final_metadata["has_long_summary"] = False
+
+        retention_value = retention_days
+        if retention_value == -1:
+            retention_value = int(ctx.config.get("retention_hours", normalized.get("retention_hours", 168)))
+
+        item = UniversalItem(
+            id=normalized["id"],
+            title=normalized["title"],
+            source_type=normalized["source_type"],
+            raw_link=normalized["raw_link"],
+            content_text=normalized.get("content_text", ""),
+            intent=normalized.get("intent", "article"),
+            retention_hours=retention_value,
+            capabilities=["summarize"] if normalized.get("content_text") or ai_text else [],
+            metadata_extra=final_metadata,
+            auto_short_summary=bool(ctx.config.get("auto_short_summary", normalized.get("auto_short_summary", False))),
+            source_user_id=user_id,
+        )
+
+        worker_log.info(f"📤 [{plugin_id}] 单条解析结果发送至 Pipeline: {item.title}")
+        await process_new_item_task.kiq(item.model_dump())
+    except Exception as e:
+        worker_log.error(f"❌ [{plugin_id}] 单条解析任务失败: {e}")
+        raise
+    finally:
+        close_method = getattr(ctx.http, "aclose", None)
+        if close_method:
+            await close_method()
 
 
 @broker.task(task_name="summarize_repo")

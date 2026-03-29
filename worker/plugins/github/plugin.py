@@ -130,6 +130,30 @@ class GitHubStarsPlugin(BasePlugin):
             ctx.log.warning(f"⚠️ 无法获取 {owner}/{repo_name_only} 的 README: {e}")
             return raw_data.get('description', '')
 
+    async def parse_single_item(self, url: str, ctx: PluginContext | None = None) -> Dict[str, Any]:
+        match = re.search(r'github\.com/([^/]+)/([^/?#]+)', url)
+        if not match:
+            raise ValueError("请提供有效的 GitHub 仓库链接")
+
+        owner = match.group(1)
+        repo = match.group(2).removesuffix(".git")
+        api_url = f"https://api.github.com/repos/{owner}/{repo}"
+        headers = {
+            "Accept": "application/vnd.github.v3+json",
+            "User-Agent": "Iris-Hub/1.0",
+        }
+        if ctx and ctx.config.get("token"):
+            headers["Authorization"] = f"Bearer {ctx.config['token']}"
+
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.get(api_url, headers=headers)
+            response.raise_for_status()
+            repo_data = response.json()
+
+        normalized = self.normalize_item(repo_data)
+        normalized["_pipeline_raw_data"] = repo_data
+        return normalized
+
     def _extract_cover_url(self, readme_content: str, owner: str, repo: str):
         """内部方法: 从 README 提取首图"""
         if not readme_content:
@@ -251,4 +275,3 @@ class GitHubStarsPlugin(BasePlugin):
         # A simple fallback logger since we don't have ctx here
         import logging
         logging.getLogger("uvicorn.error").warning(msg)
-

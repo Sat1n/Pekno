@@ -2,7 +2,7 @@
 import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useColorMode } from '@vueuse/core'
-import { Search, Activity, Clock, Settings, Sun, Moon, Monitor, LayoutList, LayoutGrid, Rows3, Bell } from 'lucide-vue-next'
+import { Search, Activity, Clock, Settings, Sun, Moon, Monitor, LayoutList, LayoutGrid, Rows3, Bell, Plus } from 'lucide-vue-next'
 import { Sidebar, SidebarContent, SidebarGroup, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -14,6 +14,7 @@ import { clearStoredToken, getStoredAuthUser } from '@/lib/api'
 
 defineEmits<{
   search: []
+  addContent: []
 }>()
 
 // 通知类型
@@ -170,6 +171,11 @@ onMounted(() => {
         </div>
 
         <div class="flex items-center gap-2">
+          <Button variant="default" size="sm" class="hidden md:inline-flex gap-2 mr-2" @click="$emit('addContent')">
+            <Plus class="w-4 h-4" />
+            添加内容
+          </Button>
+
           <!-- 布局切换按钮 -->
           <div class="flex items-center gap-1 bg-muted/50 p-1 rounded-md mr-2">
             <Button
@@ -197,7 +203,7 @@ onMounted(() => {
 
           <DropdownMenu>
             <DropdownMenuTrigger as-child>
-              <Button variant="ghost" size="icon" class="h-9 w-9">
+            <Button variant="ghost" size="icon" class="h-9 w-9">
                 <Sun class="h-4 w-4 rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
                 <Moon class="absolute h-4 w-4 rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
               </Button>
@@ -210,6 +216,10 @@ onMounted(() => {
           </DropdownMenu>
 
           <!-- 通知铃铛 -->
+          <Button variant="ghost" size="icon" class="h-9 w-9 md:hidden" @click="$emit('addContent')">
+            <Plus class="h-4 w-4" />
+          </Button>
+
           <DropdownMenu>
             <DropdownMenuTrigger as-child>
               <Button variant="ghost" size="icon" class="h-9 w-9 relative">

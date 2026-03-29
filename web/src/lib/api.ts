@@ -72,6 +72,8 @@ export const apiClient = axios.create({
   },
 })
 
+export const API_BASE_URL = String(apiClient.defaults.baseURL || '').replace(/\/$/, '')
+
 apiClient.interceptors.request.use((config) => {
   const token = getStoredToken()
   if (token) {
@@ -104,6 +106,9 @@ export interface SearchResult {
   cover_url?: string
   author?: string
   raw_link?: string
+  source_type?: string
+  intent?: string
+  metadata_extra?: Record<string, any>
   score: number
   source: string
   tags: string[]
@@ -125,6 +130,12 @@ export interface RawItem {
   metadata_extra?: Record<string, any> | null
   is_read: boolean
   is_starred: boolean
+}
+
+export interface AcceptedTaskResponse {
+  status: string
+  task_id: string
+  message: string
 }
 
 export interface AuthStatus {
@@ -240,6 +251,36 @@ export async function getItems(
 
   const response = await apiClient.get<RawItem[]>('/api/items', {
     params,
+  })
+  return response.data
+}
+
+export async function uploadItem(
+  file: File,
+  payload: { title?: string; summary?: string; retention_days?: number } = {}
+): Promise<RawItem> {
+  const formData = new FormData()
+  formData.append('file', file)
+  if (payload.title) {
+    formData.append('title', payload.title)
+  }
+  if (payload.summary) {
+    formData.append('summary', payload.summary)
+  }
+  if (typeof payload.retention_days === 'number') {
+    formData.append('retention_days', String(payload.retention_days))
+  }
+  const response = await apiClient.post<RawItem>('/api/items/upload', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
+  return response.data
+}
+
+export async function parseItemUrl(pluginName: string, url: string, retention_days: number = -1): Promise<AcceptedTaskResponse> {
+  const response = await apiClient.post<AcceptedTaskResponse>('/api/items/parse', {
+    plugin_name: pluginName,
+    url,
+    retention_days,
   })
   return response.data
 }
@@ -420,6 +461,11 @@ export interface ActivePlugin {
 
 export async function getActivePlugins(): Promise<ActivePlugin[]> {
   const response = await apiClient.get<ActivePlugin[]>('/api/plugins/active')
+  return response.data
+}
+
+export async function getParsePlugins(): Promise<ActivePlugin[]> {
+  const response = await apiClient.get<ActivePlugin[]>('/api/items/parse/plugins')
   return response.data
 }
 

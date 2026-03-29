@@ -1,8 +1,74 @@
 import re
-from typing import List, Dict, Any
+from typing import Any, Dict, List
+
+import httpx
+
 from shared.plugins.base import BasePlugin, PluginContext
 
 class BilibiliPlugin(BasePlugin):
+    def _extract_bvid(self, url: str) -> str | None:
+        bv_match = re.search(r'(BV[a-zA-Z0-9]+)', url)
+        return bv_match.group(1) if bv_match else None
+
+    def _clean_html_text(self, html_content: str) -> str:
+        clean_text = re.sub(r'<[^>]+>', ' ', html_content or "")
+        clean_text = re.sub(r'\s+', ' ', clean_text).strip()
+        if clean_text == "-":
+            return "该视频暂无详细简介"
+        return clean_text
+
+    def _normalize_video_item(self, raw_data: Dict[str, Any]) -> Dict[str, Any]:
+        raw_link = (
+            raw_data.get("short_link")
+            or raw_data.get("short_link_v2")
+            or raw_data.get("url", "")
+            or raw_data.get("link", "")
+        )
+        bvid = raw_data.get("bvid") or self._extract_bvid(raw_link)
+        aid = raw_data.get("aid")
+        uid = bvid or aid or raw_link
+
+        owner = raw_data.get("owner") or {}
+        authors = raw_data.get("authors", [])
+        up_name = owner.get("name") or (authors[0].get("name") if authors else None) or "未知 UP 主"
+        up_mid = owner.get("mid")
+
+        html_content = raw_data.get("content_html", "") or raw_data.get("summary", "")
+        clean_text = (raw_data.get("desc") or "").strip() or self._clean_html_text(html_content)
+
+        cover_url = raw_data.get("pic", "")
+        if not cover_url and html_content:
+            img_match = re.search(r'<img[^>]+src=["\'](https?://[^"\']+)["\']', html_content)
+            if img_match:
+                cover_url = img_match.group(1)
+
+        tags = []
+        if raw_data.get("tname"):
+            tags.append(raw_data.get("tname"))
+        if up_name and up_name not in tags:
+            tags.append(up_name)
+
+        auto_ai = raw_data.get("_ctx_enable_ai", False)
+
+        return {
+            "id": uid,
+            "title": raw_data.get("title", "未命名视频"),
+            "source_type": "bilibili_subscribed",
+            "raw_link": raw_link or (f"https://www.bilibili.com/video/{bvid}" if bvid else ""),
+            "content_text": clean_text,
+            "intent": "video",
+            "tags": tags,
+            "auto_ai_processing": auto_ai,
+            "capabilities": ["summarize"],
+            "metadata_extra": {
+                "up_name": up_name,
+                "up_mid": up_mid,
+                "pubdate": raw_data.get("pubdate") or raw_data.get("date_published"),
+                "duration": raw_data.get("duration", 0),
+                "cover_url": cover_url,
+            }
+        }
+
     async def fetch_data(self, ctx: PluginContext) -> List[Dict[str, Any]]:
         # 获取配置
         base_url = ctx.config.get("rsshub_base_url", "https://rsshub.app").rstrip("/")
@@ -52,54 +118,7 @@ class BilibiliPlugin(BasePlugin):
             return []
 
     def normalize_item(self, raw_data: Dict[str, Any]) -> Dict[str, Any]:
-        # 提取基础字段
-        raw_link = raw_data.get("url", "") or raw_data.get("link", "")
-        title = raw_data.get("title", "未命名视频")
-        
-        # 尝试从 URL 提取 BV 号作为 ID，如果失败则用原始链接的哈希
-        video_id = raw_link
-        bv_match = re.search(r'(BV[a-zA-Z0-9]+)', raw_link)
-        if bv_match:
-            video_id = bv_match.group(1)
-            
-        # 提取 UP 主名称
-        up_name = "未知 UP 主"
-        authors = raw_data.get("authors", [])
-        if authors and len(authors) > 0:
-            up_name = authors[0].get("name", up_name)
-            
-        # 提取封面：利用正则从 content_html 或 summary 中寻找 img 标签的 src
-        cover_url = ""
-        html_content = raw_data.get("content_html", "") or raw_data.get("summary", "")
-        img_match = re.search(r'<img[^>]+src=["\'](https?://[^"\']+)["\']', html_content)
-        if img_match:
-            cover_url = img_match.group(1)
-            
-        # 净化 content_html 以便作为摘要 (移除 iframe, img, br 等)
-        clean_text = re.sub(r'<[^>]+>', ' ', html_content)
-        clean_text = re.sub(r'\s+', ' ', clean_text).strip()
-        if clean_text == "-":  # RSSHub 经常返回一个横杠
-            clean_text = "该视频暂无详细简介"
-            
-        # 读取 fetch_data 注入的 AI 开关
-        auto_ai = raw_data.get("_ctx_enable_ai", False)
-            
-        return {
-            "id": video_id,
-            "title": title,
-            "raw_link": raw_link,
-            "source_type": "bilibili_subscribed",
-            "intent": "video",  # 明确内容类型为视频
-            "content_text": clean_text,
-            "tags": [up_name],
-            "auto_ai_processing": auto_ai,  # 由用户配置决定
-            "capabilities": ["summarize"],
-            "metadata_extra": {
-                "up_name": up_name,
-                "cover_url": cover_url,
-                "published_at": raw_data.get("date_published")
-            }
-        }
+        return self._normalize_video_item(raw_data)
 
     async def extract_text_for_ai(self, ctx: PluginContext, raw_data: Dict[str, Any]) -> str:
         # B站视频的核心文本要素就是标题、UP主和纯文本简介
@@ -110,7 +129,62 @@ class BilibiliPlugin(BasePlugin):
         text += f"【UP 主】: {up_name}\n"
         text += f"【视频简介】: {norm['content_text']}\n"
         
+        # 探针测试 (Dry Run) - 尝试脱壳解析视频本体流
+        cookie = ctx.config.get("cookie", "")
+        try:
+            import asyncio
+            from hub.core.media.downloader import YTDlpService
+            ctx.log.info(f"YTDlp 探针测试启动: {norm['raw_link']}")
+            
+            # 使用 asyncio.to_thread 包装底层阻塞的 yt-dlp 发包调用
+            info = await asyncio.to_thread(YTDlpService.extract_info, norm["raw_link"], cookie)
+            duration = info.get("duration", "未知")
+            resolution = info.get("resolution", "未知")
+            format_ext = info.get("ext", "未知")
+            
+            ctx.log.info(f"🎯 [YTDlp 探针洞穿成功] 视频: {norm['title']} | 时长: {duration}s | 画质: {resolution} | 格式: {format_ext}")
+        except Exception as e:
+            ctx.log.error(f"❌ [YTDlp 探针穿透失败] 针对 {norm['raw_link']} 的解析受阻: {e}")
+        
         return text
+
+    async def parse_single_item(self, url: str, ctx: PluginContext | None = None) -> Dict[str, Any]:
+        bvid = self._extract_bvid(url)
+        if not bvid:
+            raise ValueError("暂时仅支持直接包含 BV 号的 Bilibili 视频链接")
+        api_url = f"https://api.bilibili.com/x/web-interface/view?bvid={bvid}"
+        headers = {
+            "User-Agent": "Mozilla/5.0",
+            "Referer": f"https://www.bilibili.com/video/{bvid}",
+        }
+        if ctx and ctx.config.get("cookie"):
+            headers["Cookie"] = ctx.config["cookie"]
+
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.get(api_url, headers=headers)
+            response.raise_for_status()
+            payload = response.json()
+
+        if payload.get("code") != 0 or "data" not in payload:
+            raise ValueError("Bilibili 视频解析失败，请确认链接有效")
+
+        data = payload["data"]
+        raw_item = {
+            "bvid": bvid,
+            "aid": data.get("aid"),
+            "title": data.get("title", ""),
+            "desc": data.get("desc", ""),
+            "short_link": data.get("short_link_v2") or data.get("short_link") or f"https://www.bilibili.com/video/{bvid}",
+            "owner": data.get("owner", {}),
+            "pubdate": data.get("pubdate"),
+            "duration": data.get("duration", 0),
+            "pic": data.get("pic", ""),
+            "tname": data.get("tname"),
+            "_ctx_enable_ai": False,
+        }
+        normalized = self._normalize_video_item(raw_item)
+        normalized["_pipeline_raw_data"] = raw_item
+        return normalized
 
     async def get_hover_blocks(self, item_url: str, user_config: Dict[str, Any]) -> List[Dict[str, Any]]:
         import httpx

@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import List, Optional, Dict, Any
 from enum import Enum
-from pydantic import BaseModel, Field, HttpUrl, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict
 from shared.time_utils import now_in_app_timezone_naive
 
 class ItemIntent(str, Enum):
@@ -32,7 +32,7 @@ class UniversalItem(BaseModel):
     title: str
     source_type: str
     created_at: datetime = Field(default_factory=now_in_app_timezone_naive)
-    raw_link: HttpUrl
+    raw_link: str
     intent: str
     cover_url: Optional[str] = None 
     retention_hours: int = 168

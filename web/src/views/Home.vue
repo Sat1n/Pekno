@@ -7,6 +7,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
 import {
@@ -22,8 +23,8 @@ import {
   SheetHeader,
   SheetTitle
 } from '@/components/ui/sheet'
-import { Github, Tv, FileText, MoreVertical, Sparkles, Bookmark, BookmarkCheck, ExternalLink, Trash2, Star, Loader2, Download, X } from 'lucide-vue-next'
-import { getItems, search, summarizeItem, getItemSummaryStatus, getStoredAuthUser, toggleItemStar, markItemsReadBatch, getActivePlugins, getHoverBlocks, type RawItem, type SearchResult, type ActivePlugin, type HoverResponse } from '@/lib/api'
+import { Github, Tv, FileText, MoreVertical, Sparkles, Bookmark, BookmarkCheck, ExternalLink, Trash2, Star, Loader2, Download, X, Upload, Link2 } from 'lucide-vue-next'
+import { API_BASE_URL, getItems, search, summarizeItem, getItemSummaryStatus, getStoredAuthUser, toggleItemStar, markItemsReadBatch, getActivePlugins, getParsePlugins, getHoverBlocks, uploadItem, parseItemUrl, type RawItem, type SearchResult, type ActivePlugin, type HoverResponse } from '@/lib/api'
 import HoverPreview from '@/components/HoverPreview.vue'
 import { useToast } from '@/components/ui/toast/use-toast'
 import { Toaster } from '@/components/ui/toast'
@@ -36,6 +37,10 @@ interface LocalSearchResult extends SearchResult {
   isRead: boolean
   isStarred: boolean
   keyframes?: string[]
+  intentType: string
+  metadataExtra?: Record<string, any>
+  isLocalUpload?: boolean
+  uploadMimeType?: string
 }
 
 const savedLayout = (localStorage.getItem('pekno-layout') as 'list' | 'grid' | 'compact') || 'list'
@@ -45,6 +50,7 @@ const searchQuery = ref('')
 const searchResults = ref<LocalSearchResult[]>([])
 const activeSource = ref<string>('all')
 const activePlugins = ref<ActivePlugin[]>([])
+const parsePlugins = ref<ActivePlugin[]>([])
 const isLoading = ref(false)
 const isSheetOpen = ref(false)
 const selectedItem = ref<LocalSearchResult | null>(null)
@@ -55,6 +61,15 @@ const pendingSummaryItemId = ref<string | null>(null)
 const keyframePreviewUrl = ref<string | null>(null)
 const keyframePreviewLabel = ref<string>('')
 const keyframePreviewIndex = ref<number>(0)
+const isAddDialogOpen = ref(false)
+const addContentTab = ref<'upload' | 'parse'>('upload')
+const uploadFile = ref<File | null>(null)
+const uploadTitle = ref('')
+const uploadSummary = ref('')
+const retentionDays = ref<number>(-1)
+const parsePluginName = ref('bilibili_sync')
+const parseUrl = ref('')
+const isSubmittingContent = ref(false)
 const route = useRoute()
 const currentUsername = computed(() => getStoredAuthUser().username || '管理员')
 const initialAnchorItemId = ref<string | null>(null)
@@ -173,10 +188,27 @@ function mapSourceType(sourceType: string) {
     bilibili: 'bilibili',
     bilibili_subscribed: 'bilibili',
     article: 'article',
+    upload: 'upload',
   }
 
   return sourceMap[sourceType] || sourceType
 }
+
+function getAbsoluteMediaUrl(url?: string) {
+  if (!url) return '#'
+  if (url.startsWith('http://') || url.startsWith('https://')) {
+    return url
+  }
+  const normalizedPath = url.startsWith('/') ? url : `/${url}`
+  return `${API_BASE_URL}${normalizedPath}`
+}
+
+function isPdfDocument(item?: LocalSearchResult | null) {
+  if (!item) return false
+  return item.intentType === 'document' && item.uploadMimeType === 'application/pdf'
+}
+
+const parseSupportedPlugins = computed(() => parsePlugins.value)
 
 function normalizeRawItem(item: RawItem, index: number): LocalSearchResult {
   const metadata = item.metadata_extra || {}
@@ -213,6 +245,10 @@ function normalizeRawItem(item: RawItem, index: number): LocalSearchResult {
     isRead: Boolean(item.is_read),
     isStarred: Boolean(item.is_starred),
     keyframes: metadata.keyframes || [],
+    intentType: item.intent,
+    metadataExtra: metadata,
+    isLocalUpload: item.source_type === 'upload',
+    uploadMimeType: typeof metadata.mime_type === 'string' ? metadata.mime_type : undefined,
   }
 }
 
@@ -227,6 +263,10 @@ function normalizeSearchResult(item: SearchResult): LocalSearchResult {
     isRead: Boolean(item.is_read),
     isStarred: Boolean(item.is_starred),
     keyframes: (item as any).keyframes || [],
+    intentType: (item as any).intent || 'article',
+    metadataExtra: (item as any).metadata_extra || {},
+    isLocalUpload: (item as any).source_type === 'upload',
+    uploadMimeType: (item as any).metadata_extra?.mime_type,
   }
 }
 
@@ -291,6 +331,7 @@ async function handleSourceClick(sourceId: string) {
 onMounted(async () => {
   try {
     activePlugins.value = await getActivePlugins()
+    parsePlugins.value = await getParsePlugins()
   } catch (e) {
     console.error('获取插件列表失败:', e)
   }
@@ -320,6 +361,7 @@ onBeforeUnmount(() => {
 const getSourceIcon = (source: string) => {
   if (source === 'github') return Github
   if (source === 'bilibili') return Tv
+  if (source === 'upload') return Upload
   return FileText
 }
 
@@ -333,6 +375,11 @@ const gridClass = computed(() => {
 const skeletonCount = 6
 
 function handleCardClick(item: LocalSearchResult) {
+  if (item.isLocalUpload) {
+    selectedItem.value = item
+    isSheetOpen.value = true
+    return
+  }
   if (item.raw_link && item.raw_link !== '#') {
     window.open(item.raw_link, '_blank')
   }
@@ -383,10 +430,7 @@ function handleClearRecord() {
 }
 
 function getKeyframeAbsoluteUrl(frameUrl: string) {
-  if (frameUrl.startsWith('http://') || frameUrl.startsWith('https://')) {
-    return frameUrl
-  }
-  return `http://127.0.0.1:8001${frameUrl}`
+  return getAbsoluteMediaUrl(frameUrl)
 }
 
 function openKeyframePreview(frameUrl: string, index: number) {
@@ -515,7 +559,82 @@ function isCardActive(item: LocalSearchResult) {
 
 function openExternalLink(url?: string) {
   if (url && url !== '#') {
-    window.open(url, '_blank')
+    window.open(getAbsoluteMediaUrl(url), '_blank')
+  }
+}
+
+function handleUploadFileChange(event: Event) {
+  const target = event.target as HTMLInputElement
+  uploadFile.value = target.files?.[0] || null
+}
+
+function resetAddContentDialog() {
+  addContentTab.value = 'upload'
+  uploadFile.value = null
+  uploadTitle.value = ''
+  uploadSummary.value = ''
+  retentionDays.value = -1
+  parsePluginName.value = parseSupportedPlugins.value[0]?.id || 'bilibili_sync'
+  parseUrl.value = ''
+  isSubmittingContent.value = false
+}
+
+async function handleSubmitUpload() {
+  if (!uploadFile.value || isSubmittingContent.value) return
+  try {
+    isSubmittingContent.value = true
+    const createdItem = await uploadItem(uploadFile.value, {
+      title: uploadTitle.value.trim() || undefined,
+      summary: uploadSummary.value.trim() || undefined,
+      retention_days: retentionDays.value,
+    })
+    const normalized = normalizeRawItem(createdItem, 0)
+    isAddDialogOpen.value = false
+    resetAddContentDialog()
+    await loadData(searchQuery.value)
+    selectedItem.value = normalized
+    isSheetOpen.value = true
+    toast({
+      title: '上传成功',
+      description: normalized.title,
+    })
+  } catch (error: any) {
+    toast({
+      title: '上传失败',
+      description: error?.response?.data?.detail || '无法上传该文件，请稍后重试',
+      variant: 'destructive',
+    })
+  } finally {
+    isSubmittingContent.value = false
+  }
+}
+
+async function handleSubmitParse() {
+  if (!parseUrl.value.trim() || isSubmittingContent.value) return
+  try {
+    isSubmittingContent.value = true
+    const response = await parseItemUrl(parsePluginName.value, parseUrl.value.trim(), retentionDays.value)
+    isAddDialogOpen.value = false
+    resetAddContentDialog()
+    toast({
+      title: '解析任务已提交',
+      description: response.message,
+    })
+    void loadData(searchQuery.value)
+    window.setTimeout(() => {
+      void loadData(searchQuery.value)
+    }, 3000)
+    window.setTimeout(() => {
+      void loadData(searchQuery.value)
+    }, 7000)
+  } catch (error: any) {
+    toast({
+      title: '解析失败',
+      description: error?.response?.data?.detail || '无法解析这个链接',
+      variant: 'destructive',
+    })
+  } finally {
+    isSubmittingContent.value = false
   }
 }
 
@@ -649,6 +768,24 @@ watch(
     await loadData()
   }
 )
+
+watch(parseUrl, (value) => {
+  const normalized = value.toLowerCase()
+  if (normalized.includes('bilibili.com') || normalized.includes('b23.tv')) {
+    parsePluginName.value = 'bilibili_sync'
+  } else if (normalized.includes('github.com')) {
+    parsePluginName.value = 'github_stars'
+  }
+})
+
+watch(isAddDialogOpen, (isOpen) => {
+  if (isOpen && parseSupportedPlugins.value.length > 0 && !parseSupportedPlugins.value.find((item) => item.id === parsePluginName.value)) {
+    parsePluginName.value = parseSupportedPlugins.value[0]?.id || 'bilibili_sync'
+  }
+  if (!isOpen) {
+    resetAddContentDialog()
+  }
+})
 </script>
 
 <template>
@@ -656,6 +793,7 @@ watch(
     v-model:layout="layoutMode"
     v-model:search-query="searchQuery"
     @search="handleSearch"
+    @add-content="isAddDialogOpen = true"
   >
     <div class="mb-4">
       <h2 class="text-2xl font-bold">{{ pageTitle }}</h2>
@@ -780,9 +918,21 @@ watch(
           </DropdownMenu>
         </div>
 
-        <div v-if="layoutMode !== 'compact' && item.cover_url" class="h-44 flex items-center justify-center relative overflow-hidden border-b border-border/40 flex-shrink-0 rounded-t-xl">
+        <div
+          v-if="layoutMode !== 'compact' && item.isLocalUpload && item.intentType === 'video'"
+          class="h-44 flex items-center justify-center relative overflow-hidden border-b border-border/40 flex-shrink-0 rounded-t-xl bg-black"
+        >
+          <video
+            :src="getAbsoluteMediaUrl(item.raw_link)"
+            class="w-full h-full object-cover"
+            muted
+            preload="metadata"
+          />
+        </div>
+
+        <div v-else-if="layoutMode !== 'compact' && item.cover_url" class="h-44 flex items-center justify-center relative overflow-hidden border-b border-border/40 flex-shrink-0 rounded-t-xl">
           <img
-            :src="item.cover_url"
+            :src="getAbsoluteMediaUrl(item.cover_url)"
             alt="Cover"
             class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
             @error="(e) => { (e.target as HTMLImageElement).parentElement!.style.display = 'none'; item.cover_url = undefined }"
@@ -883,6 +1033,53 @@ watch(
 
       <ScrollArea class="flex-1 overflow-y-auto p-4">
         <div class="space-y-6">
+          <div v-if="selectedItem?.isLocalUpload">
+            <div class="flex items-center gap-2 mb-3">
+              <Upload class="w-5 h-5 text-primary" />
+              <h3 class="font-semibold text-lg">内容预览</h3>
+            </div>
+            <div class="rounded-lg border bg-muted/30 p-3">
+              <img
+                v-if="selectedItem.intentType === 'image'"
+                :src="getAbsoluteMediaUrl(selectedItem.raw_link)"
+                :alt="selectedItem.title"
+                class="w-full max-h-[50vh] object-contain rounded-md"
+              />
+              <video
+                v-else-if="selectedItem.intentType === 'video'"
+                :src="getAbsoluteMediaUrl(selectedItem.raw_link)"
+                controls
+                class="w-full max-h-[50vh] rounded-md bg-black"
+              />
+              <audio
+                v-else-if="selectedItem.intentType === 'audio'"
+                :src="getAbsoluteMediaUrl(selectedItem.raw_link)"
+                controls
+                class="w-full"
+              />
+              <div v-else-if="isPdfDocument(selectedItem)" class="flex flex-col gap-3">
+                <p class="text-sm text-muted-foreground">该 PDF 已上传完成，可直接在新标签页打开或下载查看。</p>
+                <div class="flex gap-2">
+                  <Button variant="outline" @click="openExternalLink(selectedItem.raw_link)">
+                    <ExternalLink class="w-4 h-4 mr-2" />
+                    打开 PDF
+                  </Button>
+                  <Button variant="outline" @click="openExternalLink(selectedItem.raw_link)">
+                    <Download class="w-4 h-4 mr-2" />
+                    下载文件
+                  </Button>
+                </div>
+              </div>
+              <div v-else class="flex flex-col gap-3">
+                <p class="text-sm text-muted-foreground">此文档类型暂不支持内嵌预览，你仍然可以在新标签页打开它。</p>
+                <Button variant="outline" class="w-fit" @click="openExternalLink(selectedItem.raw_link)">
+                  <ExternalLink class="w-4 h-4 mr-2" />
+                  打开文件
+                </Button>
+              </div>
+            </div>
+          </div>
+
           <div>
             <div class="flex items-center gap-2 mb-3">
               <Sparkles class="w-5 h-5 text-primary" />
@@ -956,6 +1153,100 @@ watch(
       </div>
     </SheetContent>
   </Sheet>
+
+  <Dialog v-model:open="isAddDialogOpen">
+    <DialogContent class="sm:max-w-2xl">
+      <div class="space-y-6">
+        <div>
+          <h3 class="text-xl font-bold">添加内容</h3>
+          <p class="text-sm text-muted-foreground mt-1">主动把本地文件或外部链接注入到 Iris Hub 信息流。</p>
+        </div>
+
+        <div class="flex gap-2 rounded-lg bg-muted/50 p-1">
+          <Button :variant="addContentTab === 'upload' ? 'default' : 'ghost'" class="flex-1" @click="addContentTab = 'upload'">
+            <Upload class="w-4 h-4 mr-2" />
+            本地上传
+          </Button>
+          <Button :variant="addContentTab === 'parse' ? 'default' : 'ghost'" class="flex-1" @click="addContentTab = 'parse'">
+            <Link2 class="w-4 h-4 mr-2" />
+            链接解析
+          </Button>
+        </div>
+
+        <div v-if="addContentTab === 'upload'" class="space-y-4">
+          <label class="flex cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-border bg-muted/20 px-6 py-10 text-center hover:bg-muted/40 transition-colors">
+            <Upload class="w-8 h-8 mb-3 text-primary" />
+            <div class="font-medium">{{ uploadFile ? uploadFile.name : '点击选择文件或拖入此处' }}</div>
+            <div class="text-sm text-muted-foreground mt-1">支持图片、视频、音频、PDF 与常见文档。</div>
+            <input type="file" class="hidden" @change="handleUploadFileChange" />
+          </label>
+
+          <div class="space-y-2">
+            <label class="text-sm font-medium">标题（可选）</label>
+            <input v-model="uploadTitle" type="text" class="w-full rounded-md border bg-background px-3 py-2 text-sm" placeholder="默认使用文件名" />
+          </div>
+
+          <div class="space-y-2">
+            <label class="text-sm font-medium">描述（可选）</label>
+            <textarea v-model="uploadSummary" class="min-h-24 w-full rounded-md border bg-background px-3 py-2 text-sm" placeholder="补充一点上下文，方便以后搜索和回忆"></textarea>
+          </div>
+
+          <div class="space-y-2">
+            <label class="text-sm font-medium">内容有效期</label>
+            <select v-model="retentionDays" class="w-full rounded-md border bg-background px-3 py-2 text-sm">
+              <option :value="-1">永久保留</option>
+              <option :value="7">7 天</option>
+              <option :value="30">30 天</option>
+              <option :value="90">90 天</option>
+            </select>
+          </div>
+
+          <div class="flex justify-end gap-2">
+            <Button variant="outline" @click="isAddDialogOpen = false">取消</Button>
+            <Button :disabled="!uploadFile || isSubmittingContent" @click="handleSubmitUpload">
+              <Loader2 v-if="isSubmittingContent" class="w-4 h-4 mr-2 animate-spin" />
+              上传并加入信息流
+            </Button>
+          </div>
+        </div>
+
+        <div v-else class="space-y-4">
+          <div class="space-y-2">
+            <label class="text-sm font-medium">解析插件</label>
+            <select v-model="parsePluginName" class="w-full rounded-md border bg-background px-3 py-2 text-sm">
+              <option v-for="plugin in parseSupportedPlugins" :key="plugin.id" :value="plugin.id">
+                {{ plugin.name }}
+              </option>
+            </select>
+          </div>
+
+          <div class="space-y-2">
+            <label class="text-sm font-medium">链接地址</label>
+            <input v-model="parseUrl" type="url" class="w-full rounded-md border bg-background px-3 py-2 text-sm" placeholder="https://www.bilibili.com/video/... 或 https://github.com/owner/repo" />
+            <p class="text-xs text-muted-foreground">如果链接特征明显，系统会自动帮你切换到对应插件。</p>
+          </div>
+
+          <div class="space-y-2">
+            <label class="text-sm font-medium">内容有效期</label>
+            <select v-model="retentionDays" class="w-full rounded-md border bg-background px-3 py-2 text-sm">
+              <option :value="-1">永久保留</option>
+              <option :value="7">7 天</option>
+              <option :value="30">30 天</option>
+              <option :value="90">90 天</option>
+            </select>
+          </div>
+
+          <div class="flex justify-end gap-2">
+            <Button variant="outline" @click="isAddDialogOpen = false">取消</Button>
+            <Button :disabled="!parseUrl.trim() || isSubmittingContent || parseSupportedPlugins.length === 0" @click="handleSubmitParse">
+              <Loader2 v-if="isSubmittingContent" class="w-4 h-4 mr-2 animate-spin" />
+              解析并加入信息流
+            </Button>
+          </div>
+        </div>
+      </div>
+    </DialogContent>
+  </Dialog>
 
   <Toaster />
 
