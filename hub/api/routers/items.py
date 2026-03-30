@@ -1,7 +1,6 @@
-import mimetypes
-import uuid
 import hashlib
 import mimetypes
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -58,6 +57,7 @@ def _to_item_response(item: ItemORM, state: Optional[UserItemStateORM]) -> ItemR
         intent=item.intent,
         created_at=item.created_at,
         metadata_extra=metadata,
+        local_asset_url=_build_local_asset_url(item.local_asset_path),
         is_read=bool(state.is_read) if state else False,
         is_watch_later=bool(state.is_watch_later) if state else False,
         is_favorited=bool(state.is_favorited) if state else False,
@@ -67,6 +67,18 @@ def _to_item_response(item: ItemORM, state: Optional[UserItemStateORM]) -> ItemR
 def _public_upload_path(relative_path: Path) -> str:
     normalized = relative_path.as_posix().lstrip("/")
     return f"/uploads/{normalized}"
+
+
+def _build_local_asset_url(local_asset_path: Optional[str]) -> Optional[str]:
+    if not local_asset_path:
+        return None
+    try:
+        path = Path(local_asset_path).resolve()
+        uploads_root = UPLOAD_ROOT.resolve()
+        relative = path.relative_to(uploads_root)
+    except Exception:
+        return None
+    return _public_upload_path(relative)
 
 
 def _infer_upload_type(filename: str, content_type: Optional[str]) -> tuple[str, str]:

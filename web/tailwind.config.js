@@ -1,3 +1,5 @@
+import typography from '@tailwindcss/typography'
+
 /** @type {import('tailwindcss').Config} */
 export default {
   darkMode: ['class'],
@@ -71,7 +73,46 @@ export default {
         'accordion-down': 'accordion-down 0.2s ease-out',
         'accordion-up': 'accordion-up 0.2s ease-out',
       },
+      typography: ({ theme }) => ({
+        DEFAULT: {
+          css: {
+            hr: {
+              borderTopWidth: '1px',
+              borderColor: theme('colors.slate.300'),
+              marginTop: '2.25em',
+              marginBottom: '2em',
+            },
+            table: {
+              width: '100%',
+            },
+            'thead th': {
+              color: theme('colors.slate.900'),
+              backgroundColor: theme('colors.slate.50'),
+              borderBottomColor: theme('colors.slate.300'),
+            },
+            'tbody td, tbody th': {
+              borderColor: theme('colors.slate.300'),
+            },
+          },
+        },
+        invert: {
+          css: {
+            hr: {
+              borderTopWidth: '1px',
+              borderColor: theme('colors.slate.700'),
+            },
+            'thead th': {
+              color: theme('colors.slate.100'),
+              backgroundColor: theme('colors.slate.800'),
+              borderBottomColor: theme('colors.slate.700'),
+            },
+            'tbody td, tbody th': {
+              borderColor: theme('colors.slate.700'),
+            },
+          },
+        },
+      }),
     },
   },
-  plugins: [],
+  plugins: [typography],
 }

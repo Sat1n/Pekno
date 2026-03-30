@@ -140,6 +140,19 @@ class UserItemStateORM(Base):
     )
 
 
+class UserAnnotationsORM(Base):
+    """用户对条目的轻量批注/内化记录"""
+    __tablename__ = "user_annotations"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    item_id: Mapped[str] = mapped_column(String, ForeignKey("items.id", ondelete="CASCADE"), index=True)
+    type: Mapped[str] = mapped_column(String, default="general")
+    content_raw: Mapped[str] = mapped_column(Text)
+    anchor_data: Mapped[dict] = mapped_column(JSON, default={})
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now_in_app_timezone_naive)
+
+
 class InvitationCodeORM(Base):
     """邀请码追踪表"""
     __tablename__ = "invitation_codes"

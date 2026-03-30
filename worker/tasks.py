@@ -19,6 +19,49 @@ import httpx
 from pathlib import Path
 
 
+def _parse_github_repo_ref(item: ItemORM) -> tuple[str, str] | None:
+    metadata = item.metadata_extra or {}
+    owner = metadata.get("owner")
+    repo = metadata.get("repo")
+    if owner and repo:
+        return str(owner), str(repo)
+
+    source_url = item.raw_link or ""
+    if "github.com/" not in source_url:
+        return None
+
+    try:
+        tail = source_url.split("github.com/", 1)[1]
+        parts = [part for part in tail.split("/") if part]
+        if len(parts) < 2:
+            return None
+        return parts[0], parts[1].removesuffix(".git")
+    except Exception:
+        return None
+
+
+async def _download_github_readme(item: ItemORM, output_dir: Path) -> tuple[str, str]:
+    repo_ref = _parse_github_repo_ref(item)
+    if not repo_ref:
+        raise ValueError("无法从条目中解析 GitHub 仓库信息")
+
+    owner, repo = repo_ref
+    headers = {
+        "Accept": "application/vnd.github.raw+json",
+        "User-Agent": "Iris-Hub/1.0",
+    }
+    readme_url = f"https://api.github.com/repos/{owner}/{repo}/readme"
+
+    async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+        response = await client.get(readme_url, headers=headers)
+        response.raise_for_status()
+        readme_text = response.text
+
+    output_path = output_dir / "README.md"
+    output_path.write_text(readme_text, encoding="utf-8")
+    return str(output_path), readme_text
+
+
 def _format_seconds_for_summary(seconds: float) -> str:
     total_seconds = max(0, int(seconds))
     minutes, secs = divmod(total_seconds, 60)
@@ -280,7 +323,11 @@ async def task_download_vault_asset(item_id: str):
         return
 
     existing_local_path = item.local_asset_path
-    if existing_local_path and Path(existing_local_path).exists():
+    needs_github_readme_backfill = (
+        item.source_type == "github_star"
+        and not (item.metadata_extra or {}).get("vault_readme_text")
+    )
+    if existing_local_path and Path(existing_local_path).exists() and not needs_github_readme_backfill:
         worker_log.info(f"⏭️ Vault 已存在本地文件，跳过重复下载: {item_id}")
         return
 
@@ -312,20 +359,24 @@ async def task_download_vault_asset(item_id: str):
             else:
                 local_path = await asyncio.to_thread(YTDlpService.download_audio, source_url, str(output_path))
         else:
-            guessed_type, _ = mimetypes.guess_type(source_url)
-            ext = Path(source_url).suffix or (
-                ".pdf" if guessed_type == "application/pdf" else
-                ".md" if guessed_type == "text/markdown" else
-                ".html"
-            )
-            output_path = item_dir / f"source{ext}"
-            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-                response = await client.get(source_url)
-                response.raise_for_status()
-                output_path.write_bytes(response.content)
-            local_path = str(output_path)
+            if item.source_type == "github_star":
+                local_path, readme_text = await _download_github_readme(item, item_dir)
+                metadata["vault_readme_text"] = readme_text
+                metadata["vault_download_content_type"] = "text/markdown"
+            else:
+                guessed_type, _ = mimetypes.guess_type(source_url)
+                ext = Path(source_url).suffix or (
+                    ".pdf" if guessed_type == "application/pdf" else
+                    ".md" if guessed_type == "text/markdown" else
+                    ".html"
+                )
+                output_path = item_dir / f"source{ext}"
+                async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+                    response = await client.get(source_url)
+                    response.raise_for_status()
+                    output_path.write_bytes(response.content)
+                local_path = str(output_path)
 
-        metadata = dict(item.metadata_extra or {})
         metadata["vault_download_status"] = "completed"
         metadata.pop("vault_download_error", None)
 
@@ -336,6 +387,7 @@ async def task_download_vault_asset(item_id: str):
                     .where(ItemORM.id == item_id)
                     .values(
                         local_asset_path=local_path,
+                        content_text=metadata.get("vault_readme_text", item.content_text),
                         metadata_extra=metadata,
                         updated_at=now_in_app_timezone_naive(),
                     )

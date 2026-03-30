@@ -2,7 +2,7 @@
 import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useColorMode } from '@vueuse/core'
-import { Search, Activity, Clock, Settings, Sun, Moon, Monitor, LayoutList, LayoutGrid, Rows3, Bell, Plus } from 'lucide-vue-next'
+import { Search, Activity, Clock, Settings, Sun, Moon, Monitor, LayoutList, LayoutGrid, Rows3, Bell, Plus, Archive } from 'lucide-vue-next'
 import { Sidebar, SidebarContent, SidebarGroup, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -116,6 +116,7 @@ const navMain = computed(() => {
   const items: Array<{ title: string; icon: any; to: string; disabled?: boolean }> = [
     { title: '探索 (Explore)', icon: Search, to: '/' },
     { title: '稍后再看', icon: Clock, to: '/watch-later' },
+    { title: '收藏库 / Vault', icon: Archive, to: '/vault' },
   ]
   if (currentUser.value.role === 'super_admin') {
     items.push({ title: '动态 (Activity) [开发中]', icon: Activity, to: '/activity', disabled: true })

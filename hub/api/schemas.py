@@ -13,6 +13,7 @@ class ItemResponse(BaseModel):
     intent: str
     created_at: datetime
     metadata_extra: dict = {}
+    local_asset_url: Optional[str] = None
     is_read: bool = False
     is_watch_later: bool = False
     is_favorited: bool = False
@@ -50,6 +51,7 @@ class FrontendSearchItem(BaseModel):
     cover_url: Optional[str] = None
     author: Optional[str] = None
     raw_link: Optional[str] = None
+    local_asset_url: Optional[str] = None
     source_type: Optional[str] = None
     intent: Optional[str] = None
     metadata_extra: Optional[dict] = None
@@ -105,6 +107,15 @@ class ItemStateResponse(BaseModel):
     is_read: bool
     is_watch_later: bool
     is_favorited: bool
+
+
+class AnnotationResponse(BaseModel):
+    id: str
+    item_id: str
+    type: str
+    content_raw: str
+    anchor_data: dict = {}
+    created_at: datetime
 
 
 class InvitationCodeResponse(BaseModel):

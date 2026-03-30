@@ -4,6 +4,7 @@ import Home from '@/views/Home.vue'
 import Init from '@/views/Init.vue'
 import Login from '@/views/Login.vue'
 import Register from '@/views/Register.vue'
+import Vault from '@/views/Vault.vue'
 import { getAuthStatus, getStoredToken } from '@/lib/api'
 
 let authStatusCache: { needs_initialization: boolean } | null = null
@@ -34,6 +35,12 @@ const router = createRouter({
       path: '/watch-later',
       name: 'watch-later',
       component: Home,
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/vault',
+      name: 'vault',
+      component: Vault,
       meta: { requiresAuth: true },
     },
     {

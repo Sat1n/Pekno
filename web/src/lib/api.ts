@@ -106,6 +106,7 @@ export interface SearchResult {
   cover_url?: string
   author?: string
   raw_link?: string
+  local_asset_url?: string | null
   source_type?: string
   intent?: string
   metadata_extra?: Record<string, any>
@@ -116,6 +117,7 @@ export interface SearchResult {
   is_read?: boolean
   is_watch_later?: boolean
   is_favorited?: boolean
+  is_starred?: boolean
 }
 
 export interface RawItem {
@@ -123,6 +125,7 @@ export interface RawItem {
   title: string
   source_type: string
   raw_link: string
+  local_asset_url?: string | null
   summary?: string | null
   content_text?: string | null
   tags: string[]
@@ -132,12 +135,22 @@ export interface RawItem {
   is_read: boolean
   is_watch_later: boolean
   is_favorited: boolean
+  is_starred?: boolean
 }
 
 export interface AcceptedTaskResponse {
   status: string
   task_id: string
   message: string
+}
+
+export interface AnnotationItem {
+  id: string
+  item_id: string
+  type: string
+  content_raw: string
+  anchor_data: Record<string, any>
+  created_at: string
 }
 
 export interface UploadDedupResponse {
@@ -245,13 +258,13 @@ export async function searchGitHub(params: SearchParams = {}): Promise<SearchRes
 export async function getItems(
   limit?: number,
   offset: number = 0,
-  options: { watchLaterOnly?: boolean; favoritedOnly?: boolean; source_type?: string } = {}
+  options: { watchLaterOnly?: boolean; favoritedOnly?: boolean; starredOnly?: boolean; source_type?: string } = {}
 ): Promise<RawItem[]> {
   const params: Record<string, number | boolean | string> = { offset }
   if (typeof limit === 'number') {
     params.limit = limit
   }
-  if (options.watchLaterOnly) {
+  if (options.watchLaterOnly || options.starredOnly) {
     params.watch_later_only = true
   }
   if (options.favoritedOnly) {
@@ -307,6 +320,29 @@ export async function toggleItemWatchLater(itemId: string): Promise<{ item_id: s
 
 export async function toggleItemFavorite(itemId: string): Promise<{ item_id: string; is_read: boolean; is_watch_later: boolean; is_favorited: boolean }> {
   const response = await apiClient.post(`/api/items/${itemId}/favorite`)
+  return response.data
+}
+
+export async function toggleItemStar(itemId: string): Promise<{ item_id: string; is_read: boolean; is_starred: boolean }> {
+  const response = await apiClient.post(`/api/items/${itemId}/watch_later`)
+  // Map the backend field to the frontend's simplified schema
+  return { item_id: response.data.item_id, is_read: response.data.is_read, is_starred: response.data.is_watch_later }
+}
+
+export async function getAnnotations(itemId: string): Promise<AnnotationItem[]> {
+  const response = await apiClient.get<AnnotationItem[]>(`/api/items/${itemId}/annotations`)
+  return response.data
+}
+
+export async function createAnnotation(
+  itemId: string,
+  payload: { content_raw: string; type?: string; anchor_data?: Record<string, any> }
+): Promise<AnnotationItem> {
+  const response = await apiClient.post<AnnotationItem>(`/api/items/${itemId}/annotations`, {
+    type: payload.type ?? 'general',
+    content_raw: payload.content_raw,
+    anchor_data: payload.anchor_data ?? {},
+  })
   return response.data
 }
 

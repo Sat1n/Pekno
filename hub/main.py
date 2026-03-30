@@ -3,6 +3,7 @@ from fastapi import FastAPI, Query, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Optional
 from datetime import datetime
+from pathlib import Path
 from hub.core.search import SearchService
 from shared.database import AsyncSessionLocal
 from shared.models import ItemORM, UserItemStateORM
@@ -50,23 +51,44 @@ async def _get_user_item_state_map(user_id: str, item_ids: list[str]) -> dict[st
         rows = result.scalars().all()
     return {row.item_id: row for row in rows}
 
+
+def _build_local_asset_url(local_asset_path: str | None) -> str | None:
+    if not local_asset_path:
+        return None
+    try:
+        path = Path(local_asset_path).resolve()
+        uploads_root = Path("data/uploads").resolve()
+        relative = path.relative_to(uploads_root)
+    except Exception:
+        return None
+    return f"/uploads/{relative.as_posix().lstrip('/')}"
+
 from hub.api import data
-from hub.api.routers import admin, auth, items, plugins
+from hub.api.routers import admin, annotations, auth, items, plugins
 from hub.api.mcp import mcp_app
 from hub.api.middlewares.mcp_auth import MCPAuthMiddleware
 import os
 from fastapi.staticfiles import StaticFiles
+from starlette.responses import Response
 
 # 确保存储目录存在并挂载静态目录，专门用于对外暴露关键帧等媒体素材
 os.makedirs(os.path.join("data", "static", "keyframes"), exist_ok=True)
 os.makedirs(os.path.join("data", "uploads"), exist_ok=True)
-app.mount("/api/static", StaticFiles(directory="data/static"), name="static")
-app.mount("/uploads", StaticFiles(directory="data/uploads"), name="uploads")
+class CachedStaticFiles(StaticFiles):
+    def file_response(self, full_path, stat_result, scope, status_code=200) -> Response:
+        response = super().file_response(full_path, stat_result, scope, status_code)
+        response.headers.setdefault("Cache-Control", "public, max-age=604800, immutable")
+        return response
+
+
+app.mount("/api/static", CachedStaticFiles(directory="data/static"), name="static")
+app.mount("/uploads", CachedStaticFiles(directory="data/uploads"), name="uploads")
 
 app.include_router(data.router, prefix="/api")
 app.include_router(plugins.router)
 app.include_router(auth.router)
 app.include_router(items.router)
+app.include_router(annotations.router)
 app.include_router(admin.router)
 protected_mcp_app = MCPAuthMiddleware(mcp_app)
 app.mount("/api/mcp", protected_mcp_app)
@@ -146,6 +168,7 @@ async def hybrid_search_api(
                     cover_url=cover_url,
                     author=author,
                     raw_link=item.raw_link,
+                    local_asset_url=_build_local_asset_url(item.local_asset_path),
                     source_type=item.source_type,
                     intent=item.intent,
                     metadata_extra=metadata,
@@ -216,6 +239,7 @@ async def hybrid_search_api(
             cover_url=cover_url,
             author=author,
             raw_link=item.raw_link,
+            local_asset_url=_build_local_asset_url(item.local_asset_path),
             source_type=item.source_type,
             intent=item.intent,
             metadata_extra=metadata,
@@ -311,6 +335,8 @@ async def search_github_items(
                 "has_long_summary": has_long_summary,
                 "cover_url": cover_url,
                 "author": author,
+                "raw_link": item.raw_link,
+                "local_asset_url": _build_local_asset_url(item.local_asset_path),
                 "score": round(score, 2),
                 "source": "github",
                 "tags": tags[:5],  # 最多显示 5 个标签
