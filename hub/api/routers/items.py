@@ -1,10 +1,13 @@
 import mimetypes
 import uuid
+import hashlib
+import mimetypes
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import and_, delete, select
 from sqlalchemy.dialects.postgresql import insert
@@ -56,7 +59,8 @@ def _to_item_response(item: ItemORM, state: Optional[UserItemStateORM]) -> ItemR
         created_at=item.created_at,
         metadata_extra=metadata,
         is_read=bool(state.is_read) if state else False,
-        is_starred=bool(state.is_starred) if state else False,
+        is_watch_later=bool(state.is_watch_later) if state else False,
+        is_favorited=bool(state.is_favorited) if state else False,
     )
 
 
@@ -114,6 +118,8 @@ async def _store_user_item(item_data: Dict[str, Any], user_id: str, *, retention
                 updated_at=created_at,
                 retention_days=retention_days,
                 metadata_extra=metadata_extra,
+                file_hash=item_data.get("file_hash"),
+                local_asset_path=item_data.get("local_asset_path"),
             ).on_conflict_do_update(
                 index_elements=["id"],
                 set_={
@@ -127,6 +133,8 @@ async def _store_user_item(item_data: Dict[str, Any], user_id: str, *, retention
                     "updated_at": created_at,
                     "retention_days": retention_days,
                     "metadata_extra": metadata_extra,
+                    "file_hash": item_data.get("file_hash"),
+                    "local_asset_path": item_data.get("local_asset_path"),
                 },
             )
             await session.execute(item_stmt)
@@ -135,7 +143,8 @@ async def _store_user_item(item_data: Dict[str, Any], user_id: str, *, retention
                 user_id=user_id,
                 item_id=item_id,
                 is_read=False,
-                is_starred=False,
+                is_watch_later=False,
+                is_favorited=False,
                 updated_at=created_at,
             ).on_conflict_do_nothing(index_elements=["user_id", "item_id"])
             await session.execute(state_stmt)
@@ -162,11 +171,65 @@ async def _fetch_item_for_user(item_id: str, user_id: str) -> tuple[ItemORM, Use
     return row
 
 
+async def _ensure_user_item_state(
+    user_id: str,
+    item_id: str,
+    *,
+    is_watch_later: Optional[bool] = None,
+    is_favorited: Optional[bool] = None,
+) -> UserItemStateORM:
+    now = now_in_app_timezone_naive()
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            result = await session.execute(
+                select(UserItemStateORM).where(
+                    UserItemStateORM.user_id == user_id,
+                    UserItemStateORM.item_id == item_id,
+                )
+            )
+            state = result.scalar_one_or_none()
+            if state is None:
+                state_stmt = insert(UserItemStateORM).values(
+                    user_id=user_id,
+                    item_id=item_id,
+                    is_read=False,
+                    is_watch_later=bool(is_watch_later),
+                    is_favorited=bool(is_favorited),
+                    updated_at=now,
+                ).on_conflict_do_nothing(index_elements=["user_id", "item_id"])
+                await session.execute(state_stmt)
+            else:
+                if is_watch_later is not None:
+                    state.is_watch_later = is_watch_later
+                if is_favorited is not None:
+                    state.is_favorited = is_favorited
+                state.updated_at = now
+
+    _, refreshed_state = await _fetch_item_for_user(item_id, user_id)
+    return refreshed_state
+
+
+async def _queue_vault_download_if_needed(item_id: str, item: ItemORM):
+    local_asset_path = item.local_asset_path
+    if item.source_type == "upload":
+        return
+    if local_asset_path and Path(local_asset_path).exists():
+        return
+
+    try:
+        from worker.tasks import task_download_vault_asset
+
+        await task_download_vault_asset.kiq(item_id)
+    except Exception:
+        hub_log.exception("投递 Vault 下载任务失败")
+
+
 @router.get("", response_model=List[ItemResponse])
 async def get_items(
     limit: Optional[int] = Query(default=None, ge=1),
     offset: int = Query(default=0, ge=0),
-    starred_only: bool = Query(default=False),
+    watch_later_only: bool = Query(default=False),
+    favorited_only: bool = Query(default=False),
     source_type: Optional[str] = Query(default=None),
     current_user=Depends(get_current_user),
 ):
@@ -183,8 +246,10 @@ async def get_items(
             .order_by(ItemORM.created_at.desc())
             .offset(offset)
         )
-        if starred_only:
-            stmt = stmt.where(UserItemStateORM.is_starred == True)
+        if watch_later_only:
+            stmt = stmt.where(UserItemStateORM.is_watch_later == True)
+        if favorited_only:
+            stmt = stmt.where(UserItemStateORM.is_favorited == True)
         if source_type:
             stmt = stmt.where(ItemORM.source_type == source_type)
         if limit is not None:
@@ -224,6 +289,7 @@ async def upload_item(
     title: Optional[str] = Form(default=None),
     summary: Optional[str] = Form(default=None),
     retention_days: int = Form(default=-1),
+    auto_favorite: bool = Form(default=False),
     current_user=Depends(get_current_user),
 ):
     UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
@@ -238,6 +304,34 @@ async def upload_item(
     target_path = target_dir / target_name
 
     content = await file.read()
+    file_hash = hashlib.sha256(content).hexdigest()
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(ItemORM).where(ItemORM.file_hash == file_hash)
+        )
+        existing_item = result.scalar_one_or_none()
+
+    if existing_item:
+        if auto_favorite:
+            state = await _ensure_user_item_state(
+                current_user["id"],
+                existing_item.id,
+                is_favorited=True,
+            )
+        else:
+            state = await _ensure_user_item_state(current_user["id"], existing_item.id)
+        response_item = _to_item_response(existing_item, state)
+        return JSONResponse(
+            status_code=409,
+            content={
+                "message": "该文件已存在于知识库中，已为你关联到现有卡片。",
+                "item_id": existing_item.id,
+                "deduplicated": True,
+                "item": response_item.model_dump(mode="json"),
+            },
+        )
+
     with open(target_path, "wb") as output_file:
         output_file.write(content)
 
@@ -265,8 +359,16 @@ async def upload_item(
         "intent": intent,
         "tags": [intent],
         "metadata_extra": metadata_extra,
+        "file_hash": file_hash,
+        "local_asset_path": str(target_path),
     }
     item_id = await _store_user_item(item_payload, current_user["id"], retention_days=retention_days)
+    if auto_favorite:
+        await _ensure_user_item_state(
+            current_user["id"],
+            item_id,
+            is_favorited=True,
+        )
     item, state = await _fetch_item_for_user(item_id, current_user["id"])
     return _to_item_response(item, state)
 
@@ -300,8 +402,8 @@ async def parse_item_url(
     }
 
 
-@router.post("/{item_id}/star", response_model=ItemStateResponse)
-async def toggle_item_star(item_id: str, current_user=Depends(get_current_user)):
+@router.post("/{item_id}/watch_later", response_model=ItemStateResponse)
+async def toggle_item_watch_later(item_id: str, current_user=Depends(get_current_user)):
     async with AsyncSessionLocal() as session:
         async with session.begin():
             item = await session.get(ItemORM, item_id)
@@ -319,14 +421,56 @@ async def toggle_item_star(item_id: str, current_user=Depends(get_current_user))
             if state is None:
                 raise HTTPException(status_code=404, detail="当前用户无权操作该条目")
 
-            state.is_starred = not state.is_starred
+            state.is_watch_later = not state.is_watch_later
             state.updated_at = now_in_app_timezone_naive()
 
     return ItemStateResponse(
         item_id=item_id,
         is_read=bool(state.is_read),
-        is_starred=bool(state.is_starred),
+        is_watch_later=bool(state.is_watch_later),
+        is_favorited=bool(state.is_favorited),
     )
+
+
+@router.post("/{item_id}/favorite", response_model=ItemStateResponse)
+async def toggle_item_favorite(item_id: str, current_user=Depends(get_current_user)):
+    should_queue_download = False
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            item = await session.get(ItemORM, item_id)
+            if not item:
+                raise HTTPException(status_code=404, detail="找不到对应条目")
+
+            result = await session.execute(
+                select(UserItemStateORM).where(
+                    UserItemStateORM.user_id == current_user["id"],
+                    UserItemStateORM.item_id == item_id,
+                )
+            )
+            state = result.scalar_one_or_none()
+
+            if state is None:
+                raise HTTPException(status_code=404, detail="当前用户无权操作该条目")
+
+            was_favorited = bool(state.is_favorited)
+            state.is_favorited = not state.is_favorited
+            state.updated_at = now_in_app_timezone_naive()
+            should_queue_download = (not was_favorited) and bool(state.is_favorited)
+
+    if should_queue_download:
+        await _queue_vault_download_if_needed(item_id, item)
+
+    return ItemStateResponse(
+        item_id=item_id,
+        is_read=bool(state.is_read),
+        is_watch_later=bool(state.is_watch_later),
+        is_favorited=bool(state.is_favorited),
+    )
+
+
+@router.post("/{item_id}/star", response_model=ItemStateResponse)
+async def toggle_item_star(item_id: str, current_user=Depends(get_current_user)):
+    return await toggle_item_watch_later(item_id, current_user)
 
 
 @router.post("/read_batch")
@@ -355,7 +499,8 @@ async def mark_items_read_batch(payload: ReadBatchRequest, current_user=Depends(
                         "user_id": current_user["id"],
                         "item_id": item_id,
                         "is_read": True,
-                        "is_starred": False,
+                        "is_watch_later": False,
+                        "is_favorited": False,
                         "updated_at": now,
                     }
                     for item_id in valid_item_ids
@@ -399,8 +544,22 @@ async def summarize_item(item_id: str, current_user=Depends(get_current_user)):
 
     import uuid as task_uuid
     task_id = str(task_uuid.uuid4())
+    metadata = item.metadata_extra or {}
+
+    if item.intent == "image":
+        return {
+            "status": "skipped",
+            "task_id": "",
+            "message": "图片内容暂不支持 AI 总结，已跳过本次请求。",
+        }
 
     if item.intent == "video":
+        if metadata.get("has_long_summary") or metadata.get("raw_transcript"):
+            return {
+                "status": "skipped",
+                "task_id": "",
+                "message": "该视频已经完成过多媒体分析，无需重复生成。",
+            }
         from worker.tasks import process_multimedia_task
         await process_multimedia_task.kiq(item_id, item.raw_link)
         msg = "AI 多媒体分析管线已启动，正在剥离音轨并生成胶卷快照，请稍后..."

@@ -14,7 +14,8 @@ class ItemResponse(BaseModel):
     created_at: datetime
     metadata_extra: dict = {}
     is_read: bool = False
-    is_starred: bool = False
+    is_watch_later: bool = False
+    is_favorited: bool = False
     # 注意：这里坚决不包含 embedding 字段，减少传输压力
     
     class Config:
@@ -57,6 +58,8 @@ class FrontendSearchItem(BaseModel):
     tags: List[str] = []
     time: str
     keyframes: Optional[List[str]] = None
+    is_watch_later: bool = False
+    is_favorited: bool = False
     
     class Config:
         from_attributes = True
@@ -100,7 +103,8 @@ class ReadBatchRequest(BaseModel):
 class ItemStateResponse(BaseModel):
     item_id: str
     is_read: bool
-    is_starred: bool
+    is_watch_later: bool
+    is_favorited: bool
 
 
 class InvitationCodeResponse(BaseModel):

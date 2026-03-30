@@ -114,7 +114,8 @@ export interface SearchResult {
   tags: string[]
   time: string
   is_read?: boolean
-  is_starred?: boolean
+  is_watch_later?: boolean
+  is_favorited?: boolean
 }
 
 export interface RawItem {
@@ -129,13 +130,21 @@ export interface RawItem {
   created_at: string
   metadata_extra?: Record<string, any> | null
   is_read: boolean
-  is_starred: boolean
+  is_watch_later: boolean
+  is_favorited: boolean
 }
 
 export interface AcceptedTaskResponse {
   status: string
   task_id: string
   message: string
+}
+
+export interface UploadDedupResponse {
+  message: string
+  item_id: string
+  deduplicated: boolean
+  item: RawItem
 }
 
 export interface AuthStatus {
@@ -236,14 +245,17 @@ export async function searchGitHub(params: SearchParams = {}): Promise<SearchRes
 export async function getItems(
   limit?: number,
   offset: number = 0,
-  options: { starredOnly?: boolean; source_type?: string } = {}
+  options: { watchLaterOnly?: boolean; favoritedOnly?: boolean; source_type?: string } = {}
 ): Promise<RawItem[]> {
   const params: Record<string, number | boolean | string> = { offset }
   if (typeof limit === 'number') {
     params.limit = limit
   }
-  if (options.starredOnly) {
-    params.starred_only = true
+  if (options.watchLaterOnly) {
+    params.watch_later_only = true
+  }
+  if (options.favoritedOnly) {
+    params.favorited_only = true
   }
   if (options.source_type) {
     params.source_type = options.source_type
@@ -257,7 +269,7 @@ export async function getItems(
 
 export async function uploadItem(
   file: File,
-  payload: { title?: string; summary?: string; retention_days?: number } = {}
+  payload: { title?: string; summary?: string; retention_days?: number; auto_favorite?: boolean } = {}
 ): Promise<RawItem> {
   const formData = new FormData()
   formData.append('file', file)
@@ -269,6 +281,9 @@ export async function uploadItem(
   }
   if (typeof payload.retention_days === 'number') {
     formData.append('retention_days', String(payload.retention_days))
+  }
+  if (payload.auto_favorite) {
+    formData.append('auto_favorite', 'true')
   }
   const response = await apiClient.post<RawItem>('/api/items/upload', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
@@ -285,8 +300,13 @@ export async function parseItemUrl(pluginName: string, url: string, retention_da
   return response.data
 }
 
-export async function toggleItemStar(itemId: string): Promise<{ item_id: string; is_read: boolean; is_starred: boolean }> {
-  const response = await apiClient.post(`/api/items/${itemId}/star`)
+export async function toggleItemWatchLater(itemId: string): Promise<{ item_id: string; is_read: boolean; is_watch_later: boolean; is_favorited: boolean }> {
+  const response = await apiClient.post(`/api/items/${itemId}/watch_later`)
+  return response.data
+}
+
+export async function toggleItemFavorite(itemId: string): Promise<{ item_id: string; is_read: boolean; is_watch_later: boolean; is_favorited: boolean }> {
+  const response = await apiClient.post(`/api/items/${itemId}/favorite`)
   return response.data
 }
 

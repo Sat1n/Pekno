@@ -111,18 +111,18 @@ async def cleanup_expired_items() -> int:
             ]
 
             if expired_ids:
-                starred_result = await session.execute(
+                protected_result = await session.execute(
                     select(UserItemStateORM.item_id).where(
                         UserItemStateORM.item_id.in_(expired_ids),
-                        UserItemStateORM.is_starred == True,
+                        (UserItemStateORM.is_favorited == True) | (UserItemStateORM.is_watch_later == True),
                     )
                 )
-                starred_ids = set(starred_result.scalars().all())
-                if starred_ids:
+                protected_ids = set(protected_result.scalars().all())
+                if protected_ids:
                     worker_log.info(
-                        f"🛡️ [TTL 清理] 检测到 {len(starred_ids)} 条已被收藏的过期数据，跳过物理销毁。"
+                        f"🛡️ [TTL 清理] 检测到 {len(protected_ids)} 条已被收藏或加入稍后再看的过期数据，跳过物理销毁。"
                     )
-                    expired_ids = [item_id for item_id in expired_ids if item_id not in starred_ids]
+                    expired_ids = [item_id for item_id in expired_ids if item_id not in protected_ids]
 
             for row in rows[:10]:
                 expires_at = row.created_at + timedelta(hours=row.retention_days)

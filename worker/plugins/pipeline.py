@@ -98,7 +98,8 @@ async def run_plugin_pipeline_task(plugin_id: str, limit: int = None, user_id: s
                                 user_id=user_id,
                                 item_id=item_id,
                                 is_read=False,
-                                is_starred=False,
+                                is_watch_later=False,
+                                is_favorited=False,
                             ).on_conflict_do_nothing(
                                 index_elements=["user_id", "item_id"]
                             )
@@ -235,14 +236,27 @@ async def summarize_repo_task(item_id: str, task_id: str):
             logger=worker_log
         )
         
+        repo_match = re.search(r'github\.com/([^/]+)/([^/]+)', item.raw_link or "")
         raw_data = {
-            "name": re.search(r'github\.com/[^/]+/([^/]+)', item.raw_link).group(1) if item.raw_link else item.title,
-            "owner": {"login": re.search(r'github\.com/([^/]+)/[^/]+', item.raw_link).group(1) if item.raw_link else ""},
+            "name": repo_match.group(2) if repo_match else item.title,
+            "owner": {"login": repo_match.group(1) if repo_match else ""},
             "description": item.content_text,
             "metadata_extra": item.metadata_extra or {}
         }
-        
-        text_to_summarize = await plugin.extract_text_for_ai(ctx, raw_data)
+
+        if item.source_type == "github_star" and repo_match:
+            text_to_summarize = await plugin.extract_text_for_ai(ctx, raw_data)
+        else:
+            text_to_summarize = "\n\n".join(
+                part for part in [
+                    f"标题：{item.title}" if item.title else "",
+                    f"简介：{item.content_text or item.summary}" if (item.content_text or item.summary) else "",
+                ]
+                if part
+            )
+            if not text_to_summarize.strip():
+                worker_log.info(f"⏭️ 跳过 AI 总结：条目缺少可总结文本 {item_id}")
+                return
         
         from hub.core.llm.service import LLMManager
         ai = LLMManager()

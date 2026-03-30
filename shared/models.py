@@ -23,11 +23,13 @@ class ItemORM(Base):
     raw_link: Mapped[str] = mapped_column(String)
     intent: Mapped[str] = mapped_column(String)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=now_in_app_timezone_naive, onupdate=now_in_app_timezone_naive)
+    file_hash: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    local_asset_path: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
     # 保留策略：-1 代表永久，正整数按“小时”解释（沿用旧列名避免额外迁移）
     retention_days: Mapped[int] = mapped_column(Integer, default=-1) 
     
-    # 标记：是否已"收藏" (如果收藏了，即便过了天数也不删)
+    # 条目级保留标记：用于系统级永久保留，不等同于用户收藏
     is_pinned: Mapped[bool] = mapped_column(default=False)
     
     # 扩展字段
@@ -129,7 +131,8 @@ class UserItemStateORM(Base):
     user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id", ondelete="CASCADE"), index=True)
     item_id: Mapped[str] = mapped_column(String, ForeignKey("items.id", ondelete="CASCADE"), index=True)
     is_read: Mapped[bool] = mapped_column(Boolean, default=False)
-    is_starred: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_watch_later: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_favorited: Mapped[bool] = mapped_column(Boolean, default=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
         default=now_in_app_timezone_naive,

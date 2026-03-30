@@ -70,6 +70,21 @@ END $$;
         """))
         await conn.execute(text("ALTER TABLE IF EXISTS personal_access_tokens ALTER COLUMN is_admin SET DEFAULT FALSE"))
         await conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_personal_access_tokens_token ON personal_access_tokens (token)"))
+        await conn.execute(text("ALTER TABLE IF EXISTS items ADD COLUMN IF NOT EXISTS file_hash VARCHAR"))
+        await conn.execute(text("ALTER TABLE IF EXISTS items ADD COLUMN IF NOT EXISTS local_asset_path VARCHAR"))
+        await conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_items_file_hash ON items (file_hash)"))
+        await conn.execute(text("ALTER TABLE IF EXISTS user_item_states ADD COLUMN IF NOT EXISTS is_watch_later BOOLEAN DEFAULT FALSE"))
+        await conn.execute(text("ALTER TABLE IF EXISTS user_item_states ADD COLUMN IF NOT EXISTS is_favorited BOOLEAN DEFAULT FALSE"))
+        await conn.execute(text("ALTER TABLE IF EXISTS user_item_states ALTER COLUMN is_starred SET DEFAULT FALSE"))
+        await conn.execute(text("UPDATE user_item_states SET is_starred = FALSE WHERE is_starred IS NULL"))
+        await conn.execute(text("""
+            UPDATE user_item_states
+            SET is_watch_later = TRUE
+            WHERE COALESCE(is_starred, FALSE) = TRUE
+              AND COALESCE(is_watch_later, FALSE) = FALSE
+        """))
+        await conn.execute(text("ALTER TABLE IF EXISTS user_item_states ALTER COLUMN is_watch_later SET DEFAULT FALSE"))
+        await conn.execute(text("ALTER TABLE IF EXISTS user_item_states ALTER COLUMN is_favorited SET DEFAULT FALSE"))
         
         # 确保内置插件始终存在于注册表中 (即使不运行 init_db 也能在第一次启动时载入)
         hub_log.info("🌱 正在检查并补齐内置插件...")

@@ -36,6 +36,20 @@ app.add_middleware(
 
 search_service = SearchService()
 
+
+async def _get_user_item_state_map(user_id: str, item_ids: list[str]) -> dict[str, UserItemStateORM]:
+    if not item_ids:
+        return {}
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(UserItemStateORM).where(
+                UserItemStateORM.user_id == user_id,
+                UserItemStateORM.item_id.in_(item_ids),
+            )
+        )
+        rows = result.scalars().all()
+    return {row.item_id: row for row in rows}
+
 from hub.api import data
 from hub.api.routers import admin, auth, items, plugins
 from hub.api.mcp import mcp_app
@@ -86,22 +100,11 @@ async def hybrid_search_api(
                 .limit(20)
             )
             items = result.scalars().all()
+            state_map = await _get_user_item_state_map(current_user["id"], [item.id for item in items])
             # 转换为前端格式
             search_results = []
             for idx, item in enumerate(items):
-                metadata = item.metadata_extra or {}
-                lang = metadata.get("lang")
-                pushed_at = metadata.get("pushed_at")
-                
-                tags = list(item.tags) if item.tags else []
-                if lang and lang not in tags:
-                    tags.insert(0, lang)
-                if not tags:
-                    tags = ["未分类"]
-                
-            # 转换为前端格式
-            search_results = []
-            for idx, item in enumerate(items):
+                state = state_map.get(item.id)
                 metadata = item.metadata_extra or {}
                 lang = metadata.get("lang")
                 pushed_at = metadata.get("pushed_at")
@@ -150,15 +153,19 @@ async def hybrid_search_api(
                     source=source,
                     tags=tags[:5],
                     time=time_str,
-                    keyframes=keyframes
+                    keyframes=keyframes,
+                    is_watch_later=bool(state.is_watch_later) if state else False,
+                    is_favorited=bool(state.is_favorited) if state else False,
                 ))
             return search_results
     
     # 有搜索词时，执行混合搜索
     results = await search_service.hybrid_search(q, current_user["id"], limit=20, source_type=source_type)
+    state_map = await _get_user_item_state_map(current_user["id"], [item.id for item, _ in results])
     
     search_results = []
     for item, score in results:
+        state = state_map.get(item.id)
         # 提取 metadata_extra 中的信息
         metadata = item.metadata_extra or {}
         lang = metadata.get("lang")
@@ -216,7 +223,9 @@ async def hybrid_search_api(
             source=source,
             tags=tags[:5],
             time=time_str,
-            keyframes=keyframes
+            keyframes=keyframes,
+            is_watch_later=bool(state.is_watch_later) if state else False,
+            is_favorited=bool(state.is_favorited) if state else False,
         ))
     
     return search_results
@@ -256,10 +265,12 @@ async def search_github_items(
         
         result = await session.execute(query)
         items = result.scalars().all()
+        state_map = await _get_user_item_state_map(current_user["id"], [item.id for item in items])
         
         # 转换为前端需要的格式，并按 stars 数量排序
         search_results = []
         for item in items:
+            state = state_map.get(item.id)
             # 提取 metadata_extra 中的信息
             metadata = item.metadata_extra or {}
             stars = metadata.get("stars", 0)
@@ -304,7 +315,9 @@ async def search_github_items(
                 "source": "github",
                 "tags": tags[:5],  # 最多显示 5 个标签
                 "time": time_str,
-                "keyframes": keyframes
+                "keyframes": keyframes,
+                "is_watch_later": bool(state.is_watch_later) if state else False,
+                "is_favorited": bool(state.is_favorited) if state else False,
             })
         
         # 按 stars 数量降序排列，然后取 limit 个

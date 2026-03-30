@@ -23,8 +23,8 @@ import {
   SheetHeader,
   SheetTitle
 } from '@/components/ui/sheet'
-import { Github, Tv, FileText, MoreVertical, Sparkles, Bookmark, BookmarkCheck, ExternalLink, Trash2, Star, Loader2, Download, X, Upload, Link2 } from 'lucide-vue-next'
-import { API_BASE_URL, getItems, search, summarizeItem, getItemSummaryStatus, getStoredAuthUser, toggleItemStar, markItemsReadBatch, getActivePlugins, getParsePlugins, getHoverBlocks, uploadItem, parseItemUrl, type RawItem, type SearchResult, type ActivePlugin, type HoverResponse } from '@/lib/api'
+import { Github, Tv, FileText, MoreVertical, Sparkles, Bookmark, BookmarkCheck, ExternalLink, Trash2, Star, Loader2, Download, X, Upload, Link2, Heart, HeartOff } from 'lucide-vue-next'
+import { API_BASE_URL, getItems, search, summarizeItem, getItemSummaryStatus, getStoredAuthUser, toggleItemWatchLater, toggleItemFavorite, markItemsReadBatch, getActivePlugins, getParsePlugins, getHoverBlocks, uploadItem, parseItemUrl, type RawItem, type SearchResult, type ActivePlugin, type HoverResponse, type UploadDedupResponse } from '@/lib/api'
 import HoverPreview from '@/components/HoverPreview.vue'
 import { useToast } from '@/components/ui/toast/use-toast'
 import { Toaster } from '@/components/ui/toast'
@@ -35,7 +35,8 @@ interface LocalSearchResult extends SearchResult {
   authorName?: string
   displayTags?: string[]
   isRead: boolean
-  isStarred: boolean
+  isWatchLater: boolean
+  isFavorited: boolean
   keyframes?: string[]
   intentType: string
   metadataExtra?: Record<string, any>
@@ -80,7 +81,7 @@ const pageSubtitle = computed(() => {
     return '正在加载数据...'
   }
   if (isWatchLaterPage.value) {
-    return `${currentUsername.value} 当前收藏了 ${searchResults.value.length} 条稍后再看`
+    return `${currentUsername.value} 当前暂存了 ${searchResults.value.length} 条稍后再看`
   }
   
   let unreadCount = searchResults.value.length
@@ -243,7 +244,8 @@ function normalizeRawItem(item: RawItem, index: number): LocalSearchResult {
     time,
     raw_link: item.raw_link || '#',
     isRead: Boolean(item.is_read),
-    isStarred: Boolean(item.is_starred),
+    isWatchLater: Boolean(item.is_watch_later),
+    isFavorited: Boolean(item.is_favorited),
     keyframes: metadata.keyframes || [],
     intentType: item.intent,
     metadataExtra: metadata,
@@ -261,7 +263,8 @@ function normalizeSearchResult(item: SearchResult): LocalSearchResult {
     displayTags: item.tags.length > 0 ? item.tags : ['未分类'],
     raw_link: item.raw_link || (item.source === 'github' ? `https://github.com/${item.title}` : '#'),
     isRead: Boolean(item.is_read),
-    isStarred: Boolean(item.is_starred),
+    isWatchLater: Boolean(item.is_watch_later),
+    isFavorited: Boolean(item.is_favorited),
     keyframes: (item as any).keyframes || [],
     intentType: (item as any).intent || 'article',
     metadataExtra: (item as any).metadata_extra || {},
@@ -281,7 +284,7 @@ async function loadData(query: string = '') {
     const sourceFilter = activeSource.value === 'all' ? undefined : activeSource.value
 
     if (isWatchLaterPage.value) {
-      const items = await getItems(undefined, 0, { starredOnly: true, source_type: sourceFilter })
+      const items = await getItems(undefined, 0, { watchLaterOnly: true, source_type: sourceFilter })
       const normalized = items.map((item, index) => normalizeRawItem(item, index))
       initialAnchorItemId.value = null
       if (query.trim()) {
@@ -404,13 +407,14 @@ function handleAISummary(item: LocalSearchResult) {
 
 async function handleAddToWatchLater(item: LocalSearchResult) {
   try {
-    const response = await toggleItemStar(item.id)
+    const response = await toggleItemWatchLater(item.id)
     updateLocalItemState(item.id, {
       isRead: response.is_read,
-      isStarred: response.is_starred,
+      isWatchLater: response.is_watch_later,
+      isFavorited: response.is_favorited,
     })
     toast({
-      title: response.is_starred ? '已加入稍后再看' : '已取消稍后再看',
+      title: response.is_watch_later ? '已加入稍后再看' : '已移出稍后再看',
       description: item.title,
     })
   } catch (error) {
@@ -418,6 +422,28 @@ async function handleAddToWatchLater(item: LocalSearchResult) {
     toast({
       title: '操作失败',
       description: '无法更新稍后再看状态，请稍后重试',
+      variant: 'destructive',
+    })
+  }
+}
+
+async function handleToggleFavorite(item: LocalSearchResult) {
+  try {
+    const response = await toggleItemFavorite(item.id)
+    updateLocalItemState(item.id, {
+      isRead: response.is_read,
+      isWatchLater: response.is_watch_later,
+      isFavorited: response.is_favorited,
+    })
+    toast({
+      title: response.is_favorited ? '已收藏' : '已取消收藏',
+      description: item.title,
+    })
+  } catch (error) {
+    console.error('切换收藏失败:', error)
+    toast({
+      title: '操作失败',
+      description: '无法更新收藏状态，请稍后重试',
       variant: 'destructive',
     })
   }
@@ -481,6 +507,14 @@ async function handleGenerateSummary() {
     }
 
     const response = await summarizeItem(itemId)
+    if (response.status === 'skipped') {
+      isSummarizing.value = false
+      toast({
+        title: '已跳过',
+        description: response.message,
+      })
+      return
+    }
     currentTaskId.value = response.task_id
     pendingSummaryItemId.value = itemId
 
@@ -579,7 +613,7 @@ function resetAddContentDialog() {
   isSubmittingContent.value = false
 }
 
-async function handleSubmitUpload() {
+async function handleSubmitUpload(autoFavorite: boolean = false) {
   if (!uploadFile.value || isSubmittingContent.value) return
   try {
     isSubmittingContent.value = true
@@ -587,6 +621,7 @@ async function handleSubmitUpload() {
       title: uploadTitle.value.trim() || undefined,
       summary: uploadSummary.value.trim() || undefined,
       retention_days: retentionDays.value,
+      auto_favorite: autoFavorite,
     })
     const normalized = normalizeRawItem(createdItem, 0)
     isAddDialogOpen.value = false
@@ -595,10 +630,24 @@ async function handleSubmitUpload() {
     selectedItem.value = normalized
     isSheetOpen.value = true
     toast({
-      title: '上传成功',
+      title: autoFavorite ? '上传并收藏成功' : '上传成功',
       description: normalized.title,
     })
   } catch (error: any) {
+    if (error?.response?.status === 409 && error?.response?.data?.deduplicated) {
+      const dedup = error.response.data as UploadDedupResponse
+      const normalized = normalizeRawItem(dedup.item, 0)
+      isAddDialogOpen.value = false
+      resetAddContentDialog()
+      await loadData(searchQuery.value)
+      selectedItem.value = normalized
+      isSheetOpen.value = true
+      toast({
+        title: autoFavorite ? '已关联并收藏现有内容' : '该文件已存在',
+        description: dedup.message,
+      })
+      return
+    }
     toast({
       title: '上传失败',
       description: error?.response?.data?.detail || '无法上传该文件，请稍后重试',
@@ -638,7 +687,7 @@ async function handleSubmitParse() {
   }
 }
 
-function updateLocalItemState(itemId: string, patch: Partial<Pick<LocalSearchResult, 'isRead' | 'isStarred'>>) {
+function updateLocalItemState(itemId: string, patch: Partial<Pick<LocalSearchResult, 'isRead' | 'isWatchLater' | 'isFavorited'>>) {
   searchResults.value = searchResults.value.map((entry) =>
     entry.id === itemId ? { ...entry, ...patch } : entry
   )
@@ -866,7 +915,8 @@ watch(isAddDialogOpen, (isOpen) => {
           :class="[
             'bg-card text-card-foreground border-border transition-all cursor-pointer overflow-visible group flex flex-col relative',
             isCardActive(item) ? 'border-primary ring-2 ring-primary/20 shadow-md' : 'hover:border-primary/20 shadow-sm hover:shadow-md',
-            item.isStarred ? 'border-amber-300/60 shadow-amber-100/20' : '',
+            item.isFavorited ? 'border-red-300/70 shadow-red-100/20' : '',
+            item.isWatchLater && !item.isFavorited ? 'border-amber-300/60 shadow-amber-100/20' : '',
             layoutMode === 'compact' ? 'rounded-lg' : 'rounded-xl'
           ]"
           @click="handleCardClick(item)"
@@ -880,18 +930,30 @@ watch(isAddDialogOpen, (isOpen) => {
           @click.stop
         />
         <div
-          v-if="item.has_long_summary"
-          class="absolute top-2 left-2 z-10"
-          title="已有 AI 总结"
+          v-if="item.has_long_summary || item.isFavorited || item.isWatchLater"
+          class="absolute top-2 left-2 z-10 flex items-center gap-1.5"
         >
-          <Star class="w-4 h-4 text-yellow-500 fill-yellow-500 animate-pulse" />
-        </div>
-
-        <div
-          v-if="item.isStarred"
-          class="absolute top-2 left-10 z-10 rounded-full bg-amber-500/15 px-2 py-1 text-[10px] font-semibold text-amber-700"
-        >
-          稍后再看
+          <div
+            v-if="item.has_long_summary"
+            class="flex h-7 w-7 items-center justify-center rounded-full bg-background/90 shadow-sm backdrop-blur-sm"
+            title="已有 AI 总结"
+          >
+            <Star class="h-4 w-4 text-yellow-500 fill-yellow-500 animate-pulse" />
+          </div>
+          <div
+            v-if="item.isFavorited"
+            class="flex h-7 w-7 items-center justify-center rounded-full bg-background/90 shadow-sm backdrop-blur-sm"
+            title="已收藏"
+          >
+            <Heart class="h-4 w-4 text-red-500 fill-red-500" />
+          </div>
+          <div
+            v-if="item.isWatchLater"
+            class="flex h-7 w-7 items-center justify-center rounded-full bg-background/90 shadow-sm backdrop-blur-sm"
+            title="稍后再看"
+          >
+            <Bookmark class="h-4 w-4 text-amber-600" />
+          </div>
         </div>
 
         <div class="absolute top-2 right-2 z-10" @click.stop>
@@ -911,8 +973,12 @@ watch(isAddDialogOpen, (isOpen) => {
                 <span>✨ AI 总结</span>
               </DropdownMenuItem>
               <DropdownMenuItem @click.stop="handleAddToWatchLater(item)">
-                <component :is="item.isStarred ? BookmarkCheck : Bookmark" class="mr-2 h-4 w-4" />
-                <span>{{ item.isStarred ? '移出稍后再看' : '添加到稍后再看' }}</span>
+                <component :is="item.isWatchLater ? BookmarkCheck : Bookmark" class="mr-2 h-4 w-4" />
+                <span>{{ item.isWatchLater ? '移出稍后再看' : '加入稍后再看' }}</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem @click.stop="handleToggleFavorite(item)">
+                <component :is="item.isFavorited ? HeartOff : Heart" class="mr-2 h-4 w-4" />
+                <span>{{ item.isFavorited ? '取消收藏' : '收藏' }}</span>
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -1203,9 +1269,18 @@ watch(isAddDialogOpen, (isOpen) => {
 
           <div class="flex justify-end gap-2">
             <Button variant="outline" @click="isAddDialogOpen = false">取消</Button>
-            <Button :disabled="!uploadFile || isSubmittingContent" @click="handleSubmitUpload">
+            <Button :disabled="!uploadFile || isSubmittingContent" @click="handleSubmitUpload(false)">
               <Loader2 v-if="isSubmittingContent" class="w-4 h-4 mr-2 animate-spin" />
-              上传并加入信息流
+              上传
+            </Button>
+            <Button
+              :disabled="!uploadFile || isSubmittingContent"
+              class="bg-red-600 text-white hover:bg-red-600/90"
+              @click="handleSubmitUpload(true)"
+            >
+              <Loader2 v-if="isSubmittingContent" class="w-4 h-4 mr-2 animate-spin" />
+              <Heart v-else class="w-4 h-4 mr-2" />
+              上传并收藏
             </Button>
           </div>
         </div>

@@ -6,12 +6,16 @@ from hub.core.media.downloader import YTDlpService
 from hub.core.media.transcriber import TranscriberFactory
 from hub.core.llm.summarizer import summarize_video_transcript
 from hub.core.model_settings import get_model_assignments
+from shared.time_utils import now_in_app_timezone_naive
+from sqlalchemy import select
 import os
 import json
 import asyncio
 import shutil
 import tempfile
 import random
+import mimetypes
+import httpx
 from pathlib import Path
 
 
@@ -87,6 +91,8 @@ async def process_multimedia_task(item_id: str, url: str):
             def title(self): return self._data.title
             @property
             def summary(self): return self._data.content_text or self._data.summary
+            @property
+            def metadata_extra(self): return self._data.metadata_extra or {}
             
         item_ctx = TranscribeContext()
     
@@ -97,13 +103,46 @@ async def process_multimedia_task(item_id: str, url: str):
     requested_video_path = task_cache_dir / "video.mp4"
     
     try:
-        stream_info = await asyncio.to_thread(YTDlpService.extract_info, url, {})
-        duration_seconds = stream_info.get("duration")
+        metadata_extra = item_ctx.metadata_extra
+        local_asset_path = item_data.local_asset_path
+        duration_seconds = metadata_extra.get("duration")
 
-        worker_log.info(f"📥 核心层: YTDlp 剥离最高音质流媒体并实施本地化... 缓存目录={task_cache_dir}")
-        # 这里的耗时阻断将转为守护线程执行
-        audio_path = await asyncio.to_thread(YTDlpService.download_audio, url, str(requested_audio_path))
-        worker_log.info(f"🎧 音轨已落盘: {audio_path}")
+        if local_asset_path and Path(local_asset_path).exists():
+            local_source = Path(local_asset_path)
+            if not duration_seconds:
+                duration_seconds = metadata_extra.get("duration")
+
+            if item_data.intent == "audio":
+                audio_path = str(local_source)
+                worker_log.info(f"🎧 使用 Vault 本地音频: {audio_path}")
+            else:
+                video_path = str(local_source)
+                worker_log.info(f"📹 使用 Vault 本地视频: {video_path}")
+                cmd = [
+                    "ffmpeg", "-y",
+                    "-i", video_path,
+                    "-vn",
+                    "-acodec", "libmp3lame",
+                    str(requested_audio_path),
+                ]
+                proc = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                _, stderr = await proc.communicate()
+                if proc.returncode != 0:
+                    err_text = stderr.decode("utf-8", errors="ignore").strip()
+                    raise RuntimeError(f"FFmpeg 提取本地视频音轨失败: {err_text[:500]}")
+                audio_path = str(requested_audio_path)
+                worker_log.info(f"🎧 已从本地视频提取音轨: {audio_path}")
+        else:
+            stream_info = await asyncio.to_thread(YTDlpService.extract_info, url, {})
+            duration_seconds = stream_info.get("duration")
+
+            worker_log.info(f"📥 核心层: YTDlp 剥离最高音质流媒体并实施本地化... 缓存目录={task_cache_dir}")
+            audio_path = await asyncio.to_thread(YTDlpService.download_audio, url, str(requested_audio_path))
+            worker_log.info(f"🎧 音轨已落盘: {audio_path}")
             
         # 定位底层 Whisper 挂载型号
         assignments = await get_model_assignments()
@@ -153,13 +192,17 @@ async def process_multimedia_task(item_id: str, url: str):
             worker_log.info("📸 开始通过 FFmpeg 切取高光关键帧快照...")
             os.makedirs(os.path.join("data", "static", "keyframes"), exist_ok=True)
             try:
-                worker_log.info("📹 正在下载本地视频缓存用于关键帧抽取...")
-                video_path = await asyncio.to_thread(
-                    YTDlpService.download_video_1080p,
-                    url,
-                    str(requested_video_path),
-                )
-                worker_log.info(f"🎞️ 视频已落盘: {video_path}")
+                if local_asset_path and Path(local_asset_path).exists() and item_data.intent == "video":
+                    video_path = local_asset_path
+                    worker_log.info(f"🎞️ 使用 Vault 本地视频抽取关键帧: {video_path}")
+                else:
+                    worker_log.info("📹 正在下载本地视频缓存用于关键帧抽取...")
+                    video_path = await asyncio.to_thread(
+                        YTDlpService.download_video_1080p,
+                        url,
+                        str(requested_video_path),
+                    )
+                    worker_log.info(f"🎞️ 视频已落盘: {video_path}")
 
                 for idx, ts in enumerate(summary_result.keyframe_timestamps):
                     filename = f"{item_id}_{idx}_{ts}.jpg"
@@ -221,3 +264,104 @@ async def process_multimedia_task(item_id: str, url: str):
         if task_cache_dir.exists():
             shutil.rmtree(task_cache_dir, ignore_errors=True)
             worker_log.info(f"🧹 已清理本次多媒体缓存目录: {task_cache_dir}")
+
+
+@broker.task(task_name="download_vault_asset")
+async def task_download_vault_asset(item_id: str):
+    vault_root = Path("data") / "uploads" / "vault"
+    vault_root.mkdir(parents=True, exist_ok=True)
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(ItemORM).where(ItemORM.id == item_id))
+        item = result.scalar_one_or_none()
+
+    if not item:
+        worker_log.error(f"❌ Vault 下载失败，条目不存在: {item_id}")
+        return
+
+    existing_local_path = item.local_asset_path
+    if existing_local_path and Path(existing_local_path).exists():
+        worker_log.info(f"⏭️ Vault 已存在本地文件，跳过重复下载: {item_id}")
+        return
+
+    if item.source_type == "upload":
+        worker_log.info(f"⏭️ 本地上传内容无需再次下载: {item_id}")
+        return
+
+    metadata = dict(item.metadata_extra or {})
+    metadata["vault_download_status"] = "downloading"
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            await session.execute(
+                ItemORM.__table__.update()
+                .where(ItemORM.id == item_id)
+                .values(metadata_extra=metadata, updated_at=now_in_app_timezone_naive())
+            )
+
+    source_url = item.raw_link
+    try:
+        item_dir = vault_root / item_id
+        item_dir.mkdir(parents=True, exist_ok=True)
+        local_path: str | None = None
+
+        if item.intent in {"video", "audio"}:
+            suffix = ".mp4" if item.intent == "video" else ".mp3"
+            output_path = item_dir / f"source{suffix}"
+            if item.intent == "video":
+                local_path = await asyncio.to_thread(YTDlpService.download_video_1080p, source_url, str(output_path))
+            else:
+                local_path = await asyncio.to_thread(YTDlpService.download_audio, source_url, str(output_path))
+        else:
+            guessed_type, _ = mimetypes.guess_type(source_url)
+            ext = Path(source_url).suffix or (
+                ".pdf" if guessed_type == "application/pdf" else
+                ".md" if guessed_type == "text/markdown" else
+                ".html"
+            )
+            output_path = item_dir / f"source{ext}"
+            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+                response = await client.get(source_url)
+                response.raise_for_status()
+                output_path.write_bytes(response.content)
+            local_path = str(output_path)
+
+        metadata = dict(item.metadata_extra or {})
+        metadata["vault_download_status"] = "completed"
+        metadata.pop("vault_download_error", None)
+
+        async with AsyncSessionLocal() as session:
+            async with session.begin():
+                await session.execute(
+                    ItemORM.__table__.update()
+                    .where(ItemORM.id == item_id)
+                    .values(
+                        local_asset_path=local_path,
+                        metadata_extra=metadata,
+                        updated_at=now_in_app_timezone_naive(),
+                    )
+                )
+
+        worker_log.info(f"📦 Vault 资源下载完成: {item_id} -> {local_path}")
+
+        already_processed = bool(
+            (item.metadata_extra or {}).get("raw_transcript")
+            or (item.metadata_extra or {}).get("has_long_summary")
+            or (item.metadata_extra or {}).get("keyframes")
+        )
+
+        if item.intent in {"video", "audio"} and not already_processed:
+            await process_multimedia_task.kiq(item_id, source_url)
+        elif item.intent in {"video", "audio"}:
+            worker_log.info(f"⏭️ 已存在多媒体分析结果，跳过重复处理: {item_id}")
+    except Exception as e:
+        worker_log.error(f"❌ Vault 下载失败: {item_id} | {e}")
+        metadata = dict(item.metadata_extra or {})
+        metadata["vault_download_status"] = "failed"
+        metadata["vault_download_error"] = str(e)
+        async with AsyncSessionLocal() as session:
+            async with session.begin():
+                await session.execute(
+                    ItemORM.__table__.update()
+                    .where(ItemORM.id == item_id)
+                    .values(metadata_extra=metadata, updated_at=now_in_app_timezone_naive())
+                )

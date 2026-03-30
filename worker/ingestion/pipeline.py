@@ -78,7 +78,8 @@ class IngestionPipeline:
                         user_id=item.source_user_id,
                         item_id=item.id,
                         is_read=False,
-                        is_starred=False,
+                        is_watch_later=False,
+                        is_favorited=False,
                     ).on_conflict_do_nothing(
                         index_elements=['user_id', 'item_id']
                     )

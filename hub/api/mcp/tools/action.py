@@ -9,7 +9,7 @@ from shared.models import UserItemStateORM
 
 MARK_AS_STARRED_TOOL = Tool(
     name="mark_as_starred",
-    description="Mark an item as starred (Watch Later). Requires the write:star scope.",
+    description="Mark an item as watch later. Requires the write:star scope.",
     inputSchema={
         "type": "object",
         "properties": {
@@ -54,6 +54,6 @@ async def mark_as_starred(server, user_id: str, args: dict):
             state = result.scalar_one_or_none()
             if not state:
                 return [TextContent(type="text", text=f"Error: Cannot access item {item_id}")]
-            state.is_starred = True
+            state.is_watch_later = True
 
     return [TextContent(type="text", text=f"Success: Item {item_id} added to Watch Later")]
