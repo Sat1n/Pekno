@@ -23,7 +23,7 @@ import {
   SheetHeader,
   SheetTitle
 } from '@/components/ui/sheet'
-import { Github, Tv, FileText, MoreVertical, Sparkles, Bookmark, BookmarkCheck, ExternalLink, Trash2, Star, Loader2, Download, X, Upload, Link2, Heart, HeartOff } from 'lucide-vue-next'
+import { Github, Tv, FileText, MoreVertical, Sparkles, Clock3, Clock4, ExternalLink, Trash2, Star, Loader2, Download, X, Upload, Link2, Heart, HeartOff } from 'lucide-vue-next'
 import { API_BASE_URL, getItems, search, summarizeItem, getItemSummaryStatus, getStoredAuthUser, toggleItemWatchLater, toggleItemFavorite, markItemsReadBatch, getActivePlugins, getParsePlugins, getHoverBlocks, uploadItem, parseItemUrl, type RawItem, type SearchResult, type ActivePlugin, type HoverResponse, type UploadDedupResponse } from '@/lib/api'
 import HoverPreview from '@/components/HoverPreview.vue'
 import { useToast } from '@/components/ui/toast/use-toast'
@@ -952,7 +952,7 @@ watch(isAddDialogOpen, (isOpen) => {
             class="flex h-7 w-7 items-center justify-center rounded-full bg-background/90 shadow-sm backdrop-blur-sm"
             title="稍后再看"
           >
-            <Bookmark class="h-4 w-4 text-amber-600" />
+              <Clock3 class="h-4 w-4 text-amber-600" />
           </div>
         </div>
 
@@ -973,7 +973,7 @@ watch(isAddDialogOpen, (isOpen) => {
                 <span>✨ AI 总结</span>
               </DropdownMenuItem>
               <DropdownMenuItem @click.stop="handleAddToWatchLater(item)">
-                <component :is="item.isWatchLater ? BookmarkCheck : Bookmark" class="mr-2 h-4 w-4" />
+                  <component :is="item.isWatchLater ? Clock4 : Clock3" class="mr-2 h-4 w-4" />
                 <span>{{ item.isWatchLater ? '移出稍后再看' : '加入稍后再看' }}</span>
               </DropdownMenuItem>
               <DropdownMenuItem @click.stop="handleToggleFavorite(item)">
