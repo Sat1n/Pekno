@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useColorMode } from '@vueuse/core'
 import { Search, Activity, Clock, Settings, Sun, Moon, Monitor, LayoutList, LayoutGrid, Rows3, Bell, Plus, Archive } from 'lucide-vue-next'
@@ -11,6 +11,12 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import SettingsDialog from '@/components/SettingsDialog.vue'
 import PluginSettingsDialog from '@/components/PluginSettingsDialog.vue'
 import { clearStoredToken, getStoredAuthUser } from '@/lib/api'
+
+const props = withDefaults(defineProps<{
+  searchPlaceholder?: string
+}>(), {
+  searchPlaceholder: '搜索 GitHub 项目...',
+})
 
 defineEmits<{
   search: []
@@ -94,9 +100,12 @@ const layoutMode = defineModel<'list' | 'grid' | 'compact'>('layout', { default:
 // 搜索关键词 v-model
 const searchQuery = defineModel<string>('searchQuery', { default: '' })
 
+const SIDEBAR_STATE_KEY = 'pekno-sidebar-open'
+
 // 系统设置弹窗状态
 const isSettingsOpen = ref(false)
 const settingsTab = ref('plugins')
+const sidebarOpen = ref(true)
 
 // 插件设置弹窗状态
 const isPluginSettingsOpen = ref(false)
@@ -136,18 +145,26 @@ async function navigateTo(path: string, disabled?: boolean) {
   await router.push(path)
 }
 
-import { onMounted } from 'vue'
 onMounted(() => {
+  const savedSidebarState = window.localStorage.getItem(SIDEBAR_STATE_KEY)
+  if (savedSidebarState === 'false') {
+    sidebarOpen.value = false
+  }
+
   if (route.query.openSettings === 'models') {
     settingsTab.value = 'models'
     isSettingsOpen.value = true
     router.replace({ path: route.path })
   }
 })
+
+watch(sidebarOpen, (value) => {
+  window.localStorage.setItem(SIDEBAR_STATE_KEY, String(value))
+})
 </script>
 
 <template>
-  <SidebarProvider>
+  <SidebarProvider :open="sidebarOpen" @update:open="sidebarOpen = $event">
     <div class="flex flex-col h-screen w-full bg-background transition-colors duration-300">
       
       <header class="h-14 border-b border-border flex items-center justify-between px-4 sticky top-0 z-50 bg-background/80 backdrop-blur-md">
@@ -165,7 +182,7 @@ onMounted(() => {
           <Search class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <Input 
             v-model="searchQuery"
-            placeholder="搜索 GitHub 项目..." 
+            :placeholder="props.searchPlaceholder" 
             class="w-full pl-9 bg-muted/50 border-transparent focus:bg-background rounded-md h-9 transition-all"
             @keyup.enter="$emit('search')"
           />
@@ -315,7 +332,7 @@ onMounted(() => {
         </div>
       </header>
 
-      <div class="flex flex-1 overflow-hidden">
+      <div class="flex min-h-0 flex-1 overflow-hidden">
         <Sidebar class="top-14 h-[calc(100vh-3.5rem)] border-r bg-muted/30">
           <SidebarContent>
             <SidebarGroup>
@@ -345,8 +362,8 @@ onMounted(() => {
           </div>
         </Sidebar>
 
-        <main class="flex-1 overflow-y-auto bg-background py-6 px-8 lg:px-12 xl:px-16 custom-scrollbar">
-          <div class="w-full max-w-[1920px] mx-auto">
+        <main class="min-h-0 min-w-0 flex-1 overflow-y-auto bg-background px-8 py-6 lg:px-12 xl:px-16 custom-scrollbar">
+          <div class="mx-auto w-full min-w-0 max-w-[1920px]">
             <slot />
           </div>
         </main>

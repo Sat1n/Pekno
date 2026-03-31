@@ -1,5 +1,6 @@
 import hashlib
 import mimetypes
+import re
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -16,7 +17,7 @@ from shared.config import ConfigManager
 from hub.core.security import get_current_user
 from shared.database import AsyncSessionLocal
 from shared.logger import hub_log
-from shared.models import ItemORM, UserItemStateORM
+from shared.models import ItemORM, UserItemStateORM, VaultCategoryORM
 from shared.plugins.base import BasePlugin
 from shared.plugins.manager import plugin_manager
 from shared.time_utils import now_in_app_timezone_naive
@@ -24,12 +25,36 @@ from shared.time_utils import now_in_app_timezone_naive
 router = APIRouter(prefix="/api/items", tags=["Items"])
 
 UPLOAD_ROOT = Path("data/uploads")
+VAULT_ROOT = Path("data/vault")
 PLUGIN_NAME_ALIASES = {
     "github": "github_stars",
     "github_stars": "github_stars",
     "bilibili": "bilibili_sync",
     "bilibili_sync": "bilibili_sync",
 }
+
+
+def _has_unresolved_vault_readme_assets(metadata: Dict[str, Any]) -> bool:
+    if metadata.get("vault_readme_asset_failures"):
+        return True
+
+    readme_text = str(metadata.get("vault_readme_text") or "")
+    if not readme_text:
+        return False
+
+    markdown_matches = re.findall(r'!\[[^\]]*\]\(([^)]+)\)', readme_text)
+    html_matches = re.findall(r'<img\b[^>]*src=["\']([^"\']+)["\']', readme_text, flags=re.IGNORECASE)
+    for asset_url in [*(markdown_matches or []), *(html_matches or [])]:
+        normalized = str(asset_url).strip().replace("\\", "/").lower()
+        if not normalized:
+            continue
+        if normalized.startswith("http://") or normalized.startswith("https://") or normalized.startswith("//") or normalized.startswith("data:"):
+            continue
+        if normalized.startswith("/api/static/vault/"):
+            continue
+        return True
+
+    return False
 
 
 class ParseItemRequest(BaseModel):
@@ -42,6 +67,10 @@ class ParsePluginInfo(BaseModel):
     id: str
     name: str
     source_type: str
+
+
+class AssignVaultCategoryRequest(BaseModel):
+    vault_category_id: str | None = None
 
 
 def _to_item_response(item: ItemORM, state: Optional[UserItemStateORM]) -> ItemResponse:
@@ -58,6 +87,7 @@ def _to_item_response(item: ItemORM, state: Optional[UserItemStateORM]) -> ItemR
         created_at=item.created_at,
         metadata_extra=metadata,
         local_asset_url=_build_local_asset_url(item.local_asset_path),
+        vault_category_id=state.vault_category_id if state else None,
         is_read=bool(state.is_read) if state else False,
         is_watch_later=bool(state.is_watch_later) if state else False,
         is_favorited=bool(state.is_favorited) if state else False,
@@ -74,11 +104,16 @@ def _build_local_asset_url(local_asset_path: Optional[str]) -> Optional[str]:
         return None
     try:
         path = Path(local_asset_path).resolve()
-        uploads_root = UPLOAD_ROOT.resolve()
-        relative = path.relative_to(uploads_root)
+        try:
+            relative = path.relative_to(VAULT_ROOT.resolve())
+            return f"/api/static/vault/{relative.as_posix().lstrip('/')}"
+        except Exception:
+            relative = path.relative_to(UPLOAD_ROOT.resolve())
+            if relative.parts and relative.parts[0] == "vault":
+                return None
+            return _public_upload_path(relative)
     except Exception:
         return None
-    return _public_upload_path(relative)
 
 
 def _infer_upload_type(filename: str, content_type: Optional[str]) -> tuple[str, str]:
@@ -154,6 +189,7 @@ async def _store_user_item(item_data: Dict[str, Any], user_id: str, *, retention
             state_stmt = insert(UserItemStateORM).values(
                 user_id=user_id,
                 item_id=item_id,
+                vault_category_id=None,
                 is_read=False,
                 is_watch_later=False,
                 is_favorited=False,
@@ -204,6 +240,7 @@ async def _ensure_user_item_state(
                 state_stmt = insert(UserItemStateORM).values(
                     user_id=user_id,
                     item_id=item_id,
+                    vault_category_id=None,
                     is_read=False,
                     is_watch_later=bool(is_watch_later),
                     is_favorited=bool(is_favorited),
@@ -221,19 +258,52 @@ async def _ensure_user_item_state(
     return refreshed_state
 
 
-async def _queue_vault_download_if_needed(item_id: str, item: ItemORM):
+async def _queue_vault_download_if_needed(item_id: str, item: ItemORM, user_id: str | None = None):
     local_asset_path = item.local_asset_path
+    metadata = item.metadata_extra or {}
+    needs_github_readme_backfill = (
+        item.source_type == "github_star"
+        and (
+            not metadata.get("vault_readme_text")
+            or not metadata.get("vault_readme_assets_localized")
+            or _has_unresolved_vault_readme_assets(metadata)
+        )
+    )
     if item.source_type == "upload":
         return
-    if local_asset_path and Path(local_asset_path).exists():
+    if local_asset_path and Path(local_asset_path).exists() and not needs_github_readme_backfill:
         return
 
     try:
         from worker.tasks import task_download_vault_asset
 
-        await task_download_vault_asset.kiq(item_id)
+        await task_download_vault_asset.kiq(item_id, user_id)
+        hub_log.info(f"📨 已投递 Vault 资源补齐任务: {item_id} | user={user_id or 'fallback'}")
     except Exception:
         hub_log.exception("投递 Vault 下载任务失败")
+
+
+@router.post("/{item_id}/ensure_vault_asset", response_model=ItemResponse)
+async def ensure_vault_asset(item_id: str, current_user=Depends(get_current_user)):
+    item, state = await _fetch_item_for_user(item_id, current_user["id"])
+    await _queue_vault_download_if_needed(item_id, item, current_user["id"])
+    return _to_item_response(item, state)
+
+
+async def _queue_video_summary_if_needed(item: ItemORM):
+    if item.intent != "video":
+        return
+
+    metadata = item.metadata_extra or {}
+    if metadata.get("has_long_summary") or metadata.get("raw_transcript"):
+        return
+
+    try:
+        from worker.tasks import process_multimedia_task
+
+        await process_multimedia_task.kiq(item.id, item.raw_link)
+    except Exception:
+        hub_log.exception("投递视频总结任务失败")
 
 
 @router.get("", response_model=List[ItemResponse])
@@ -441,12 +511,14 @@ async def toggle_item_watch_later(item_id: str, current_user=Depends(get_current
         is_read=bool(state.is_read),
         is_watch_later=bool(state.is_watch_later),
         is_favorited=bool(state.is_favorited),
+        vault_category_id=state.vault_category_id,
     )
 
 
 @router.post("/{item_id}/favorite", response_model=ItemStateResponse)
 async def toggle_item_favorite(item_id: str, current_user=Depends(get_current_user)):
     should_queue_download = False
+    should_queue_video_summary = False
     async with AsyncSessionLocal() as session:
         async with session.begin():
             item = await session.get(ItemORM, item_id)
@@ -468,15 +540,19 @@ async def toggle_item_favorite(item_id: str, current_user=Depends(get_current_us
             state.is_favorited = not state.is_favorited
             state.updated_at = now_in_app_timezone_naive()
             should_queue_download = (not was_favorited) and bool(state.is_favorited)
+            should_queue_video_summary = should_queue_download and item.intent == "video"
 
     if should_queue_download:
-        await _queue_vault_download_if_needed(item_id, item)
+        await _queue_vault_download_if_needed(item_id, item, current_user["id"])
+    if should_queue_video_summary:
+        await _queue_video_summary_if_needed(item)
 
     return ItemStateResponse(
         item_id=item_id,
         is_read=bool(state.is_read),
         is_watch_later=bool(state.is_watch_later),
         is_favorited=bool(state.is_favorited),
+        vault_category_id=state.vault_category_id,
     )
 
 
@@ -510,6 +586,7 @@ async def mark_items_read_batch(payload: ReadBatchRequest, current_user=Depends(
                     {
                         "user_id": current_user["id"],
                         "item_id": item_id,
+                        "vault_category_id": None,
                         "is_read": True,
                         "is_watch_later": False,
                         "is_favorited": False,
@@ -537,6 +614,43 @@ async def delete_item(item_id: str, current_user=Depends(get_current_user)):
             await session.execute(delete(UserItemStateORM).where(UserItemStateORM.item_id == item_id))
             await session.execute(delete(ItemORM).where(ItemORM.id == item_id))
     return {"status": "success"}
+
+
+@router.patch("/{item_id}/vault-category", response_model=ItemStateResponse)
+async def assign_item_vault_category(
+    item_id: str,
+    payload: AssignVaultCategoryRequest = Body(...),
+    current_user=Depends(get_current_user),
+):
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            result = await session.execute(
+                select(UserItemStateORM).where(
+                    UserItemStateORM.user_id == current_user["id"],
+                    UserItemStateORM.item_id == item_id,
+                )
+            )
+            state = result.scalar_one_or_none()
+            if state is None:
+                raise HTTPException(status_code=404, detail="当前用户无权操作该条目")
+
+            if payload.vault_category_id:
+                category = await session.get(VaultCategoryORM, payload.vault_category_id)
+                if not category or category.user_id != current_user["id"]:
+                    raise HTTPException(status_code=404, detail="目标分类不存在")
+                state.vault_category_id = category.id
+            else:
+                state.vault_category_id = None
+
+            state.updated_at = now_in_app_timezone_naive()
+
+    return ItemStateResponse(
+        item_id=item_id,
+        is_read=bool(state.is_read),
+        is_watch_later=bool(state.is_watch_later),
+        is_favorited=bool(state.is_favorited),
+        vault_category_id=state.vault_category_id,
+    )
 
 
 @router.post("/{item_id}/summarize")

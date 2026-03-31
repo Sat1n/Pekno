@@ -1,18 +1,21 @@
 from __future__ import annotations
 
+import json
 import uuid
+from pathlib import Path
 
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, select
 
-from hub.api.schemas import AnnotationResponse
+from hub.api.schemas import AnnotationAssetResponse, AnnotationResponse
 from hub.core.security import get_current_user
 from shared.database import AsyncSessionLocal
 from shared.models import ItemORM, UserAnnotationsORM, UserItemStateORM
 from shared.time_utils import now_in_app_timezone_naive
 
 router = APIRouter(prefix="/api/items", tags=["Annotations"])
+ANNOTATION_CAPTURE_ROOT = Path("data/static/annotation-captures")
 
 
 class AnnotationCreateRequest(BaseModel):
@@ -96,4 +99,48 @@ async def create_item_annotation(
         content_raw=annotation.content_raw,
         anchor_data=annotation.anchor_data or {},
         created_at=annotation.created_at,
+    )
+
+
+@router.post("/{item_id}/annotation-assets", response_model=AnnotationAssetResponse)
+async def upload_annotation_asset(
+    item_id: str,
+    file: UploadFile = File(...),
+    page: int | None = Form(default=None),
+    rect_norm: str | None = Form(default=None),
+    current_user=Depends(get_current_user),
+):
+    await _ensure_item_visible(item_id, current_user["id"])
+
+    content_type = file.content_type or "application/octet-stream"
+    if not content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="当前仅支持上传图片类型的注释资产")
+
+    suffix = Path(file.filename or "capture.png").suffix or ".png"
+    target_dir = ANNOTATION_CAPTURE_ROOT / current_user["id"] / item_id
+    target_dir.mkdir(parents=True, exist_ok=True)
+    filename = f"{uuid.uuid4()}{suffix}"
+    target_path = target_dir / filename
+
+    payload = await file.read()
+    if not payload:
+        raise HTTPException(status_code=400, detail="上传内容为空")
+
+    target_path.write_bytes(payload)
+
+    parsed_rect = None
+    if rect_norm:
+        try:
+            parsed_rect = json.loads(rect_norm)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=400, detail="rect_norm 不是合法 JSON") from exc
+
+    relative_path = target_path.relative_to(Path("data/static"))
+    asset_url = f"/api/static/{relative_path.as_posix().lstrip('/')}"
+
+    return AnnotationAssetResponse(
+        asset_url=asset_url,
+        content_type=content_type,
+        page=page,
+        rect_norm=parsed_rect,
     )

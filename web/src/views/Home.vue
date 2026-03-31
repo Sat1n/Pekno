@@ -211,6 +211,22 @@ function isPdfDocument(item?: LocalSearchResult | null) {
 
 const parseSupportedPlugins = computed(() => parsePlugins.value)
 
+function toPlainTextSnippet(input?: string | null, fallback: string = '暂无描述', maxLength: number = 180) {
+  if (!input) return fallback
+
+  const plainText = input
+    .replace(/!\[[^\]]*\]\([^)]+\)/g, ' ')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/[#>*_`~-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  if (!plainText) return fallback
+  if (plainText.length <= maxLength) return plainText
+  return `${plainText.slice(0, maxLength).trimEnd()}...`
+}
+
 function normalizeRawItem(item: RawItem, index: number): LocalSearchResult {
   const metadata = item.metadata_extra || {}
   const source = mapSourceType(item.source_type)
@@ -232,7 +248,7 @@ function normalizeRawItem(item: RawItem, index: number): LocalSearchResult {
   return {
     id: item.id,
     title: item.title,
-    summary: item.content_text || item.summary || '暂无描述',
+    summary: toPlainTextSnippet(item.content_text || item.summary || '', '暂无描述'),
     long_summary: hasLongSummary ? (typeof metadata.long_summary === 'string' ? metadata.long_summary : item.summary || undefined) : undefined,
     has_long_summary: hasLongSummary,
     cover_url: typeof metadata.cover_url === 'string' ? metadata.cover_url : undefined,
@@ -256,9 +272,15 @@ function normalizeRawItem(item: RawItem, index: number): LocalSearchResult {
 
 function normalizeSearchResult(item: SearchResult): LocalSearchResult {
   const authorName = item.source === 'bilibili' ? item.author : undefined
+  const metadataExtra = (item as any).metadata_extra || {}
+  const hasLongSummary = Boolean(item.has_long_summary)
+  const displaySummary = toPlainTextSnippet(item.summary, '暂无描述')
 
   return {
     ...item,
+    summary: displaySummary,
+    long_summary: hasLongSummary && typeof item.long_summary === 'string' ? item.long_summary : undefined,
+    has_long_summary: hasLongSummary,
     authorName,
     displayTags: item.tags.length > 0 ? item.tags : ['未分类'],
     raw_link: item.raw_link || (item.source === 'github' ? `https://github.com/${item.title}` : '#'),
@@ -267,9 +289,9 @@ function normalizeSearchResult(item: SearchResult): LocalSearchResult {
     isFavorited: Boolean(item.is_favorited),
     keyframes: (item as any).keyframes || [],
     intentType: (item as any).intent || 'article',
-    metadataExtra: (item as any).metadata_extra || {},
+    metadataExtra,
     isLocalUpload: (item as any).source_type === 'upload',
-    uploadMimeType: (item as any).metadata_extra?.mime_type,
+    uploadMimeType: metadataExtra?.mime_type,
   }
 }
 

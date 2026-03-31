@@ -11,7 +11,12 @@ class SearchService:
         self.embed_service = EmbeddingService()
 
     async def _get_vector_candidates(
-        self, query_text: str, user_id: str, limit: int = 60, source_type: Optional[str] = None
+        self,
+        query_text: str,
+        user_id: str,
+        limit: int = 60,
+        source_type: Optional[str] = None,
+        favorited_only: bool = False,
     ) -> List[ItemORM]:
         """第一路召回：纯向量检索"""
         query_vector = await self.embed_service.get_vector(query_text)
@@ -30,11 +35,18 @@ class SearchService:
             )
             if source_type:
                 stmt = stmt.where(ItemORM.source_type == source_type)
+            if favorited_only:
+                stmt = stmt.where(UserItemStateORM.is_favorited == True)
             result = await session.execute(stmt)
             return result.scalars().all()
 
     async def _get_keyword_candidates(
-        self, query_text: str, user_id: str, limit: int = 60, source_type: Optional[str] = None
+        self,
+        query_text: str,
+        user_id: str,
+        limit: int = 60,
+        source_type: Optional[str] = None,
+        favorited_only: bool = False,
     ) -> List[ItemORM]:
         """第二路召回：全文检索"""
         async with AsyncSessionLocal() as session:
@@ -61,15 +73,34 @@ class SearchService:
             )
             if source_type:
                 stmt = stmt.where(ItemORM.source_type == source_type)
+            if favorited_only:
+                stmt = stmt.where(UserItemStateORM.is_favorited == True)
             result = await session.execute(stmt)
             return result.scalars().all()
 
     async def hybrid_search(
-        self, query_text: str, user_id: str, limit: int = 20, source_type: Optional[str] = None
+        self,
+        query_text: str,
+        user_id: str,
+        limit: int = 20,
+        source_type: Optional[str] = None,
+        favorited_only: bool = False,
     ) -> List[Tuple[ItemORM, float]]:
         """混合搜索 2.0：RRF 算法融合"""
-        vec_task = self._get_vector_candidates(query_text, user_id, limit=60, source_type=source_type)
-        kw_task = self._get_keyword_candidates(query_text, user_id, limit=60, source_type=source_type)
+        vec_task = self._get_vector_candidates(
+            query_text,
+            user_id,
+            limit=60,
+            source_type=source_type,
+            favorited_only=favorited_only,
+        )
+        kw_task = self._get_keyword_candidates(
+            query_text,
+            user_id,
+            limit=60,
+            source_type=source_type,
+            favorited_only=favorited_only,
+        )
         
         vec_items, kw_items = await asyncio.gather(vec_task, kw_task)
         

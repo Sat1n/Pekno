@@ -74,6 +74,14 @@ export const apiClient = axios.create({
 
 export const API_BASE_URL = String(apiClient.defaults.baseURL || '').replace(/\/$/, '')
 
+export function buildAuthorizedHeaders(): Record<string, string> | undefined {
+  const token = getStoredToken()
+  if (!token) return undefined
+  return {
+    Authorization: `Bearer ${token}`,
+  }
+}
+
 apiClient.interceptors.request.use((config) => {
   const token = getStoredToken()
   if (token) {
@@ -132,6 +140,7 @@ export interface RawItem {
   intent: string
   created_at: string
   metadata_extra?: Record<string, any> | null
+  vault_category_id?: string | null
   is_read: boolean
   is_watch_later: boolean
   is_favorited: boolean
@@ -150,6 +159,21 @@ export interface AnnotationItem {
   type: string
   content_raw: string
   anchor_data: Record<string, any>
+  created_at: string
+}
+
+export interface AnnotationAssetUploadResult {
+  asset_url: string
+  content_type: string
+  page?: number | null
+  rect_norm?: Record<string, number> | null
+}
+
+export interface VaultCategory {
+  id: string
+  name: string
+  color?: string | null
+  sort_order: number
   created_at: string
 }
 
@@ -216,6 +240,7 @@ export interface SearchParams {
   q?: string
   limit?: number
   source_type?: string
+  favorited_only?: boolean
 }
 
 /**
@@ -227,6 +252,9 @@ export async function search(params: SearchParams = {}): Promise<SearchResult[]>
   const queryParams: Record<string, any> = { q: params.q || '' }
   if (params.source_type && params.source_type !== 'all') {
     queryParams.source_type = params.source_type
+  }
+  if (params.favorited_only) {
+    queryParams.favorited_only = true
   }
   const response = await apiClient.get<SearchResult[]>('/api/search', {
     params: queryParams,
@@ -313,12 +341,12 @@ export async function parseItemUrl(pluginName: string, url: string, retention_da
   return response.data
 }
 
-export async function toggleItemWatchLater(itemId: string): Promise<{ item_id: string; is_read: boolean; is_watch_later: boolean; is_favorited: boolean }> {
+export async function toggleItemWatchLater(itemId: string): Promise<{ item_id: string; is_read: boolean; is_watch_later: boolean; is_favorited: boolean; vault_category_id?: string | null }> {
   const response = await apiClient.post(`/api/items/${itemId}/watch_later`)
   return response.data
 }
 
-export async function toggleItemFavorite(itemId: string): Promise<{ item_id: string; is_read: boolean; is_watch_later: boolean; is_favorited: boolean }> {
+export async function toggleItemFavorite(itemId: string): Promise<{ item_id: string; is_read: boolean; is_watch_later: boolean; is_favorited: boolean; vault_category_id?: string | null }> {
   const response = await apiClient.post(`/api/items/${itemId}/favorite`)
   return response.data
 }
@@ -343,6 +371,62 @@ export async function createAnnotation(
     content_raw: payload.content_raw,
     anchor_data: payload.anchor_data ?? {},
   })
+  return response.data
+}
+
+export async function uploadAnnotationAsset(
+  itemId: string,
+  file: Blob,
+  payload: { filename?: string; page?: number; rect_norm?: Record<string, number> } = {},
+): Promise<AnnotationAssetUploadResult> {
+  const formData = new FormData()
+  formData.append('file', file, payload.filename || 'annotation-capture.png')
+  if (typeof payload.page === 'number') {
+    formData.append('page', String(payload.page))
+  }
+  if (payload.rect_norm) {
+    formData.append('rect_norm', JSON.stringify(payload.rect_norm))
+  }
+
+  const response = await apiClient.post<AnnotationAssetUploadResult>(
+    `/api/items/${itemId}/annotation-assets`,
+    formData,
+    {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    },
+  )
+  return response.data
+}
+
+export async function getVaultCategories(): Promise<VaultCategory[]> {
+  const response = await apiClient.get<VaultCategory[]>('/api/vault/categories')
+  return response.data
+}
+
+export async function createVaultCategory(payload: { name: string; color?: string }): Promise<VaultCategory> {
+  const response = await apiClient.post<VaultCategory>('/api/vault/categories', payload)
+  return response.data
+}
+
+export async function updateVaultCategory(categoryId: string, payload: { name?: string; color?: string | null }): Promise<VaultCategory> {
+  const response = await apiClient.patch<VaultCategory>(`/api/vault/categories/${categoryId}`, payload)
+  return response.data
+}
+
+export async function deleteVaultCategory(categoryId: string): Promise<{ status: string }> {
+  const response = await apiClient.delete<{ status: string }>(`/api/vault/categories/${categoryId}`)
+  return response.data
+}
+
+export async function assignItemVaultCategory(itemId: string, vaultCategoryId?: string | null): Promise<{ item_id: string; is_read: boolean; is_watch_later: boolean; is_favorited: boolean; vault_category_id?: string | null }> {
+  const response = await apiClient.patch(`/api/items/${itemId}/vault-category`, {
+    vault_category_id: vaultCategoryId ?? null,
+  })
+  return response.data
+}
+
+export async function ensureVaultAsset(itemId: string): Promise<RawItem> {
+  const response = await apiClient.post<RawItem>(`/api/items/${itemId}/ensure_vault_asset`)
   return response.data
 }
 

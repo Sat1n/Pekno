@@ -2,6 +2,7 @@ import yt_dlp
 from yt_dlp.networking.impersonate import ImpersonateTarget
 from typing import Dict, Any, Optional
 from pathlib import Path
+import re
 
 class YTDlpService:
     @staticmethod
@@ -29,6 +30,40 @@ class YTDlpService:
             
         ydl.params['http_headers'] = ydl.params.get('http_headers', {})
         ydl.params['http_headers']['Cookie'] = cookie_str
+
+    @staticmethod
+    def _extract_bilibili_bvid(url: str) -> Optional[str]:
+        match = re.search(r'(BV[a-zA-Z0-9]+)', url or '')
+        return match.group(1) if match else None
+
+    @staticmethod
+    def _build_bilibili_fallback_url(url: str) -> Optional[str]:
+        if "bilibili.com" not in (url or "") and "b23.tv" not in (url or "") and "BV" not in (url or ""):
+            return None
+
+        bvid = YTDlpService._extract_bilibili_bvid(url)
+        if not bvid:
+            return None
+
+        fallback_url = f"https://www.bilibili.com/video/{bvid}"
+        return None if fallback_url == url else fallback_url
+
+    @staticmethod
+    def _run_with_bilibili_fallback(action_name: str, url: str, runner):
+        try:
+            return runner(url)
+        except Exception as primary_exc:
+            fallback_url = YTDlpService._build_bilibili_fallback_url(url)
+            if not fallback_url:
+                raise
+
+            try:
+                return runner(fallback_url)
+            except Exception as fallback_exc:
+                raise RuntimeError(
+                    f"{action_name} 失败: original_url={url}; fallback_url={fallback_url}; "
+                    f"primary_error={primary_exc}; fallback_error={fallback_exc}"
+                ) from fallback_exc
         
     @staticmethod
     def extract_info(url: str, cookies: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
@@ -39,9 +74,12 @@ class YTDlpService:
         opts['extract_flat'] = False
         opts['download'] = False
         
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            YTDlpService._apply_cookies(ydl, cookies)
-            return ydl.extract_info(url, download=False)
+        def _runner(target_url: str):
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                YTDlpService._apply_cookies(ydl, cookies)
+                return ydl.extract_info(target_url, download=False)
+
+        return YTDlpService._run_with_bilibili_fallback("extract_info", url, _runner)
 
     @staticmethod
     def download_audio(url: str, output_path: str, cookies: Optional[Dict[str, str]] = None) -> str:
@@ -62,9 +100,12 @@ class YTDlpService:
                 'preferredquality': '192',
             }]
         })
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            YTDlpService._apply_cookies(ydl, cookies)
-            ydl.download([url])
+        def _runner(target_url: str):
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                YTDlpService._apply_cookies(ydl, cookies)
+                ydl.download([target_url])
+
+        YTDlpService._run_with_bilibili_fallback("download_audio", url, _runner)
 
         expected_path = base_path.with_suffix(".mp3")
         if expected_path.exists():
@@ -91,9 +132,12 @@ class YTDlpService:
             'merge_output_format': 'mp4',
             'outtmpl': str(base_path) + '.%(ext)s',
         })
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            YTDlpService._apply_cookies(ydl, cookies)
-            ydl.download([url])
+        def _runner(target_url: str):
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                YTDlpService._apply_cookies(ydl, cookies)
+                ydl.download([target_url])
+
+        YTDlpService._run_with_bilibili_fallback("download_video_1080p", url, _runner)
 
         expected_path = base_path.with_suffix(".mp4")
         if expected_path.exists():

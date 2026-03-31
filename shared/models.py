@@ -130,6 +130,7 @@ class UserItemStateORM(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id", ondelete="CASCADE"), index=True)
     item_id: Mapped[str] = mapped_column(String, ForeignKey("items.id", ondelete="CASCADE"), index=True)
+    vault_category_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("vault_categories.id", ondelete="SET NULL"), nullable=True, index=True)
     is_read: Mapped[bool] = mapped_column(Boolean, default=False)
     is_watch_later: Mapped[bool] = mapped_column(Boolean, default=False)
     is_favorited: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -151,6 +152,22 @@ class UserAnnotationsORM(Base):
     content_raw: Mapped[str] = mapped_column(Text)
     anchor_data: Mapped[dict] = mapped_column(JSON, default={})
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now_in_app_timezone_naive)
+
+
+class VaultCategoryORM(Base):
+    """用户的 Vault 自定义分类"""
+    __tablename__ = "vault_categories"
+    __table_args__ = (
+        UniqueConstraint("user_id", "name", name="uq_vault_category_user_name"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String)
+    color: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now_in_app_timezone_naive)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=now_in_app_timezone_naive, onupdate=now_in_app_timezone_naive)
 
 
 class InvitationCodeORM(Base):

@@ -2,6 +2,8 @@
 import { computed, nextTick, onBeforeUnmount, ref, useTemplateRef, watch } from 'vue'
 import { useColorMode } from '@vueuse/core'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Pin } from 'lucide-vue-next'
+import { API_BASE_URL } from '@/lib/api'
 import { renderMarkdown, type MarkdownMode, type MarkdownTheme } from '@/lib/markdown'
 
 const props = withDefaults(
@@ -9,19 +11,33 @@ const props = withDefaults(
     content?: string | null
     mode?: MarkdownMode
     class?: string
+    quoteable?: boolean
   }>(),
   {
     content: '',
     mode: 'readme',
     class: '',
+    quoteable: false,
   },
 )
+
+const emit = defineEmits<{
+  quote: [payload: {
+    text: string
+    mode: MarkdownMode
+    heading: string
+    excerpt: string
+  }]
+}>()
 
 const mode = useColorMode()
 const renderedHtml = ref('')
 const isRendering = ref(false)
 const markdownRoot = useTemplateRef<HTMLElement>('markdownRoot')
+const containerRef = useTemplateRef<HTMLElement>('container')
 const cleanupListeners: Array<() => void> = []
+const selectedText = ref('')
+const quoteButton = ref<{ top: number; left: number } | null>(null)
 
 const resolvedTheme = computed<MarkdownTheme>(() => {
   if (mode.value === 'dark') return 'dark'
@@ -44,6 +60,16 @@ function clearCodeBlockEnhancements() {
   while (cleanupListeners.length > 0) {
     cleanupListeners.pop()?.()
   }
+}
+
+function hideQuoteButton() {
+  quoteButton.value = null
+  selectedText.value = ''
+}
+
+function clearSelection() {
+  const selection = window.getSelection()
+  selection?.removeAllRanges()
 }
 
 async function copyCode(code: string, button: HTMLButtonElement) {
@@ -91,24 +117,175 @@ function enhanceCodeBlocks() {
   })
 }
 
+function toAbsoluteAssetUrl(rawUrl: string) {
+  if (!rawUrl) return rawUrl
+  if (/^https?:\/\//i.test(rawUrl)) return rawUrl
+  if (!rawUrl.startsWith('/')) return rawUrl
+  if (!rawUrl.startsWith('/api/static/') && !rawUrl.startsWith('/uploads/')) return rawUrl
+  return `${API_BASE_URL}${rawUrl}`
+}
+
+function normalizeSrcsetValue(value: string) {
+  return value
+    .split(',')
+    .map((candidate) => {
+      const trimmed = candidate.trim()
+      if (!trimmed) return ''
+      const parts = trimmed.split(/\s+/)
+      const rawUrl = parts.shift() ?? ''
+      const descriptor = parts.join(' ')
+      let normalizedUrl = rawUrl
+      if (rawUrl.startsWith('/api/static/') || rawUrl.startsWith('/uploads/')) {
+        normalizedUrl = toAbsoluteAssetUrl(rawUrl)
+      }
+      return descriptor ? `${normalizedUrl} ${descriptor}` : normalizedUrl
+    })
+    .filter(Boolean)
+    .join(', ')
+}
+
+function sanitizeRenderedHtml(html: string) {
+  if (!html || typeof window === 'undefined') return html
+
+  const parser = new DOMParser()
+  const doc = parser.parseFromString(html, 'text/html')
+  doc.querySelectorAll('[src]').forEach((element) => {
+    const src = element.getAttribute('src')
+    if (!src) return
+    element.setAttribute('src', toAbsoluteAssetUrl(src))
+  })
+  doc.querySelectorAll('[poster]').forEach((element) => {
+    const poster = element.getAttribute('poster')
+    if (!poster) return
+    element.setAttribute('poster', toAbsoluteAssetUrl(poster))
+  })
+  doc.querySelectorAll('[srcset]').forEach((element) => {
+    const srcset = element.getAttribute('srcset')
+    if (!srcset) return
+    element.setAttribute('srcset', normalizeSrcsetValue(srcset))
+  })
+
+  return doc.body.innerHTML
+}
+
 async function refreshMarkdown() {
   if (!props.content?.trim()) {
     isRendering.value = false
     renderedHtml.value = '<p class="text-sm text-muted-foreground">暂无内容。</p>'
     await nextTick()
     enhanceCodeBlocks()
+    hideQuoteButton()
     return
   }
 
   isRendering.value = true
   try {
-    renderedHtml.value = await renderMarkdown(props.content, resolvedTheme.value, props.mode)
+    const html = await renderMarkdown(props.content, resolvedTheme.value, props.mode)
+    renderedHtml.value = sanitizeRenderedHtml(html)
   } finally {
     isRendering.value = false
   }
 
   await nextTick()
   enhanceCodeBlocks()
+  hideQuoteButton()
+}
+
+function getNearestHeadingText(root: HTMLElement, targetNode: Node) {
+  const headings = Array.from(root.querySelectorAll('h1, h2, h3, h4, h5, h6'))
+  let latestHeading = ''
+  const targetElement = targetNode.nodeType === Node.ELEMENT_NODE ? targetNode as Element : targetNode.parentElement
+  if (!targetElement) return latestHeading
+
+  for (const heading of headings) {
+    const position = heading.compareDocumentPosition(targetElement)
+    if (position & Node.DOCUMENT_POSITION_FOLLOWING || heading === targetElement) {
+      latestHeading = heading.textContent?.trim() || latestHeading
+      continue
+    }
+    break
+  }
+
+  return latestHeading
+}
+
+function getExcerptFromTarget(targetNode: Node) {
+  const element = targetNode.nodeType === Node.ELEMENT_NODE ? targetNode as HTMLElement : targetNode.parentElement
+  const excerptHost = element?.closest('p, li, blockquote, td, th') as HTMLElement | null
+  const text = excerptHost?.innerText?.replace(/\s+/g, ' ').trim() || ''
+  if (!text) return ''
+  return text.length <= 220 ? text : `${text.slice(0, 220).trimEnd()}...`
+}
+
+function updateSelectionState() {
+  if (!props.quoteable || !markdownRoot.value || !containerRef.value) return
+
+  const selection = window.getSelection()
+  if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+    hideQuoteButton()
+    return
+  }
+
+  const text = selection.toString().trim()
+  if (!text) {
+    hideQuoteButton()
+    return
+  }
+
+  const range = selection.getRangeAt(0)
+  const commonNode = range.commonAncestorContainer
+  const targetNode =
+    commonNode.nodeType === Node.ELEMENT_NODE ? commonNode as Element : commonNode.parentElement
+
+  if (!targetNode || !markdownRoot.value.contains(targetNode)) {
+    hideQuoteButton()
+    return
+  }
+
+  const rect = range.getBoundingClientRect()
+  const containerRect = containerRef.value.getBoundingClientRect()
+  const left = Math.min(
+    Math.max(rect.left - containerRect.left, 12),
+    Math.max(containerRect.width - 120, 12),
+  )
+  const top = Math.max(rect.top - containerRect.top - 40, 12)
+
+  selectedText.value = text
+  quoteButton.value = { top, left }
+}
+
+function handleMouseUp() {
+  if (!props.quoteable) return
+  window.setTimeout(() => updateSelectionState(), 0)
+}
+
+function handleSelectionChange() {
+  if (!props.quoteable) return
+  const selection = window.getSelection()
+  if (!selection || selection.isCollapsed) {
+    hideQuoteButton()
+  }
+}
+
+function emitQuote() {
+  if (!selectedText.value.trim() || !markdownRoot.value) return
+
+  const selection = window.getSelection()
+  const range = selection?.rangeCount ? selection.getRangeAt(0) : null
+  const commonNode = range?.commonAncestorContainer
+  const targetNode = commonNode
+    ? commonNode.nodeType === Node.ELEMENT_NODE ? commonNode : commonNode.parentNode
+    : markdownRoot.value
+
+  emit('quote', {
+    text: selectedText.value.trim(),
+    mode: props.mode,
+    heading: targetNode ? getNearestHeadingText(markdownRoot.value, targetNode) : '',
+    excerpt: targetNode ? getExcerptFromTarget(targetNode) : '',
+  })
+
+  clearSelection()
+  hideQuoteButton()
 }
 
 watch(
@@ -121,11 +298,26 @@ watch(
 
 onBeforeUnmount(() => {
   clearCodeBlockEnhancements()
+  document.removeEventListener('selectionchange', handleSelectionChange)
+  clearSelection()
 })
+
+watch(
+  () => props.quoteable,
+  (enabled) => {
+    document.removeEventListener('selectionchange', handleSelectionChange)
+    if (enabled) {
+      document.addEventListener('selectionchange', handleSelectionChange)
+      return
+    }
+    hideQuoteButton()
+  },
+  { immediate: true },
+)
 </script>
 
 <template>
-  <div class="min-w-0">
+  <div ref="container" class="relative min-w-0">
     <div v-if="isRendering" class="space-y-3">
       <Skeleton class="h-5 w-1/3" />
       <Skeleton class="h-24 w-full" />
@@ -136,8 +328,19 @@ onBeforeUnmount(() => {
       v-else
       ref="markdownRoot"
       :class="proseClass"
+      @mouseup="handleMouseUp"
       v-html="renderedHtml"
     />
+    <button
+      v-if="quoteButton"
+      type="button"
+      class="absolute z-20 inline-flex items-center gap-1 rounded-full border bg-background/95 px-3 py-1.5 text-xs font-medium shadow-sm backdrop-blur"
+      :style="{ top: `${quoteButton.top}px`, left: `${quoteButton.left}px` }"
+      @click="emitQuote"
+    >
+      <Pin class="h-3.5 w-3.5" />
+      引用
+    </button>
   </div>
 </template>
 
@@ -431,6 +634,7 @@ onBeforeUnmount(() => {
 
 .vault-markdown :deep(picture) {
   display: block;
+  margin: 0.35rem 0;
 }
 
 .vault-markdown :deep(picture img),
@@ -447,11 +651,12 @@ onBeforeUnmount(() => {
 }
 
 .vault-markdown :deep(a > img),
+.vault-markdown :deep(picture img),
 .vault-markdown :deep(p[align="center"] > img) {
   display: inline-block;
   margin: 0.2rem;
   border: none;
-  border-radius: 0.2rem;
+  border-radius: 0;
   vertical-align: middle;
 }
 

@@ -14,6 +14,7 @@ class ItemResponse(BaseModel):
     created_at: datetime
     metadata_extra: dict = {}
     local_asset_url: Optional[str] = None
+    vault_category_id: Optional[str] = None
     is_read: bool = False
     is_watch_later: bool = False
     is_favorited: bool = False
@@ -107,6 +108,15 @@ class ItemStateResponse(BaseModel):
     is_read: bool
     is_watch_later: bool
     is_favorited: bool
+    vault_category_id: Optional[str] = None
+
+
+class VaultCategoryResponse(BaseModel):
+    id: str
+    name: str
+    color: Optional[str] = None
+    sort_order: int
+    created_at: datetime
 
 
 class AnnotationResponse(BaseModel):
@@ -116,6 +126,13 @@ class AnnotationResponse(BaseModel):
     content_raw: str
     anchor_data: dict = {}
     created_at: datetime
+
+
+class AnnotationAssetResponse(BaseModel):
+    asset_url: str
+    content_type: str
+    page: Optional[int] = None
+    rect_norm: Optional[dict] = None
 
 
 class InvitationCodeResponse(BaseModel):

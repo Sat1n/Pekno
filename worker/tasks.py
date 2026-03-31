@@ -16,7 +16,11 @@ import tempfile
 import random
 import mimetypes
 import httpx
+import posixpath
+import re
 from pathlib import Path
+from urllib.parse import quote, unquote, urlparse
+from shared.config import ConfigManager, ConfigKeys
 
 
 def _parse_github_repo_ref(item: ItemORM) -> tuple[str, str] | None:
@@ -40,26 +44,230 @@ def _parse_github_repo_ref(item: ItemORM) -> tuple[str, str] | None:
         return None
 
 
-async def _download_github_readme(item: ItemORM, output_dir: Path) -> tuple[str, str]:
+async def _get_github_access_token(user_id: str | None = None) -> str | None:
+    token = await ConfigManager.get_config("github_stars", ConfigKeys.TOKEN, user_id=user_id)
+    if token:
+        return token
+    if user_id:
+        return await ConfigManager.get_config("github_stars", ConfigKeys.TOKEN)
+    return None
+
+
+async def _download_github_readme(
+    item: ItemORM,
+    output_dir: Path,
+    user_id: str | None = None,
+) -> tuple[str, str, str]:
     repo_ref = _parse_github_repo_ref(item)
     if not repo_ref:
         raise ValueError("无法从条目中解析 GitHub 仓库信息")
 
     owner, repo = repo_ref
+    github_token = await _get_github_access_token(user_id)
     headers = {
-        "Accept": "application/vnd.github.raw+json",
+        "Accept": "application/vnd.github+json",
         "User-Agent": "Iris-Hub/1.0",
     }
+    if github_token:
+        headers["Authorization"] = f"Bearer {github_token}"
     readme_url = f"https://api.github.com/repos/{owner}/{repo}/readme"
 
     async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
         response = await client.get(readme_url, headers=headers)
         response.raise_for_status()
-        readme_text = response.text
+        payload = response.json()
+        readme_path = str(payload.get("path") or "README.md")
+        download_url = payload.get("download_url")
+        if download_url:
+            raw_headers = {"User-Agent": "Iris-Hub/1.0"}
+            if github_token:
+                raw_headers["Authorization"] = f"Bearer {github_token}"
+            raw_response = await client.get(download_url, headers=raw_headers)
+            raw_response.raise_for_status()
+            readme_text = raw_response.text
+        else:
+            import base64
+
+            encoded_content = str(payload.get("content") or "")
+            readme_text = base64.b64decode(encoded_content).decode("utf-8")
 
     output_path = output_dir / "README.md"
     output_path.write_text(readme_text, encoding="utf-8")
-    return str(output_path), readme_text
+    return str(output_path), readme_text, readme_path
+
+
+def _is_external_asset_url(url: str) -> bool:
+    normalized = (url or "").strip().lower()
+    return (
+        normalized.startswith("http://")
+        or normalized.startswith("https://")
+        or normalized.startswith("//")
+        or normalized.startswith("data:")
+    )
+
+
+def _extract_asset_path_token(asset_url: str) -> str | None:
+    cleaned = (asset_url or "").strip().strip("<>")
+    if not cleaned:
+        return None
+
+    cleaned = cleaned.replace("\\", "/")
+    title_match = re.match(r'^(.*?)(?:\s+["\'][^"\']*["\'])?$', cleaned)
+    token = (title_match.group(1) if title_match else cleaned).strip()
+    return token or None
+
+
+def _normalize_repo_relative_paths(readme_repo_path: str, asset_url: str) -> list[str]:
+    cleaned = _extract_asset_path_token(asset_url)
+    if not cleaned or _is_external_asset_url(cleaned):
+        return []
+
+    parsed = urlparse(cleaned)
+    asset_path = unquote(parsed.path or "").replace("\\", "/")
+    if not asset_path:
+        return []
+
+    readme_dir = posixpath.dirname(readme_repo_path or "README.md")
+    candidates: list[str] = []
+
+    def _push(candidate: str):
+        normalized = posixpath.normpath(candidate).lstrip("/")
+        if normalized and not normalized.startswith("..") and normalized not in candidates:
+            candidates.append(normalized)
+
+    if asset_path.startswith("/"):
+        _push(asset_path.lstrip("/"))
+        return candidates
+
+    _push(posixpath.join(readme_dir, asset_path))
+    if not asset_path.startswith("../"):
+        _push(asset_path.lstrip("./"))
+
+    return candidates
+
+
+def _build_github_raw_asset_url(owner: str, repo: str, repo_relative_path: str) -> str:
+    safe_path = quote(repo_relative_path, safe="/")
+    return f"https://raw.githubusercontent.com/{owner}/{repo}/HEAD/{safe_path}"
+
+
+async def _download_github_asset(
+    client: httpx.AsyncClient,
+    owner: str,
+    repo: str,
+    repo_relative_path: str,
+    target_path: Path,
+) -> bool:
+    asset_url = _build_github_raw_asset_url(owner, repo, repo_relative_path)
+    try:
+        response = await client.get(asset_url, headers={"User-Agent": "Iris-Hub/1.0"})
+        response.raise_for_status()
+    except Exception:
+        return False
+
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    target_path.write_bytes(response.content)
+    return True
+
+
+async def _localize_github_readme_assets(
+    item: ItemORM,
+    output_dir: Path,
+    readme_text: str,
+    readme_repo_path: str,
+) -> tuple[str, list[str]]:
+    repo_ref = _parse_github_repo_ref(item)
+    if not repo_ref:
+        return readme_text, []
+
+    owner, repo = repo_ref
+    assets_dir = output_dir / "assets"
+    rewritten_markdown = readme_text
+    replacement_map: dict[str, str] = {}
+    failed_assets: list[str] = []
+
+    markdown_matches = re.findall(r'!\[[^\]]*\]\(([^)]+)\)', readme_text)
+    html_matches = re.findall(r'<img\b[^>]*src=["\']([^"\']+)["\']', readme_text, flags=re.IGNORECASE)
+    html_srcset_matches = re.findall(
+        r'\bsrcset=["\']([^"\']+)["\']',
+        readme_text,
+        flags=re.IGNORECASE,
+    )
+    srcset_candidates: list[str] = []
+    for srcset_value in html_srcset_matches:
+        for candidate in srcset_value.split(","):
+            candidate = candidate.strip()
+            if not candidate:
+                continue
+            url_part = candidate.split()[0].strip()
+            if url_part:
+                srcset_candidates.append(url_part)
+
+    asset_candidates = list(
+        dict.fromkeys([*(markdown_matches or []), *(html_matches or []), *srcset_candidates])
+    )
+
+    async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+        for asset_url in asset_candidates:
+            if _is_external_asset_url(asset_url):
+                continue
+
+            repo_relative_paths = _normalize_repo_relative_paths(readme_repo_path, asset_url)
+            if not repo_relative_paths:
+                continue
+
+            downloaded = False
+            for repo_relative_path in repo_relative_paths:
+                local_target_path = assets_dir / Path(repo_relative_path)
+                encoded_repo_relative_path = quote(repo_relative_path, safe="/")
+                public_url = f"/api/static/vault/{item.id}/assets/{encoded_repo_relative_path}"
+                if await _download_github_asset(client, owner, repo, repo_relative_path, local_target_path):
+                    replacement_map[asset_url] = public_url
+                    downloaded = True
+                    break
+
+            if not downloaded:
+                failed_assets.append(asset_url)
+                worker_log.warning(
+                    f"⚠️ README 图片下载失败: {asset_url} | tried={repo_relative_paths}"
+                )
+
+    for original, rewritten in replacement_map.items():
+        rewritten_markdown = rewritten_markdown.replace(f"({original})", f"({rewritten})")
+        rewritten_markdown = re.sub(
+            rf'(<img\b[^>]*src=["\']){re.escape(original)}(["\'])',
+            rf"\1{rewritten}\2",
+            rewritten_markdown,
+            flags=re.IGNORECASE,
+        )
+
+    def _rewrite_srcset_value(match: re.Match[str]) -> str:
+        original_value = match.group(1)
+        rewritten_candidates: list[str] = []
+        for candidate in original_value.split(","):
+            raw_candidate = candidate.strip()
+            if not raw_candidate:
+                continue
+
+            parts = raw_candidate.split()
+            asset_url = parts[0].strip()
+            descriptor = " ".join(parts[1:]).strip()
+            rewritten_url = replacement_map.get(asset_url, asset_url)
+            rewritten_candidates.append(
+                f"{rewritten_url} {descriptor}".strip()
+            )
+
+        rewritten_value = ", ".join(rewritten_candidates) if rewritten_candidates else original_value
+        return f'srcset="{rewritten_value}"'
+
+    rewritten_markdown = re.sub(
+        r'\bsrcset=["\']([^"\']+)["\']',
+        _rewrite_srcset_value,
+        rewritten_markdown,
+        flags=re.IGNORECASE,
+    )
+
+    return rewritten_markdown, failed_assets
 
 
 def _format_seconds_for_summary(seconds: float) -> str:
@@ -309,9 +517,8 @@ async def process_multimedia_task(item_id: str, url: str):
             worker_log.info(f"🧹 已清理本次多媒体缓存目录: {task_cache_dir}")
 
 
-@broker.task(task_name="download_vault_asset")
-async def task_download_vault_asset(item_id: str):
-    vault_root = Path("data") / "uploads" / "vault"
+async def _download_vault_asset_impl(item_id: str, user_id: str | None = None):
+    vault_root = Path("data") / "vault"
     vault_root.mkdir(parents=True, exist_ok=True)
 
     async with AsyncSessionLocal() as session:
@@ -325,7 +532,10 @@ async def task_download_vault_asset(item_id: str):
     existing_local_path = item.local_asset_path
     needs_github_readme_backfill = (
         item.source_type == "github_star"
-        and not (item.metadata_extra or {}).get("vault_readme_text")
+        and (
+            not (item.metadata_extra or {}).get("vault_readme_text")
+            or not (item.metadata_extra or {}).get("vault_readme_assets_localized")
+        )
     )
     if existing_local_path and Path(existing_local_path).exists() and not needs_github_readme_backfill:
         worker_log.info(f"⏭️ Vault 已存在本地文件，跳过重复下载: {item_id}")
@@ -360,9 +570,14 @@ async def task_download_vault_asset(item_id: str):
                 local_path = await asyncio.to_thread(YTDlpService.download_audio, source_url, str(output_path))
         else:
             if item.source_type == "github_star":
-                local_path, readme_text = await _download_github_readme(item, item_dir)
-                metadata["vault_readme_text"] = readme_text
+                local_path, readme_text, readme_repo_path = await _download_github_readme(item, item_dir, user_id)
+                localized_readme_text, failed_assets = await _localize_github_readme_assets(item, item_dir, readme_text, readme_repo_path)
+                Path(local_path).write_text(localized_readme_text, encoding="utf-8")
+                metadata["vault_readme_text"] = localized_readme_text
                 metadata["vault_download_content_type"] = "text/markdown"
+                metadata["vault_readme_assets_localized"] = len(failed_assets) == 0
+                metadata["vault_readme_asset_failures"] = failed_assets
+                metadata["vault_asset_root"] = "vault"
             else:
                 guessed_type, _ = mimetypes.guess_type(source_url)
                 ext = Path(source_url).suffix or (
@@ -379,6 +594,7 @@ async def task_download_vault_asset(item_id: str):
 
         metadata["vault_download_status"] = "completed"
         metadata.pop("vault_download_error", None)
+        metadata.pop("vault_download_error_context", None)
 
         async with AsyncSessionLocal() as session:
             async with session.begin():
@@ -387,7 +603,7 @@ async def task_download_vault_asset(item_id: str):
                     .where(ItemORM.id == item_id)
                     .values(
                         local_asset_path=local_path,
-                        content_text=metadata.get("vault_readme_text", item.content_text),
+                        content_text=item.content_text,
                         metadata_extra=metadata,
                         updated_at=now_in_app_timezone_naive(),
                     )
@@ -410,6 +626,11 @@ async def task_download_vault_asset(item_id: str):
         metadata = dict(item.metadata_extra or {})
         metadata["vault_download_status"] = "failed"
         metadata["vault_download_error"] = str(e)
+        metadata["vault_download_error_context"] = {
+            "source_url": source_url,
+            "is_bilibili": "bilibili.com" in (source_url or "") or "b23.tv" in (source_url or "") or "BV" in (source_url or ""),
+            "github_user_id": user_id,
+        }
         async with AsyncSessionLocal() as session:
             async with session.begin():
                 await session.execute(
@@ -417,3 +638,8 @@ async def task_download_vault_asset(item_id: str):
                     .where(ItemORM.id == item_id)
                     .values(metadata_extra=metadata, updated_at=now_in_app_timezone_naive())
                 )
+
+
+@broker.task(task_name="download_vault_asset")
+async def task_download_vault_asset(item_id: str, user_id: str | None = None):
+    await _download_vault_asset_impl(item_id, user_id)

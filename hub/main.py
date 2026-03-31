@@ -57,14 +57,21 @@ def _build_local_asset_url(local_asset_path: str | None) -> str | None:
         return None
     try:
         path = Path(local_asset_path).resolve()
-        uploads_root = Path("data/uploads").resolve()
-        relative = path.relative_to(uploads_root)
+        vault_root = Path("data/vault").resolve()
+        try:
+            relative = path.relative_to(vault_root)
+            return f"/api/static/vault/{relative.as_posix().lstrip('/')}"
+        except Exception:
+            uploads_root = Path("data/uploads").resolve()
+            relative = path.relative_to(uploads_root)
+            if relative.parts and relative.parts[0] == "vault":
+                return None
+            return f"/uploads/{relative.as_posix().lstrip('/')}"
     except Exception:
         return None
-    return f"/uploads/{relative.as_posix().lstrip('/')}"
 
 from hub.api import data
-from hub.api.routers import admin, annotations, auth, items, plugins
+from hub.api.routers import admin, annotations, auth, items, plugins, vault
 from hub.api.mcp import mcp_app
 from hub.api.middlewares.mcp_auth import MCPAuthMiddleware
 import os
@@ -74,13 +81,14 @@ from starlette.responses import Response
 # 确保存储目录存在并挂载静态目录，专门用于对外暴露关键帧等媒体素材
 os.makedirs(os.path.join("data", "static", "keyframes"), exist_ok=True)
 os.makedirs(os.path.join("data", "uploads"), exist_ok=True)
+os.makedirs(os.path.join("data", "vault"), exist_ok=True)
 class CachedStaticFiles(StaticFiles):
     def file_response(self, full_path, stat_result, scope, status_code=200) -> Response:
         response = super().file_response(full_path, stat_result, scope, status_code)
         response.headers.setdefault("Cache-Control", "public, max-age=604800, immutable")
         return response
 
-
+app.mount("/api/static/vault", CachedStaticFiles(directory="data/vault"), name="vault-static")
 app.mount("/api/static", CachedStaticFiles(directory="data/static"), name="static")
 app.mount("/uploads", CachedStaticFiles(directory="data/uploads"), name="uploads")
 
@@ -89,6 +97,7 @@ app.include_router(plugins.router)
 app.include_router(auth.router)
 app.include_router(items.router)
 app.include_router(annotations.router)
+app.include_router(vault.router)
 app.include_router(admin.router)
 protected_mcp_app = MCPAuthMiddleware(mcp_app)
 app.mount("/api/mcp", protected_mcp_app)
@@ -98,6 +107,7 @@ app.mount("/api/mcp", protected_mcp_app)
 async def hybrid_search_api(
     q: Optional[str] = Query(None, description="搜索关键词，为空则返回所有"),
     source_type: Optional[str] = Query(None, description="按信息源过滤"),
+    favorited_only: bool = Query(False, description="仅搜索当前用户已收藏内容"),
     current_user=Depends(get_current_user),
 ):
     """
@@ -183,7 +193,13 @@ async def hybrid_search_api(
             return search_results
     
     # 有搜索词时，执行混合搜索
-    results = await search_service.hybrid_search(q, current_user["id"], limit=20, source_type=source_type)
+    results = await search_service.hybrid_search(
+        q,
+        current_user["id"],
+        limit=20,
+        source_type=source_type,
+        favorited_only=favorited_only,
+    )
     state_map = await _get_user_item_state_map(current_user["id"], [item.id for item, _ in results])
     
     search_results = []
@@ -351,7 +367,7 @@ async def search_github_items(
         return search_results[:limit]
 
 
-# ========== 配置管理 API: 由通用插件引擎 (/api/plugins) 接管 ==========
+def format_time_ago(dt: datetime) -> str:
     """格式化时间为相对描述"""
     now = datetime.now()
     diff = now - dt
@@ -379,6 +395,7 @@ async def search_github_items(
         return f"{years}年前"
 
 
+# ========== 配置管理 API: 由通用插件引擎 (/api/plugins) 接管 ==========
 def format_github_time(time_str: str) -> str:
     """格式化 GitHub 时间字符串为相对描述"""
     if not time_str:
