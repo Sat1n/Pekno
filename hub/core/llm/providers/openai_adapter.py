@@ -1,6 +1,7 @@
 import openai
 from ..base import BaseLLMProvider
 import re
+import json
 
 
 def _parse_tag_list(raw_text: str) -> list[str]:
@@ -41,3 +42,31 @@ class OpenAIProvider(BaseLLMProvider):
         )
         tags_raw = response.choices[0].message.content
         return _parse_tag_list(tags_raw)
+
+    async def understand_image(self, image_data_url: str) -> dict:
+        prompt = (
+            "你是一个图片理解助手。请仔细分析图片，并只返回 JSON 对象，不要输出 Markdown 或解释。"
+            'JSON schema: {"short_caption": string, "detailed_summary_markdown": string, "tags": string[], '
+            '"ocr_text": string, "objects": string[], "scene": string}. '
+            "要求：short_caption 为 20-60 字简洁描述；detailed_summary_markdown 为面向知识库的 Markdown 总结；"
+            "如果图片里有文字，尽量提取到 ocr_text；如果没有就返回空字符串。"
+        )
+        response = await self.client.chat.completions.create(
+            model=self.model,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url", "image_url": {"url": image_data_url}},
+                    ],
+                }
+            ],
+            response_format={"type": "json_object"},
+        )
+        raw = response.choices[0].message.content or "{}"
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            parsed = {}
+        return parsed if isinstance(parsed, dict) else {}

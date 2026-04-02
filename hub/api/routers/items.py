@@ -306,6 +306,22 @@ async def _queue_video_summary_if_needed(item: ItemORM):
         hub_log.exception("投递视频总结任务失败")
 
 
+async def _queue_image_summary_if_needed(item: ItemORM):
+    if item.intent != "image":
+        return
+
+    metadata = item.metadata_extra or {}
+    if metadata.get("has_long_summary") and metadata.get("image_understanding"):
+        return
+
+    try:
+        from worker.tasks import process_image_understanding_task
+
+        await process_image_understanding_task.kiq(item.id)
+    except Exception:
+        hub_log.exception("投递图片理解任务失败")
+
+
 @router.get("", response_model=List[ItemResponse])
 async def get_items(
     limit: Optional[int] = Query(default=None, ge=1),
@@ -519,6 +535,7 @@ async def toggle_item_watch_later(item_id: str, current_user=Depends(get_current
 async def toggle_item_favorite(item_id: str, current_user=Depends(get_current_user)):
     should_queue_download = False
     should_queue_video_summary = False
+    should_queue_image_summary = False
     async with AsyncSessionLocal() as session:
         async with session.begin():
             item = await session.get(ItemORM, item_id)
@@ -541,11 +558,14 @@ async def toggle_item_favorite(item_id: str, current_user=Depends(get_current_us
             state.updated_at = now_in_app_timezone_naive()
             should_queue_download = (not was_favorited) and bool(state.is_favorited)
             should_queue_video_summary = should_queue_download and item.intent == "video"
+            should_queue_image_summary = should_queue_download and item.intent == "image"
 
     if should_queue_download:
         await _queue_vault_download_if_needed(item_id, item, current_user["id"])
     if should_queue_video_summary:
         await _queue_video_summary_if_needed(item)
+    if should_queue_image_summary:
+        await _queue_image_summary_if_needed(item)
 
     return ItemStateResponse(
         item_id=item_id,
@@ -672,13 +692,6 @@ async def summarize_item(item_id: str, current_user=Depends(get_current_user)):
     task_id = str(task_uuid.uuid4())
     metadata = item.metadata_extra or {}
 
-    if item.intent == "image":
-        return {
-            "status": "skipped",
-            "task_id": "",
-            "message": "图片内容暂不支持 AI 总结，已跳过本次请求。",
-        }
-
     if item.intent == "video":
         if metadata.get("has_long_summary") or metadata.get("raw_transcript"):
             return {
@@ -689,6 +702,16 @@ async def summarize_item(item_id: str, current_user=Depends(get_current_user)):
         from worker.tasks import process_multimedia_task
         await process_multimedia_task.kiq(item_id, item.raw_link)
         msg = "AI 多媒体分析管线已启动，正在剥离音轨并生成胶卷快照，请稍后..."
+    elif item.intent == "image":
+        if metadata.get("has_long_summary") and metadata.get("image_understanding"):
+            return {
+                "status": "skipped",
+                "task_id": "",
+                "message": "该图片已经完成过图片理解，无需重复生成。",
+            }
+        from worker.tasks import process_image_understanding_task
+        await process_image_understanding_task.kiq(item_id)
+        msg = "图片理解任务已启动，正在提取视觉描述与图片文字，请稍后..."
     else:
         from worker.plugins.pipeline import summarize_repo_task
         await summarize_repo_task.kiq(item_id, task_id)

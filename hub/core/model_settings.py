@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import json
 import re
 from typing import Any, Dict, List, Tuple
@@ -26,7 +27,7 @@ MODEL_PROVIDER_CATALOG: List[Dict[str, Any]] = [
         "name": "Ollama",
         "description": "连接本地或局域网 Ollama，适合离线推理与自托管场景。",
         "badge": "本地优先",
-        "capabilities": ["LLM", "Embedding"],
+        "capabilities": ["LLM", "Embedding", "Vision"],
         "config_fields": [
             {"key": "host", "label": "服务地址", "type": "string", "default": "http://127.0.0.1:11434"},
         ],
@@ -36,7 +37,7 @@ MODEL_PROVIDER_CATALOG: List[Dict[str, Any]] = [
         "name": "OpenAI Compatible",
         "description": "兼容 OpenAI API 的通用提供商，适配 LM Studio、vLLM、One API 等。",
         "badge": "通用兼容",
-        "capabilities": ["LLM", "Embedding"],
+        "capabilities": ["LLM", "Embedding", "Vision"],
         "config_fields": [
             {"key": "base_url", "label": "Base URL", "type": "string", "default": "https://api.openai.com/v1"},
             {"key": "api_key", "label": "API Key", "type": "string", "secret": True, "default": ""},
@@ -47,7 +48,7 @@ MODEL_PROVIDER_CATALOG: List[Dict[str, Any]] = [
         "name": "OpenAI",
         "description": "OpenAI 官方服务，适合 GPT 与 text-embedding 系列模型。",
         "badge": "官方",
-        "capabilities": ["LLM", "Embedding"],
+        "capabilities": ["LLM", "Embedding", "Vision"],
         "config_fields": [
             {"key": "base_url", "label": "Base URL", "type": "string", "default": "https://api.openai.com/v1"},
             {"key": "api_key", "label": "API Key", "type": "string", "secret": True, "default": ""},
@@ -58,7 +59,7 @@ MODEL_PROVIDER_CATALOG: List[Dict[str, Any]] = [
         "name": "OpenRouter",
         "description": "统一访问多家模型供应商，适合快速试用不同模型。",
         "badge": "聚合",
-        "capabilities": ["LLM", "Embedding"],
+        "capabilities": ["LLM", "Embedding", "Vision"],
         "config_fields": [
             {"key": "base_url", "label": "Base URL", "type": "string", "default": "https://openrouter.ai/api/v1"},
             {"key": "api_key", "label": "API Key", "type": "string", "secret": True, "default": ""},
@@ -69,7 +70,7 @@ MODEL_PROVIDER_CATALOG: List[Dict[str, Any]] = [
         "name": "硅基流动",
         "description": "常见国产推理平台，适合接入通用 OpenAI 兼容模型接口。",
         "badge": "国产",
-        "capabilities": ["LLM", "Embedding"],
+        "capabilities": ["LLM", "Embedding", "Vision"],
         "config_fields": [
             {"key": "base_url", "label": "Base URL", "type": "string", "default": "https://api.siliconflow.cn/v1"},
             {"key": "api_key", "label": "API Key", "type": "string", "secret": True, "default": ""},
@@ -102,7 +103,7 @@ MODEL_PROVIDER_CATALOG: List[Dict[str, Any]] = [
         "name": "Together AI",
         "description": "适合多种开源模型托管，方便尝试不同家族的文本与向量模型。",
         "badge": "开源生态",
-        "capabilities": ["LLM", "Embedding"],
+        "capabilities": ["LLM", "Embedding", "Vision"],
         "config_fields": [
             {"key": "base_url", "label": "Base URL", "type": "string", "default": "https://api.together.xyz/v1"},
             {"key": "api_key", "label": "API Key", "type": "string", "secret": True, "default": ""},
@@ -198,8 +199,8 @@ MODEL_ASSIGNMENT_DEFINITIONS: List[Dict[str, Any]] = [
         "key": "image_understanding",
         "label": "图片语义理解引擎",
         "description": "为封面图、截图和图文内容提取语义信息预留，后续可用于图像标签与摘要。",
-        "group": "多模态占位",
-        "status": "planned",
+        "group": "核心多模态",
+        "status": "active",
         "task_type": "vision",
         "default_provider": "zhipu",
         "default_model": "glm-4v-plus",
@@ -449,3 +450,65 @@ async def embed_text(text: str) -> Tuple[List[float], str]:
     client = openai.AsyncOpenAI(api_key=api_key, base_url=base_url)
     response = await client.embeddings.create(model=model_name, input=text)
     return response.data[0].embedding, model_name
+
+
+def _normalize_image_understanding_result(payload: Dict[str, Any]) -> Dict[str, Any]:
+    short_caption = str(
+        payload.get("short_caption")
+        or payload.get("caption")
+        or payload.get("summary")
+        or ""
+    ).strip()
+    detailed_summary = str(
+        payload.get("detailed_summary_markdown")
+        or payload.get("detailed_summary")
+        or payload.get("long_summary")
+        or ""
+    ).strip()
+    ocr_text = str(payload.get("ocr_text") or payload.get("text") or "").strip()
+    scene = str(payload.get("scene") or "").strip()
+
+    raw_tags = payload.get("tags") or []
+    if isinstance(raw_tags, str):
+        tags = parse_tag_list(raw_tags)
+    elif isinstance(raw_tags, list):
+        tags = [str(tag).strip() for tag in raw_tags if str(tag).strip()][:12]
+    else:
+        tags = []
+
+    raw_objects = payload.get("objects") or []
+    if isinstance(raw_objects, str):
+        objects = parse_tag_list(raw_objects)
+    elif isinstance(raw_objects, list):
+        objects = [str(obj).strip() for obj in raw_objects if str(obj).strip()][:20]
+    else:
+        objects = []
+
+    if not short_caption and detailed_summary:
+        short_caption = detailed_summary.splitlines()[0].strip("# ").strip()[:80]
+    if not detailed_summary and short_caption:
+        details = [f"这张图片展示了：{short_caption}"]
+        if ocr_text:
+            details.append(f"## 图片文字\n\n{ocr_text}")
+        if objects:
+            details.append(f"## 关键元素\n\n- " + "\n- ".join(objects))
+        detailed_summary = "\n\n".join(details)
+
+    return {
+        "short_caption": short_caption,
+        "detailed_summary_markdown": detailed_summary,
+        "tags": tags,
+        "ocr_text": ocr_text,
+        "objects": objects,
+        "scene": scene,
+    }
+
+
+async def understand_image(image_bytes: bytes, mime_type: str) -> Tuple[Dict[str, Any], str, str]:
+    assignment = await _resolve_assignment("image_understanding")
+    provider_id = assignment["provider"]
+    provider, model_name = await _build_llm_provider("image_understanding")
+    image_data_url = f"data:{mime_type};base64,{base64.b64encode(image_bytes).decode('ascii')}"
+    raw_result = await provider.understand_image(image_data_url)
+    normalized = _normalize_image_understanding_result(raw_result)
+    return normalized, provider_id, model_name

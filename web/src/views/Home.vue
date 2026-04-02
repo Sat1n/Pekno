@@ -540,10 +540,10 @@ async function handleGenerateSummary() {
     currentTaskId.value = response.task_id
     pendingSummaryItemId.value = itemId
 
-    toast({
-      title: '🔄 AI 总结生成中',
-      description: '请稍候，正在抓取并分析仓库内容...',
-    })
+      toast({
+        title: '🔄 AI 总结生成中',
+        description: '请稍候，正在分析内容并生成 AI 总结...',
+      })
 
     startPollingSummaryStatus(itemId)
   } catch (error) {

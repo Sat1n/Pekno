@@ -6,6 +6,7 @@ from hub.core.media.downloader import YTDlpService
 from hub.core.media.transcriber import TranscriberFactory
 from hub.core.llm.summarizer import summarize_video_transcript
 from hub.core.model_settings import get_model_assignments
+from hub.core.llm.service import LLMManager
 from shared.time_utils import now_in_app_timezone_naive
 from sqlalchemy import select
 import os
@@ -643,3 +644,141 @@ async def _download_vault_asset_impl(item_id: str, user_id: str | None = None):
 @broker.task(task_name="download_vault_asset")
 async def task_download_vault_asset(item_id: str, user_id: str | None = None):
     await _download_vault_asset_impl(item_id, user_id)
+def _build_image_feature_text(title: str, result: dict) -> str:
+    parts = [
+        f"标题：{title}" if title else "",
+        f"图片描述：{result.get('short_caption', '')}" if result.get("short_caption") else "",
+        f"场景：{result.get('scene', '')}" if result.get("scene") else "",
+        f"OCR：{result.get('ocr_text', '')}" if result.get("ocr_text") else "",
+    ]
+    objects = result.get("objects") or []
+    if objects:
+        parts.append("关键元素：" + "、".join(str(obj).strip() for obj in objects if str(obj).strip()))
+    tags = result.get("tags") or []
+    if tags:
+        parts.append("标签：" + "、".join(str(tag).strip() for tag in tags if str(tag).strip()))
+    return "\n".join(part for part in parts if part).strip()
+
+
+def _resolve_image_source_path(item: ItemORM) -> Path | None:
+    if item.local_asset_path and Path(item.local_asset_path).exists():
+        return Path(item.local_asset_path)
+
+    raw_link = str(item.raw_link or "").strip()
+    if not raw_link:
+        return None
+
+    if raw_link.startswith("/uploads/"):
+        candidate = Path("data") / raw_link.removeprefix("/uploads/")
+        if candidate.exists():
+            return candidate
+
+    if raw_link.startswith("/api/static/vault/"):
+        relative = raw_link.removeprefix("/api/static/vault/")
+        candidate = Path("data") / "vault" / relative
+        if candidate.exists():
+            return candidate
+
+    return None
+
+
+@broker.task(task_name="process_image_understanding")
+async def process_image_understanding_task(item_id: str):
+    worker_log.info(f"🖼️ 开始图片理解任务: {item_id}")
+    cache_root = Path("data") / "cache" / "images"
+    cache_root.mkdir(parents=True, exist_ok=True)
+    task_cache_dir = Path(tempfile.mkdtemp(prefix=f"image_{item_id}_", dir=str(cache_root)))
+
+    try:
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(select(ItemORM).where(ItemORM.id == item_id))
+            item = result.scalar_one_or_none()
+            if not item:
+                worker_log.warning(f"⚠️ 图片理解任务跳过：条目不存在 {item_id}")
+                return
+
+        metadata = dict(item.metadata_extra or {})
+        if metadata.get("has_long_summary") and metadata.get("image_understanding"):
+            worker_log.info(f"⏭️ 图片理解任务跳过：已有结果 {item_id}")
+            return
+
+        source_path = _resolve_image_source_path(item)
+        if source_path is None:
+            source_url = str(item.raw_link or "").strip()
+            if not source_url:
+                raise ValueError("图片条目缺少可读取的本地路径或原始链接")
+            target_path = task_cache_dir / "source-image"
+            async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
+                response = await client.get(source_url)
+                response.raise_for_status()
+                suffix = mimetypes.guess_extension(response.headers.get("content-type", "").split(";")[0].strip()) or ".img"
+                target_path = target_path.with_suffix(suffix)
+                target_path.write_bytes(response.content)
+            source_path = target_path
+
+        image_bytes = source_path.read_bytes()
+        mime_type = mimetypes.guess_type(str(source_path))[0] or "image/png"
+
+        ai = LLMManager()
+        worker_log.info(f"🧠 正在调用图片理解模型处理: {item_id}")
+        result, provider_id, model_name = await ai.understand_image(image_bytes, mime_type)
+        feature_text = _build_image_feature_text(item.title, result)
+        embed_model_name = await ai.get_embedding_model_name()
+        vector = await ai.get_vector(feature_text or item.title)
+
+        short_caption = str(result.get("short_caption") or item.summary or item.title).strip()
+        long_summary = str(result.get("detailed_summary_markdown") or short_caption).strip()
+        tags = [str(tag).strip() for tag in (result.get("tags") or []) if str(tag).strip()]
+
+        image_understanding_meta = {
+            "caption": short_caption,
+            "tags": tags,
+            "ocr_text": str(result.get("ocr_text") or "").strip(),
+            "objects": [str(obj).strip() for obj in (result.get("objects") or []) if str(obj).strip()],
+            "scene": str(result.get("scene") or "").strip(),
+            "provider": provider_id,
+            "model": model_name,
+            "embedding_model": embed_model_name,
+        }
+
+        metadata["has_long_summary"] = True
+        metadata["long_summary"] = long_summary
+        metadata["image_understanding"] = image_understanding_meta
+        metadata.pop("image_understanding_error", None)
+
+        async with AsyncSessionLocal() as session:
+            await session.execute(
+                ItemORM.__table__.update()
+                .where(ItemORM.id == item_id)
+                .values(
+                    summary=short_caption,
+                    content_text=feature_text,
+                    tags=tags,
+                    metadata_extra=metadata,
+                    embedding=vector,
+                    updated_at=now_in_app_timezone_naive(),
+                )
+            )
+            await session.commit()
+        worker_log.info(f"✅ 图片理解完成: {item_id}")
+
+    except Exception as e:
+        worker_log.error(f"❌ 图片理解任务失败: {item_id} | {e}")
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(select(ItemORM).where(ItemORM.id == item_id))
+            item = result.scalar_one_or_none()
+            if item:
+                metadata = dict(item.metadata_extra or {})
+                metadata["image_understanding_error"] = str(e)
+                await session.execute(
+                    ItemORM.__table__.update()
+                    .where(ItemORM.id == item_id)
+                    .values(
+                        metadata_extra=metadata,
+                        updated_at=now_in_app_timezone_naive(),
+                    )
+                )
+                await session.commit()
+    finally:
+        if task_cache_dir.exists():
+            shutil.rmtree(task_cache_dir, ignore_errors=True)
