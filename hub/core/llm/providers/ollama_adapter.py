@@ -46,13 +46,15 @@ class OllamaProvider(BaseLLMProvider):
         )
         return _parse_tag_list(response.choices[0].message.content)
 
-    async def understand_image(self, image_data_url: str) -> dict:
+    async def understand_image(self, image_data_url: str, ocr_text: str = "") -> dict:
         prompt = (
             "你是一个图片理解助手。请分析图片，并只返回 JSON 对象。"
             'JSON schema: {"short_caption": string, "detailed_summary_markdown": string, "tags": string[], '
             '"ocr_text": string, "objects": string[], "scene": string}. '
             "不要输出额外说明。"
         )
+        if ocr_text.strip():
+            prompt += f"\n\n已通过本地 OCR 识别到部分文字，可作为辅助参考：\n{ocr_text[:4000]}"
         response = await self.client.chat.completions.create(
             model=self.model_name,
             messages=[

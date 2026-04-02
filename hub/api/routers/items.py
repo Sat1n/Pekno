@@ -127,6 +127,17 @@ def _infer_upload_type(filename: str, content_type: Optional[str]) -> tuple[str,
     return "document", guessed_type
 
 
+def _is_pdf_item(item: ItemORM) -> bool:
+    metadata = item.metadata_extra or {}
+    mime_type = str(
+        metadata.get("mime_type")
+        or metadata.get("vault_download_content_type")
+        or ""
+    ).lower()
+    candidate = str(item.local_asset_path or item.raw_link or "").lower()
+    return mime_type == "application/pdf" or candidate.endswith(".pdf")
+
+
 async def _resolve_plugin(plugin_name: str) -> BasePlugin:
     plugin_id = PLUGIN_NAME_ALIASES.get(plugin_name, plugin_name)
     plugin = plugin_manager.get_plugin(plugin_id)
@@ -320,6 +331,25 @@ async def _queue_image_summary_if_needed(item: ItemORM):
         await process_image_understanding_task.kiq(item.id)
     except Exception:
         hub_log.exception("投递图片理解任务失败")
+
+
+async def _queue_pdf_ocr_if_needed(item: ItemORM):
+    if not _is_pdf_item(item):
+        return
+
+    metadata = item.metadata_extra or {}
+    ocr_meta = metadata.get("ocr") if isinstance(metadata.get("ocr"), dict) else {}
+    if ocr_meta.get("status") in {"processing", "completed"}:
+        return
+    if not item.local_asset_path or not Path(item.local_asset_path).exists():
+        return
+
+    try:
+        from worker.tasks import process_pdf_ocr_task
+
+        await process_pdf_ocr_task.kiq(item.id)
+    except Exception:
+        hub_log.exception("投递 PDF OCR 任务失败")
 
 
 @router.get("", response_model=List[ItemResponse])
@@ -536,6 +566,7 @@ async def toggle_item_favorite(item_id: str, current_user=Depends(get_current_us
     should_queue_download = False
     should_queue_video_summary = False
     should_queue_image_summary = False
+    should_queue_pdf_ocr = False
     async with AsyncSessionLocal() as session:
         async with session.begin():
             item = await session.get(ItemORM, item_id)
@@ -559,6 +590,7 @@ async def toggle_item_favorite(item_id: str, current_user=Depends(get_current_us
             should_queue_download = (not was_favorited) and bool(state.is_favorited)
             should_queue_video_summary = should_queue_download and item.intent == "video"
             should_queue_image_summary = should_queue_download and item.intent == "image"
+            should_queue_pdf_ocr = should_queue_download and _is_pdf_item(item) and bool(item.local_asset_path)
 
     if should_queue_download:
         await _queue_vault_download_if_needed(item_id, item, current_user["id"])
@@ -566,6 +598,8 @@ async def toggle_item_favorite(item_id: str, current_user=Depends(get_current_us
         await _queue_video_summary_if_needed(item)
     if should_queue_image_summary:
         await _queue_image_summary_if_needed(item)
+    if should_queue_pdf_ocr:
+        await _queue_pdf_ocr_if_needed(item)
 
     return ItemStateResponse(
         item_id=item_id,

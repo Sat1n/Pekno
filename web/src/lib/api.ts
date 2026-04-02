@@ -228,7 +228,7 @@ export interface ModelAssignmentInfo {
   description: string
   group: string
   status: 'active' | 'planned'
-  task_type: 'llm' | 'embedding' | 'speech' | 'vision' | 'video'
+  task_type: 'llm' | 'embedding' | 'speech' | 'vision' | 'video' | 'ocr'
   default_provider: string
   default_model: string
   provider: string

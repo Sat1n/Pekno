@@ -142,6 +142,18 @@ MODEL_PROVIDER_CATALOG: List[Dict[str, Any]] = [
             {"key": "endpoint", "label": "下载镜像 / Endpoint", "type": "string", "default": ""},
         ],
     },
+    {
+        "id": "paddleocr_v5_cpu",
+        "name": "PaddleOCR v5 (CPU)",
+        "description": "本地 CPU OCR 引擎，适合图片文字提取与扫描版 PDF 后台识别。",
+        "badge": "本地 OCR",
+        "capabilities": ["OCR"],
+        "config_fields": [
+            {"key": "enabled", "label": "启用 OCR", "type": "string", "default": "true"},
+            {"key": "lang", "label": "语言", "type": "string", "default": "ch"},
+            {"key": "max_workers", "label": "并发数", "type": "string", "default": "1"},
+        ],
+    },
 ]
 
 MODEL_ASSIGNMENT_DEFINITIONS: List[Dict[str, Any]] = [
@@ -186,6 +198,16 @@ MODEL_ASSIGNMENT_DEFINITIONS: List[Dict[str, Any]] = [
         "default_model": "",
     },
     {
+        "key": "ocr",
+        "label": "OCR 文字识别引擎",
+        "description": "负责图片文字提取与扫描版 PDF 的后台文字识别。",
+        "group": "核心多模态",
+        "status": "active",
+        "task_type": "ocr",
+        "default_provider": "paddleocr_v5_cpu",
+        "default_model": "PP-OCRv5",
+    },
+    {
         "key": "speech_to_text",
         "label": "语音转文字引擎",
         "description": "为后续视频音轨抽取与播客内容处理预留，将语音内容转换为可检索文本。",
@@ -216,6 +238,21 @@ MODEL_ASSIGNMENT_DEFINITIONS: List[Dict[str, Any]] = [
         "default_model": "qwen-vl-max",
     },
 ]
+
+
+def _is_provider_configured(provider_id: str, config: Dict[str, Any], is_configured_in_db: bool) -> bool:
+    if provider_id == "paddleocr_v5_cpu":
+        return str(config.get("enabled", "true")).strip().lower() not in {"false", "0", "no", "off"}
+
+    api_key = config.get("api_key")
+    if isinstance(api_key, str):
+        return bool(api_key)
+
+    host = config.get("host")
+    if isinstance(host, str):
+        return bool(host)
+
+    return is_configured_in_db
 
 
 def _normalize_ollama_host(host: str) -> str:
@@ -299,10 +336,7 @@ async def get_model_provider_state() -> Dict[str, Any]:
             secret_preview = f"{api_key[:4]}..." if len(api_key) > 4 else api_key
             config["api_key"] = ""
             
-        if "api_key" in defaults:
-            is_configured = bool(api_key)
-        else:
-            is_configured = is_configured_in_db and bool(config.get("host"))
+        is_configured = _is_provider_configured(provider["id"], config, is_configured_in_db)
 
         provider_states.append(
             {
@@ -372,13 +406,29 @@ async def get_model_assignments() -> List[Dict[str, Any]]:
 
 async def save_model_assignments(assignments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     definition_map = {item["key"]: item for item in MODEL_ASSIGNMENT_DEFINITIONS}
+    capability_map = {
+        "llm": "LLM",
+        "embedding": "Embedding",
+        "speech": "Speech",
+        "vision": "Vision",
+        "video": "Video",
+        "ocr": "OCR",
+    }
     for assignment in assignments:
         key = assignment.get("key")
         if key not in definition_map:
             continue
         definition = definition_map[key]
+        provider_id = assignment.get("provider", definition["default_provider"])
+        if provider_id:
+            provider = _catalog_map().get(provider_id)
+            if not provider:
+                raise ValueError(f"未知模型提供商: {provider_id}")
+            required_capability = capability_map.get(definition["task_type"])
+            if required_capability and required_capability not in provider.get("capabilities", []):
+                raise ValueError(f"模型提供商 [{provider_id}] 不支持用途 [{definition['label']}]")
         payload = {
-            "provider": assignment.get("provider", definition["default_provider"]),
+            "provider": provider_id,
             "model": assignment.get("model", definition["default_model"]),
         }
         success = await _save_json_config(
@@ -504,11 +554,11 @@ def _normalize_image_understanding_result(payload: Dict[str, Any]) -> Dict[str, 
     }
 
 
-async def understand_image(image_bytes: bytes, mime_type: str) -> Tuple[Dict[str, Any], str, str]:
+async def understand_image(image_bytes: bytes, mime_type: str, ocr_text: str = "") -> Tuple[Dict[str, Any], str, str]:
     assignment = await _resolve_assignment("image_understanding")
     provider_id = assignment["provider"]
     provider, model_name = await _build_llm_provider("image_understanding")
     image_data_url = f"data:{mime_type};base64,{base64.b64encode(image_bytes).decode('ascii')}"
-    raw_result = await provider.understand_image(image_data_url)
+    raw_result = await provider.understand_image(image_data_url, ocr_text=ocr_text)
     normalized = _normalize_image_understanding_result(raw_result)
     return normalized, provider_id, model_name

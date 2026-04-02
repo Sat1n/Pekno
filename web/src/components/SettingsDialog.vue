@@ -730,9 +730,9 @@ function formatPatScopes(scopes: string[]): string {
                         <div class="flex items-center justify-between gap-3">
                           <div>
                             <h4 class="text-lg font-semibold">{{ section.group }}</h4>
-                            <p class="text-sm text-muted-foreground mt-1">
-                              {{ section.group === '当前工作流' ? '已落地并正在使用的模型用途。' : '未来视频与多模态链路的预留模型用途。' }}
-                            </p>
+                              <p class="text-sm text-muted-foreground mt-1">
+                                {{ section.items.some((item) => item.status === 'active') ? '已落地并正在使用的模型用途。' : '未来多模态链路的预留模型用途。' }}
+                              </p>
                           </div>
                           <span class="rounded-full bg-muted px-2.5 py-1 text-[11px] font-medium">
                             {{ section.items.length }} 项

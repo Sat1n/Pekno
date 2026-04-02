@@ -5,6 +5,7 @@ from shared.models import ItemORM
 from hub.core.media.downloader import YTDlpService
 from hub.core.media.transcriber import TranscriberFactory
 from hub.core.llm.summarizer import summarize_video_transcript
+from hub.core.ocr import OCRConfigError, OCRDisabledError, run_image_ocr, run_pdf_ocr
 from hub.core.model_settings import get_model_assignments
 from hub.core.llm.service import LLMManager
 from shared.time_utils import now_in_app_timezone_naive
@@ -622,6 +623,11 @@ async def _download_vault_asset_impl(item_id: str, user_id: str | None = None):
             await process_multimedia_task.kiq(item_id, source_url)
         elif item.intent in {"video", "audio"}:
             worker_log.info(f"⏭️ 已存在多媒体分析结果，跳过重复处理: {item_id}")
+
+        if _is_pdf_item(item):
+            ocr_meta = metadata.get("ocr") if isinstance(metadata.get("ocr"), dict) else {}
+            if ocr_meta.get("status") not in {"processing", "completed"}:
+                await process_pdf_ocr_task.kiq(item_id)
     except Exception as e:
         worker_log.error(f"❌ Vault 下载失败: {item_id} | {e}")
         metadata = dict(item.metadata_extra or {})
@@ -644,6 +650,8 @@ async def _download_vault_asset_impl(item_id: str, user_id: str | None = None):
 @broker.task(task_name="download_vault_asset")
 async def task_download_vault_asset(item_id: str, user_id: str | None = None):
     await _download_vault_asset_impl(item_id, user_id)
+
+
 def _build_image_feature_text(title: str, result: dict) -> str:
     parts = [
         f"标题：{title}" if title else "",
@@ -658,6 +666,17 @@ def _build_image_feature_text(title: str, result: dict) -> str:
     if tags:
         parts.append("标签：" + "、".join(str(tag).strip() for tag in tags if str(tag).strip()))
     return "\n".join(part for part in parts if part).strip()
+
+
+def _is_pdf_item(item: ItemORM) -> bool:
+    metadata = item.metadata_extra or {}
+    mime_type = str(
+        metadata.get("mime_type")
+        or metadata.get("vault_download_content_type")
+        or ""
+    ).lower()
+    candidate = str(item.local_asset_path or item.raw_link or "").lower()
+    return item.intent == "document" and (mime_type == "application/pdf" or candidate.endswith(".pdf"))
 
 
 def _resolve_image_source_path(item: ItemORM) -> Path | None:
@@ -702,6 +721,8 @@ async def process_image_understanding_task(item_id: str):
             worker_log.info(f"⏭️ 图片理解任务跳过：已有结果 {item_id}")
             return
 
+        ocr_meta = metadata.get("ocr") if isinstance(metadata.get("ocr"), dict) else {}
+
         source_path = _resolve_image_source_path(item)
         if source_path is None:
             source_url = str(item.raw_link or "").strip()
@@ -718,10 +739,49 @@ async def process_image_understanding_task(item_id: str):
 
         image_bytes = source_path.read_bytes()
         mime_type = mimetypes.guess_type(str(source_path))[0] or "image/png"
+        ocr_text = str(ocr_meta.get("full_text") or "").strip()
+
+        if ocr_meta.get("status") != "completed":
+            try:
+                ocr_result, ocr_provider, ocr_model = await run_image_ocr(source_path)
+                ocr_text = str(ocr_result.get("full_text") or "").strip()
+                metadata["ocr"] = {
+                    "kind": "image",
+                    "status": "completed",
+                    "full_text": ocr_text,
+                    "blocks": ocr_result.get("blocks") or [],
+                    "provider": ocr_provider,
+                    "model": ocr_model,
+                    "processed_at": now_in_app_timezone_naive().isoformat(),
+                    "error": None,
+                }
+            except OCRDisabledError as exc:
+                metadata["ocr"] = {
+                    "kind": "image",
+                    "status": "disabled",
+                    "full_text": "",
+                    "blocks": [],
+                    "provider": "paddleocr_v5_cpu",
+                    "model": "PP-OCRv5",
+                    "processed_at": now_in_app_timezone_naive().isoformat(),
+                    "error": str(exc),
+                }
+            except (OCRConfigError, Exception) as exc:
+                worker_log.warning(f"⚠️ 图片 OCR 失败，降级为纯视觉理解: {item_id} | {exc}")
+                metadata["ocr"] = {
+                    "kind": "image",
+                    "status": "failed",
+                    "full_text": "",
+                    "blocks": [],
+                    "provider": "paddleocr_v5_cpu",
+                    "model": "PP-OCRv5",
+                    "processed_at": now_in_app_timezone_naive().isoformat(),
+                    "error": str(exc),
+                }
 
         ai = LLMManager()
         worker_log.info(f"🧠 正在调用图片理解模型处理: {item_id}")
-        result, provider_id, model_name = await ai.understand_image(image_bytes, mime_type)
+        result, provider_id, model_name = await ai.understand_image(image_bytes, mime_type, ocr_text=ocr_text)
         feature_text = _build_image_feature_text(item.title, result)
         embed_model_name = await ai.get_embedding_model_name()
         vector = await ai.get_vector(feature_text or item.title)
@@ -782,3 +842,131 @@ async def process_image_understanding_task(item_id: str):
     finally:
         if task_cache_dir.exists():
             shutil.rmtree(task_cache_dir, ignore_errors=True)
+
+
+@broker.task(task_name="process_pdf_ocr")
+async def process_pdf_ocr_task(item_id: str):
+    worker_log.info(f"📄 开始 PDF OCR 任务: {item_id}")
+
+    try:
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(select(ItemORM).where(ItemORM.id == item_id))
+            item = result.scalar_one_or_none()
+            if not item:
+                worker_log.warning(f"⚠️ PDF OCR 任务跳过：条目不存在 {item_id}")
+                return
+
+        if not _is_pdf_item(item):
+            worker_log.info(f"⏭️ PDF OCR 任务跳过：不是 PDF {item_id}")
+            return
+
+        if not item.local_asset_path or not Path(item.local_asset_path).exists():
+            worker_log.warning(f"⚠️ PDF OCR 任务跳过：本地文件不存在 {item_id}")
+            return
+
+        metadata = dict(item.metadata_extra or {})
+        ocr_meta = metadata.get("ocr") if isinstance(metadata.get("ocr"), dict) else {}
+        if ocr_meta.get("status") == "completed" and ocr_meta.get("kind") == "pdf":
+            worker_log.info(f"⏭️ PDF OCR 任务跳过：已有结果 {item_id}")
+            return
+
+        metadata["ocr"] = {
+            "kind": "pdf",
+            "status": "processing",
+            "full_text": str(ocr_meta.get("full_text") or ""),
+            "pages": ocr_meta.get("pages") or [],
+            "provider": "paddleocr_v5_cpu",
+            "model": "PP-OCRv5",
+            "processed_at": now_in_app_timezone_naive().isoformat(),
+            "error": None,
+        }
+        async with AsyncSessionLocal() as session:
+            async with session.begin():
+                await session.execute(
+                    ItemORM.__table__.update()
+                    .where(ItemORM.id == item_id)
+                    .values(metadata_extra=metadata, updated_at=now_in_app_timezone_naive())
+                )
+
+        result, provider_id, model_name = await run_pdf_ocr(item.local_asset_path)
+        full_text = str(result.get("full_text") or "").strip()
+
+        metadata["ocr"] = {
+            "kind": "pdf",
+            "status": "completed",
+            "full_text": full_text,
+            "pages": result.get("pages") or [],
+            "ocr_page_count": int(result.get("ocr_page_count") or 0),
+            "provider": provider_id,
+            "model": model_name,
+            "processed_at": now_in_app_timezone_naive().isoformat(),
+            "error": None,
+        }
+
+        values = {
+            "metadata_extra": metadata,
+            "updated_at": now_in_app_timezone_naive(),
+        }
+
+        if full_text:
+            ai = LLMManager()
+            feature_text = "\n".join(part for part in [f"标题：{item.title}" if item.title else "", full_text] if part).strip()
+            vector = await ai.get_vector(feature_text)
+            values["content_text"] = full_text
+            values["embedding"] = vector
+
+        async with AsyncSessionLocal() as session:
+            async with session.begin():
+                await session.execute(
+                    ItemORM.__table__.update()
+                    .where(ItemORM.id == item_id)
+                    .values(**values)
+                )
+
+        worker_log.info(f"✅ PDF OCR 完成: {item_id}")
+    except OCRDisabledError as exc:
+        worker_log.warning(f"⚠️ PDF OCR 已禁用: {item_id}")
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(select(ItemORM).where(ItemORM.id == item_id))
+            item = result.scalar_one_or_none()
+            if item:
+                metadata = dict(item.metadata_extra or {})
+                metadata["ocr"] = {
+                    "kind": "pdf",
+                    "status": "disabled",
+                    "full_text": "",
+                    "pages": [],
+                    "provider": "paddleocr_v5_cpu",
+                    "model": "PP-OCRv5",
+                    "processed_at": now_in_app_timezone_naive().isoformat(),
+                    "error": str(exc),
+                }
+                await session.execute(
+                    ItemORM.__table__.update()
+                    .where(ItemORM.id == item_id)
+                    .values(metadata_extra=metadata, updated_at=now_in_app_timezone_naive())
+                )
+                await session.commit()
+    except Exception as exc:
+        worker_log.error(f"❌ PDF OCR 任务失败: {item_id} | {exc}")
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(select(ItemORM).where(ItemORM.id == item_id))
+            item = result.scalar_one_or_none()
+            if item:
+                metadata = dict(item.metadata_extra or {})
+                metadata["ocr"] = {
+                    "kind": "pdf",
+                    "status": "failed",
+                    "full_text": "",
+                    "pages": [],
+                    "provider": "paddleocr_v5_cpu",
+                    "model": "PP-OCRv5",
+                    "processed_at": now_in_app_timezone_naive().isoformat(),
+                    "error": str(exc),
+                }
+                await session.execute(
+                    ItemORM.__table__.update()
+                    .where(ItemORM.id == item_id)
+                    .values(metadata_extra=metadata, updated_at=now_in_app_timezone_naive())
+                )
+                await session.commit()

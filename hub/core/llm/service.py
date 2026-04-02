@@ -17,8 +17,8 @@ class LLMService:
         match = next((item for item in assignments if item["key"] == purpose), None)
         return match["model"] if match else ""
 
-    async def understand_image(self, image_bytes: bytes, mime_type: str) -> tuple[dict, str, str]:
-        return await model_settings.understand_image(image_bytes, mime_type)
+    async def understand_image(self, image_bytes: bytes, mime_type: str, ocr_text: str = "") -> tuple[dict, str, str]:
+        return await model_settings.understand_image(image_bytes, mime_type, ocr_text=ocr_text)
 
 
 class EmbeddingService:
@@ -55,5 +55,5 @@ class LLMManager:
     async def get_embedding_model_name(self) -> str:
         return await self.embed.current_model_name()
 
-    async def understand_image(self, image_bytes: bytes, mime_type: str) -> tuple[dict, str, str]:
-        return await self.llm.understand_image(image_bytes, mime_type)
+    async def understand_image(self, image_bytes: bytes, mime_type: str, ocr_text: str = "") -> tuple[dict, str, str]:
+        return await self.llm.understand_image(image_bytes, mime_type, ocr_text=ocr_text)

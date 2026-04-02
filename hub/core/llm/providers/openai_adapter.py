@@ -43,7 +43,7 @@ class OpenAIProvider(BaseLLMProvider):
         tags_raw = response.choices[0].message.content
         return _parse_tag_list(tags_raw)
 
-    async def understand_image(self, image_data_url: str) -> dict:
+    async def understand_image(self, image_data_url: str, ocr_text: str = "") -> dict:
         prompt = (
             "你是一个图片理解助手。请仔细分析图片，并只返回 JSON 对象，不要输出 Markdown 或解释。"
             'JSON schema: {"short_caption": string, "detailed_summary_markdown": string, "tags": string[], '
@@ -51,6 +51,8 @@ class OpenAIProvider(BaseLLMProvider):
             "要求：short_caption 为 20-60 字简洁描述；detailed_summary_markdown 为面向知识库的 Markdown 总结；"
             "如果图片里有文字，尽量提取到 ocr_text；如果没有就返回空字符串。"
         )
+        if ocr_text.strip():
+            prompt += f"\n\n已通过本地 OCR 识别到部分文字，可作为辅助参考：\n{ocr_text[:4000]}"
         response = await self.client.chat.completions.create(
             model=self.model,
             messages=[

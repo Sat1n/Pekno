@@ -13,6 +13,6 @@ class BaseLLMProvider(ABC):
         pass
 
     @abstractmethod
-    async def understand_image(self, image_data_url: str) -> dict[str, Any]:
+    async def understand_image(self, image_data_url: str, ocr_text: str = "") -> dict[str, Any]:
         """理解图片并返回结构化结果"""
         pass
