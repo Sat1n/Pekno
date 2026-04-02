@@ -8,10 +8,20 @@ import { buildAuthorizedHeaders } from '@/lib/api'
 
 const props = defineProps<{
   url: string
+  highlights?: Array<{
+    page: number
+    rects: Array<{ x: number; y: number; width: number; height: number }>
+    kind?: 'text' | 'screenshot'
+    active?: boolean
+  }>
 }>()
 
 const emit = defineEmits<{
-  quote: [payload: { text: string; page: number }]
+  quote: [payload: {
+    text: string
+    page: number
+    rects: Array<{ x: number; y: number; width: number; height: number }>
+  }]
   screenshotCapture: [payload: {
     blob: Blob
     page: number
@@ -41,10 +51,13 @@ const loading = ref(false)
 const errorMessage = ref('')
 const selectedText = ref('')
 const quoteButton = ref<{ top: number; left: number } | null>(null)
+const selectedRects = ref<Array<{ x: number; y: number; width: number; height: number }>>([])
 const zoomMode = ref<'fit-width' | 'fit-page' | '100' | '125' | '150'>('fit-page')
 const captureMode = ref(false)
 const captureRect = ref<{ x: number; y: number; width: number; height: number } | null>(null)
 const captureStart = ref<{ x: number; y: number } | null>(null)
+const currentScale = ref(1)
+const currentViewportSize = ref({ width: 0, height: 0 })
 
 let renderToken = 0
 let activeTextLayer: TextLayerBuilder | null = null
@@ -58,6 +71,19 @@ const canGoPrev = computed(() => currentPage.value > 1)
 const canGoNext = computed(() => currentPage.value < totalPages.value)
 const colorMode = useColorMode()
 const isDarkMode = computed(() => colorMode.value === 'dark')
+const isFitZoomMode = computed(() => zoomMode.value === 'fit-width' || zoomMode.value === 'fit-page')
+const pageHighlights = computed(() => {
+  return (props.highlights || [])
+    .filter((highlight) => highlight.page === currentPage.value)
+    .flatMap((highlight, groupIndex) =>
+      (highlight.rects || []).map((rect, rectIndex) => ({
+        ...rect,
+        kind: highlight.kind || 'text',
+        active: Boolean(highlight.active),
+        key: `${highlight.page}-${highlight.kind || 'text'}-${groupIndex}-${rectIndex}`,
+      })),
+    )
+})
 const zoomOptions = [
   { value: 'fit-page', label: '整页' },
   { value: 'fit-width', label: '适宽' },
@@ -84,6 +110,7 @@ function emitViewerState() {
 function hideQuoteButton() {
   quoteButton.value = null
   selectedText.value = ''
+  selectedRects.value = []
 }
 
 function setCaptureMode(active: boolean) {
@@ -242,7 +269,9 @@ async function renderPage() {
     }
 
     scale = Math.max(Math.min(scale, 2.2), 0.45)
+    currentScale.value = scale
     const viewport = page.getViewport({ scale })
+    currentViewportSize.value = { width: viewport.width, height: viewport.height }
     const canvas = layout.canvas
     const textLayerHost = layout.textLayer
     if (
@@ -261,7 +290,10 @@ async function renderPage() {
       return
     }
 
-    const outputScale = window.devicePixelRatio || 1
+    const outputScaleBase = window.devicePixelRatio || 1
+    const outputScale = isFitZoomMode.value
+      ? outputScaleBase
+      : Math.min(outputScaleBase * 1.5, 3)
     canvas.width = Math.floor(viewport.width * outputScale)
     canvas.height = Math.floor(viewport.height * outputScale)
     canvas.style.width = `${viewport.width}px`
@@ -285,6 +317,12 @@ async function renderPage() {
     textLayerHost.innerHTML = ''
     textLayerHost.style.width = `${viewport.width}px`
     textLayerHost.style.height = `${viewport.height}px`
+    textLayerHost.style.setProperty('--scale-factor', String(scale))
+    textLayerHost.style.setProperty('--total-scale-factor', String(scale))
+    textLayerHost.style.setProperty('--user-unit', '1')
+    layout.host.style.setProperty('--scale-factor', String(scale))
+    layout.host.style.setProperty('--total-scale-factor', String(scale))
+    layout.host.style.setProperty('--user-unit', '1')
 
     activeTextLayer?.cancel()
     activeTextLayer = null
@@ -351,6 +389,32 @@ function updateSelectionState() {
 
   const rect = range.getBoundingClientRect()
   const viewerRect = viewerRef.value.getBoundingClientRect()
+  const textLayerRect = textLayerRef.value.getBoundingClientRect()
+  const normalizedRects = Array.from(range.getClientRects())
+    .map((clientRect) => {
+      const left = Math.max(clientRect.left, textLayerRect.left)
+      const top = Math.max(clientRect.top, textLayerRect.top)
+      const right = Math.min(clientRect.right, textLayerRect.right)
+      const bottom = Math.min(clientRect.bottom, textLayerRect.bottom)
+      const width = right - left
+      const height = bottom - top
+      if (width <= 1 || height <= 1 || textLayerRect.width <= 0 || textLayerRect.height <= 0) {
+        return null
+      }
+      return {
+        x: (left - textLayerRect.left) / textLayerRect.width,
+        y: (top - textLayerRect.top) / textLayerRect.height,
+        width: width / textLayerRect.width,
+        height: height / textLayerRect.height,
+      }
+    })
+    .filter((item): item is { x: number; y: number; width: number; height: number } => Boolean(item))
+
+  if (normalizedRects.length === 0) {
+    hideQuoteButton()
+    return
+  }
+
   const left = Math.min(
     Math.max(rect.left - viewerRect.left, 12),
     Math.max(viewerRect.width - 120, 12),
@@ -358,6 +422,7 @@ function updateSelectionState() {
   const top = Math.max(rect.top - viewerRect.top - 40, 12)
 
   selectedText.value = text
+  selectedRects.value = normalizedRects
   quoteButton.value = { top, left }
 }
 
@@ -378,13 +443,25 @@ function handleSelectionChange() {
 }
 
 function emitQuote() {
-  if (!selectedText.value.trim()) return
+  if (!selectedText.value.trim() || selectedRects.value.length === 0) return
   emit('quote', {
     text: selectedText.value.trim(),
     page: currentPage.value,
+    rects: selectedRects.value,
   })
   clearSelection()
   hideQuoteButton()
+}
+
+function highlightRectStyle(rect: { x: number; y: number; width: number; height: number }) {
+  const width = currentViewportSize.value.width
+  const height = currentViewportSize.value.height
+  return {
+    left: `${rect.x * width}px`,
+    top: `${rect.y * height}px`,
+    width: `${rect.width * width}px`,
+    height: `${rect.height * height}px`,
+  }
 }
 
 function goPrev() {
@@ -618,6 +695,7 @@ function handleViewerKeydown(event: KeyboardEvent) {
       ref="viewer"
       class="pdf-viewer relative h-full min-h-0 min-w-0 overflow-auto rounded-2xl border bg-muted/10 p-3"
       :class="{ 'pdf-viewer--dark': isDarkMode }"
+      :style="{ '--scale-factor': String(currentScale) }"
     >
       <div v-if="loading" class="space-y-3">
         <Skeleton class="h-10 w-full" />
@@ -632,10 +710,29 @@ function handleViewerKeydown(event: KeyboardEvent) {
         v-else
         ref="pageShell"
         class="pdf-page-shell relative mx-auto w-fit max-w-full"
+        :class="{ 'pdf-page-shell--fit': isFitZoomMode, 'pdf-page-shell--manual': !isFitZoomMode }"
+        :style="{ '--scale-factor': String(currentScale), '--total-scale-factor': String(currentScale), '--user-unit': '1' }"
         @mouseup="handleMouseUp"
       >
-        <canvas ref="canvas" class="pdf-page-canvas block rounded-lg shadow-sm" />
+        <canvas
+          ref="canvas"
+          class="pdf-page-canvas block rounded-lg shadow-sm"
+          :class="{ 'pdf-page-canvas--fit': isFitZoomMode, 'pdf-page-canvas--manual': !isFitZoomMode }"
+        />
         <div ref="textLayer" class="pdf-text-layer absolute inset-0 overflow-hidden rounded-lg" />
+        <div class="pdf-highlight-layer pointer-events-none absolute inset-0 overflow-hidden rounded-lg">
+          <div
+            v-for="rect in pageHighlights"
+            :key="rect.key"
+            class="pdf-highlight-rect absolute"
+            :class="{
+              'pdf-highlight-rect--text': rect.kind === 'text',
+              'pdf-highlight-rect--screenshot': rect.kind === 'screenshot',
+              'pdf-highlight-rect--active': rect.active,
+            }"
+            :style="highlightRectStyle(rect)"
+          />
+        </div>
         <div
           v-if="captureMode"
           class="absolute inset-0 z-10 cursor-crosshair rounded-lg bg-black/5"
@@ -687,8 +784,23 @@ function handleViewerKeydown(event: KeyboardEvent) {
 }
 
 .pdf-viewer canvas {
-  max-width: 100%;
   height: auto;
+}
+
+.pdf-page-shell--fit {
+  max-width: 100%;
+}
+
+.pdf-page-shell--manual {
+  max-width: none;
+}
+
+.pdf-page-canvas--fit {
+  max-width: 100%;
+}
+
+.pdf-page-canvas--manual {
+  max-width: none;
 }
 
 .pdf-viewer--dark {
@@ -700,7 +812,6 @@ function handleViewerKeydown(event: KeyboardEvent) {
   background:
     radial-gradient(circle at top, rgba(148, 163, 184, 0.08), transparent 42%),
     linear-gradient(180deg, rgba(30, 41, 59, 0.9), rgba(15, 23, 42, 0.92));
-  padding: 0.4rem;
   box-shadow:
     0 18px 40px rgba(2, 6, 23, 0.32),
     inset 0 0 0 1px rgba(148, 163, 184, 0.08);
@@ -729,5 +840,43 @@ function handleViewerKeydown(event: KeyboardEvent) {
 .pdf-text-layer :deep(span),
 .pdf-text-layer :deep(br) {
   cursor: text;
+}
+
+.pdf-highlight-rect {
+  border-radius: 0.25rem;
+}
+
+.pdf-highlight-rect--text {
+  border: none;
+  background: rgb(248 113 113 / 0.24);
+  mix-blend-mode: multiply;
+}
+
+.pdf-highlight-rect--text.pdf-highlight-rect--active {
+  background: rgb(239 68 68 / 0.3);
+}
+
+.pdf-highlight-rect--screenshot {
+  border: 2px solid rgb(239 68 68 / 0.92);
+  background: rgb(248 113 113 / 0.08);
+  box-shadow: 0 0 0 1px rgb(254 242 242 / 0.35);
+}
+
+.pdf-highlight-rect--screenshot.pdf-highlight-rect--active {
+  background: rgb(248 113 113 / 0.14);
+}
+
+.pdf-viewer--dark .pdf-highlight-rect--text {
+  background: rgb(248 113 113 / 0.2);
+  mix-blend-mode: screen;
+}
+
+.pdf-viewer--dark .pdf-highlight-rect--text.pdf-highlight-rect--active {
+  background: rgb(248 113 113 / 0.28);
+}
+
+.pdf-viewer--dark .pdf-highlight-rect--screenshot {
+  border-color: rgb(248 113 113 / 0.96);
+  background: rgb(248 113 113 / 0.05);
 }
 </style>

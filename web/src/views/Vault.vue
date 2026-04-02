@@ -63,6 +63,20 @@ interface TranscriptSegment {
   text: string
 }
 
+interface PdfHighlightRect {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+interface PdfHighlightGroup {
+  page: number
+  rects: PdfHighlightRect[]
+  kind: 'text' | 'screenshot'
+  active: boolean
+}
+
 const UNCATEGORIZED_CATEGORY_ID = '__uncategorized__'
 const DEFAULT_UNCATEGORIZED_COLOR = '#94A3B8'
 const CATEGORY_COLORS = ['#3B82F6', '#F97316', '#10B981', '#EF4444', '#8B5CF6', '#EAB308']
@@ -92,6 +106,11 @@ const pdfViewerState = ref({
 })
 const pdfPageInput = ref('1')
 const pdfCaptureMode = ref(false)
+const activePdfHighlight = ref<{
+  page: number
+  rects: PdfHighlightRect[]
+  kind?: 'text' | 'screenshot'
+} | null>(null)
 const pdfZoomOptions = [
   { value: 'fit-page' as const, label: '整页' },
   { value: 'fit-width' as const, label: '适宽' },
@@ -306,6 +325,49 @@ const isPortraitVideo = computed(() => videoAspect.value.height > videoAspect.va
 const transcriptSegments = computed(() => parseTranscriptSegments(activeItem.value?.metadata_extra?.raw_transcript))
 const transcriptAvailable = computed(() => transcriptSegments.value.length > 0)
 const currentCategoryValue = computed(() => activeItem.value?.vault_category_id || UNCATEGORIZED_CATEGORY_ID)
+const pdfAnnotationHighlights = computed<PdfHighlightGroup[]>(() => {
+  if (activeItem.value?.intent !== 'document') return []
+
+  const persistentHighlights: PdfHighlightGroup[] = annotations.value.flatMap((annotation): PdfHighlightGroup[] => {
+    const anchor = annotation.anchor_data || {}
+    if (anchor.media_type !== 'pdf' || typeof anchor.page !== 'number') return []
+
+    if (anchor.quote_type === 'text-selection' && Array.isArray(anchor.selection_rects) && anchor.selection_rects.length > 0) {
+      return [{
+        page: anchor.page,
+        rects: anchor.selection_rects as PdfHighlightRect[],
+        kind: 'text' as const,
+        active: false,
+      }]
+    }
+
+    if (
+      anchor.quote_type === 'screenshot'
+      && anchor.rect_norm
+      && typeof anchor.rect_norm === 'object'
+    ) {
+      return [{
+        page: anchor.page,
+        rects: [anchor.rect_norm as PdfHighlightRect],
+        kind: 'screenshot' as const,
+        active: false,
+      }]
+    }
+
+    return []
+  })
+
+  if (activePdfHighlight.value?.rects?.length) {
+    persistentHighlights.push({
+      page: activePdfHighlight.value.page,
+      rects: activePdfHighlight.value.rects,
+      kind: activePdfHighlight.value.kind || 'text',
+      active: true,
+    })
+  }
+
+  return persistentHighlights
+})
 
 const activeTranscriptIndex = computed(() => {
   const currentTime = videoCurrentTime.value
@@ -575,8 +637,29 @@ function captureVideoTimestamp() {
   void fillAnnotationDraft(`> [${formatTimestamp(currentSeconds)}] 视频时间点\n${transcriptLine}\n我的思考：`)
 }
 
-function jumpToPdfAnnotationPage(page: number) {
-  pdfViewerRef.value?.goToPage(page)
+function jumpToPdfAnnotation(anchor: { page: number; selection_rects?: Array<{ x: number; y: number; width: number; height: number }> }) {
+  activePdfHighlight.value = anchor.selection_rects?.length
+    ? {
+      page: anchor.page,
+      rects: anchor.selection_rects,
+      kind: 'text',
+    }
+    : null
+  pdfViewerRef.value?.goToPage(anchor.page)
+}
+
+function jumpToPdfScreenshotAnnotation(anchor: {
+  page: number
+  rect_norm?: { x: number; y: number; width: number; height: number }
+}) {
+  activePdfHighlight.value = anchor.rect_norm
+    ? {
+      page: anchor.page,
+      rects: [anchor.rect_norm],
+      kind: 'screenshot',
+    }
+    : null
+  pdfViewerRef.value?.goToPage(anchor.page)
 }
 
 function handlePdfStateChange(payload: {
@@ -643,12 +726,22 @@ function handlePdfKeydown(event: KeyboardEvent) {
   }
 }
 
-async function handleQuote(payload: { text: string; page: number }) {
+async function handleQuote(payload: {
+  text: string
+  page: number
+  rects: Array<{ x: number; y: number; width: number; height: number }>
+}) {
   pendingAnnotationAnchor.value = {
     media_type: 'pdf',
     quote_type: 'text-selection',
     page: payload.page,
     selected_text: payload.text,
+    selection_rects: payload.rects,
+  }
+  activePdfHighlight.value = {
+    page: payload.page,
+    rects: payload.rects,
+    kind: 'text',
   }
   await fillAnnotationDraft(`> [Page ${payload.page}] ${payload.text}\n\n我的思考：`)
 }
@@ -696,6 +789,11 @@ async function handlePdfScreenshotCapture(payload: {
       image_width: payload.imageWidth,
       image_height: payload.imageHeight,
       rect_norm: payload.rectNorm,
+    }
+    activePdfHighlight.value = {
+      page: payload.page,
+      rects: [payload.rectNorm],
+      kind: 'screenshot',
     }
 
     await fillAnnotationDraft(`> [Page ${payload.page}] PDF 截图引用\n\n我的思考：`)
@@ -878,14 +976,13 @@ watch(
   () => activeItem.value?.id,
   async () => {
     pendingAnnotationAnchor.value = {}
+    activePdfHighlight.value = null
     pdfCaptureMode.value = false
     videoAspect.value = { width: 16, height: 9 }
     videoCurrentTime.value = 0
     transcriptCollapsed.value = false
     void ensureActiveVaultAsset()
-    if (activeInspectorTab.value === 'notes') {
-      await loadAnnotations()
-    }
+    await loadAnnotations()
   },
 )
 
@@ -1299,6 +1396,7 @@ onBeforeUnmount(() => {
                     <PdfViewer
                       ref="pdfViewer"
                       :url="openableDocumentUrl"
+                      :highlights="pdfAnnotationHighlights"
                       @quote="handleQuote"
                       @screenshot-capture="handlePdfScreenshotCapture"
                       @capture-mode-change="pdfCaptureMode = $event"
@@ -1444,7 +1542,7 @@ onBeforeUnmount(() => {
                           v-if="annotation.anchor_data?.media_type === 'pdf' && annotation.anchor_data?.quote_type === 'text-selection' && typeof annotation.anchor_data?.page === 'number'"
                           type="button"
                           class="mb-2 inline-flex rounded-full border bg-background px-2.5 py-1 text-xs font-medium text-foreground transition hover:bg-muted"
-                          @click="jumpToPdfAnnotationPage(annotation.anchor_data.page)"
+                          @click="jumpToPdfAnnotation({ page: annotation.anchor_data.page, selection_rects: annotation.anchor_data.selection_rects })"
                         >
                           <Pin class="mr-1 h-3.5 w-3.5" />
                           Page {{ annotation.anchor_data.page }}
@@ -1481,7 +1579,7 @@ onBeforeUnmount(() => {
                           <button
                             type="button"
                             class="inline-flex rounded-full border bg-background px-2.5 py-1 text-xs font-medium text-foreground transition hover:bg-muted"
-                            @click="jumpToPdfAnnotationPage(annotation.anchor_data.page)"
+                            @click="jumpToPdfScreenshotAnnotation({ page: annotation.anchor_data.page, rect_norm: annotation.anchor_data.rect_norm })"
                           >
                             <Camera class="mr-1 h-3.5 w-3.5" />
                             Page {{ annotation.anchor_data.page }}
