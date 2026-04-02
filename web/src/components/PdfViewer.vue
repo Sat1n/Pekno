@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, markRaw, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, useTemplateRef, watch } from 'vue'
+import { useColorMode } from '@vueuse/core'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Camera, Pin } from 'lucide-vue-next'
 import { getDocument, TextLayerBuilder, TextLayerImages, type PDFDocumentProxy } from '@/lib/pdfjs'
@@ -55,6 +56,8 @@ let delayedRenderTimer = 0
 
 const canGoPrev = computed(() => currentPage.value > 1)
 const canGoNext = computed(() => currentPage.value < totalPages.value)
+const colorMode = useColorMode()
+const isDarkMode = computed(() => colorMode.value === 'dark')
 const zoomOptions = [
   { value: 'fit-page', label: '整页' },
   { value: 'fit-width', label: '适宽' },
@@ -611,7 +614,11 @@ function handleViewerKeydown(event: KeyboardEvent) {
 
 <template>
   <div class="h-full min-h-0">
-    <div ref="viewer" class="pdf-viewer relative h-full min-h-0 min-w-0 overflow-auto rounded-2xl border bg-muted/10 p-3">
+    <div
+      ref="viewer"
+      class="pdf-viewer relative h-full min-h-0 min-w-0 overflow-auto rounded-2xl border bg-muted/10 p-3"
+      :class="{ 'pdf-viewer--dark': isDarkMode }"
+    >
       <div v-if="loading" class="space-y-3">
         <Skeleton class="h-10 w-full" />
         <Skeleton class="h-[70vh] w-full" />
@@ -624,10 +631,10 @@ function handleViewerKeydown(event: KeyboardEvent) {
       <div
         v-else
         ref="pageShell"
-        class="relative mx-auto w-fit max-w-full"
+        class="pdf-page-shell relative mx-auto w-fit max-w-full"
         @mouseup="handleMouseUp"
       >
-        <canvas ref="canvas" class="block rounded-lg shadow-sm" />
+        <canvas ref="canvas" class="pdf-page-canvas block rounded-lg shadow-sm" />
         <div ref="textLayer" class="pdf-text-layer absolute inset-0 overflow-hidden rounded-lg" />
         <div
           v-if="captureMode"
@@ -675,9 +682,39 @@ function handleViewerKeydown(event: KeyboardEvent) {
   min-height: 100%;
 }
 
+.pdf-page-shell {
+  border-radius: 0.9rem;
+}
+
 .pdf-viewer canvas {
   max-width: 100%;
   height: auto;
+}
+
+.pdf-viewer--dark {
+  background: rgba(11, 15, 23, 0.92);
+  border-color: rgba(71, 85, 105, 0.45);
+}
+
+.pdf-viewer--dark .pdf-page-shell {
+  background:
+    radial-gradient(circle at top, rgba(148, 163, 184, 0.08), transparent 42%),
+    linear-gradient(180deg, rgba(30, 41, 59, 0.9), rgba(15, 23, 42, 0.92));
+  padding: 0.4rem;
+  box-shadow:
+    0 18px 40px rgba(2, 6, 23, 0.32),
+    inset 0 0 0 1px rgba(148, 163, 184, 0.08);
+}
+
+.pdf-viewer--dark .pdf-page-canvas {
+  filter: invert(1) hue-rotate(180deg) brightness(0.9) contrast(0.92);
+  box-shadow:
+    0 12px 30px rgba(2, 6, 23, 0.34),
+    0 0 0 1px rgba(148, 163, 184, 0.08);
+}
+
+.pdf-viewer--dark .pdf-text-layer {
+  opacity: 0.9;
 }
 
 .pdf-text-layer :deep(.textLayer) {
