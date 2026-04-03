@@ -63,7 +63,11 @@ SUPPORTED_TEXT_EXTENSIONS = {".txt"}
 SUPPORTED_TEXT_MIME_TYPES = {"text/plain"}
 SUPPORTED_MARKDOWN_EXTENSIONS = {".md", ".markdown"}
 SUPPORTED_MARKDOWN_MIME_TYPES = {"text/markdown", "text/x-markdown"}
-UNSUPPORTED_OFFICE_EXTENSIONS = {".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx"}
+SUPPORTED_DOCX_EXTENSIONS = {".docx"}
+SUPPORTED_DOCX_MIME_TYPES = {
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+}
+UNSUPPORTED_OFFICE_EXTENSIONS = {".doc", ".docm", ".xls", ".xlsx", ".ppt", ".pptx"}
 UNSUPPORTED_OFFICE_MIME_KEYWORDS = {
     "officedocument",
     "msword",
@@ -71,6 +75,9 @@ UNSUPPORTED_OFFICE_MIME_KEYWORDS = {
     "powerpoint",
     "presentationml",
     "spreadsheetml",
+}
+SUPPORTED_DOCX_MIME_KEYWORDS = {
+    "wordprocessingml.document",
 }
 PLUGIN_NAME_ALIASES = {
     "github": "github_stars",
@@ -222,15 +229,24 @@ def _validate_and_classify_upload(filename: str, content_type: Optional[str]) ->
     if ext in SUPPORTED_TEXT_EXTENSIONS or mime_type in SUPPORTED_TEXT_MIME_TYPES:
         return "document", "text/plain"
 
-    if ext in UNSUPPORTED_OFFICE_EXTENSIONS or any(keyword in mime_type for keyword in UNSUPPORTED_OFFICE_MIME_KEYWORDS):
-        raise HTTPException(status_code=400, detail="Office 文档上传暂不支持，请先转换为 PDF、TXT 或 Markdown。")
+    if ext in SUPPORTED_DOCX_EXTENSIONS or mime_type in SUPPORTED_DOCX_MIME_TYPES or any(
+        keyword in mime_type for keyword in SUPPORTED_DOCX_MIME_KEYWORDS
+    ):
+        return "document", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
-    raise HTTPException(status_code=400, detail="当前仅支持静态图片、常见视频音频、PDF、TXT 与 Markdown 上传。")
+    if ext in UNSUPPORTED_OFFICE_EXTENSIONS or any(keyword in mime_type for keyword in UNSUPPORTED_OFFICE_MIME_KEYWORDS):
+        raise HTTPException(status_code=400, detail="当前仅支持 DOCX，其他 Office 文档请先转换为 PDF、TXT 或 Markdown。")
+
+    raise HTTPException(status_code=400, detail="当前仅支持静态图片、常见视频音频、PDF、TXT、Markdown 与 DOCX 上传。")
 
 
 def _is_text_upload_mime(mime_type: str) -> bool:
     normalized = (mime_type or "").strip().lower()
-    return normalized in SUPPORTED_TEXT_MIME_TYPES or normalized in SUPPORTED_MARKDOWN_MIME_TYPES
+    return (
+        normalized in SUPPORTED_TEXT_MIME_TYPES
+        or normalized in SUPPORTED_MARKDOWN_MIME_TYPES
+        or normalized in SUPPORTED_DOCX_MIME_TYPES
+    )
 
 
 def _is_pdf_item(item: ItemORM) -> bool:
@@ -594,7 +610,7 @@ async def upload_item(
         )
 
     intent, mime_type = _validate_and_classify_upload(original_name, file.content_type)
-    extracted_text = _extract_text_from_upload_bytes(content) if _is_text_upload_mime(mime_type) else ""
+    extracted_text = _extract_text_from_upload_bytes(content) if mime_type in SUPPORTED_TEXT_MIME_TYPES or mime_type in SUPPORTED_MARKDOWN_MIME_TYPES else ""
 
     with open(target_path, "wb") as output_file:
         output_file.write(content)

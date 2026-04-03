@@ -55,6 +55,33 @@ async def _get_github_access_token(user_id: str | None = None) -> str | None:
     return None
 
 
+def _extract_docx_text(file_path: Path) -> str:
+    try:
+        from docx import Document  # type: ignore
+    except Exception as exc:
+        raise RuntimeError("未安装 DOCX 解析依赖 python-docx") from exc
+
+    document = Document(str(file_path))
+    parts: list[str] = []
+
+    for paragraph in document.paragraphs:
+        text = (paragraph.text or "").strip()
+        if text:
+            parts.append(text)
+
+    for table in document.tables:
+        for row in table.rows:
+            row_text = " | ".join(
+                cell_text
+                for cell in row.cells
+                if (cell_text := (cell.text or "").strip())
+            ).strip()
+            if row_text:
+                parts.append(row_text)
+
+    return "\n".join(parts).strip()
+
+
 async def _download_github_readme(
     item: ItemORM,
     output_dir: Path,
@@ -1003,8 +1030,13 @@ async def process_uploaded_text_document_task(item_id: str):
 
         metadata = dict(item.metadata_extra or {})
         mime_type = str(metadata.get("mime_type") or "").lower()
-        if mime_type not in {"text/plain", "text/markdown", "text/x-markdown"}:
-            worker_log.info(f"⏭️ 文本上传分析任务跳过：不是文本/Markdown {item_id}")
+        if mime_type not in {
+            "text/plain",
+            "text/markdown",
+            "text/x-markdown",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        }:
+            worker_log.info(f"⏭️ 文本上传分析任务跳过：不是文本/Markdown/DOCX {item_id}")
             return
         if item.embedding is not None and item.tags:
             worker_log.info(f"⏭️ 文本上传分析任务跳过：已有向量和标签 {item_id}")
@@ -1022,19 +1054,26 @@ async def process_uploaded_text_document_task(item_id: str):
             )
             await session.commit()
 
-        raw_bytes = Path(item.local_asset_path).read_bytes()
-        text_content = ""
-        for encoding in ("utf-8-sig", "utf-8", "utf-16", "gb18030"):
-            try:
-                text_content = raw_bytes.decode(encoding).strip()
-                break
-            except UnicodeDecodeError:
-                continue
-        if not text_content:
-            text_content = raw_bytes.decode("utf-8", errors="ignore").strip()
+        source_path = Path(item.local_asset_path)
+        if mime_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+            text_content = _extract_docx_text(source_path)
+        else:
+            raw_bytes = source_path.read_bytes()
+            text_content = ""
+            for encoding in ("utf-8-sig", "utf-8", "utf-16", "gb18030"):
+                try:
+                    text_content = raw_bytes.decode(encoding).strip()
+                    break
+                except UnicodeDecodeError:
+                    continue
+            if not text_content:
+                text_content = raw_bytes.decode("utf-8", errors="ignore").strip()
 
         user_supplied_summary = str(metadata.get("user_supplied_summary") or "").strip()
         content_text = "\n\n".join(part for part in [user_supplied_summary, text_content] if part).strip()
+
+        if not content_text:
+            raise ValueError("文档中未提取到可用文本")
 
         ai = LLMManager()
         short_summary = await ai.generate_summary(content_text or item.title, length="short")
@@ -1069,6 +1108,8 @@ async def process_uploaded_text_document_task(item_id: str):
                 metadata = dict(item.metadata_extra or {})
                 metadata["processing_status"] = "failed"
                 metadata["text_processing_error"] = str(exc)
+                if mime_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+                    metadata["docx_extract_error"] = str(exc)
                 await session.execute(
                     ItemORM.__table__.update()
                     .where(ItemORM.id == item_id)

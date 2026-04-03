@@ -168,7 +168,8 @@ const SUPPORTED_STATIC_IMAGE_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'i
 const SUPPORTED_VIDEO_MIME_TYPES = new Set(['video/mp4', 'video/webm', 'video/quicktime', 'video/x-matroska', 'video/x-msvideo', 'video/mpeg'])
 const SUPPORTED_AUDIO_MIME_TYPES = new Set(['audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/x-wav', 'audio/mp4', 'audio/x-m4a', 'audio/aac', 'audio/flac', 'audio/ogg', 'audio/webm'])
 const SUPPORTED_TEXT_MIME_TYPES = new Set(['text/plain', 'text/markdown', 'text/x-markdown', 'application/pdf'])
-const UPLOAD_ACCEPT = '.png,.jpg,.jpeg,.webp,.bmp,.mp4,.webm,.mov,.m4v,.mkv,.avi,.mp3,.wav,.m4a,.aac,.flac,.ogg,.pdf,.txt,.md,.markdown'
+const SUPPORTED_DOCX_MIME_TYPES = new Set(['application/vnd.openxmlformats-officedocument.wordprocessingml.document'])
+const UPLOAD_ACCEPT = '.png,.jpg,.jpeg,.webp,.bmp,.mp4,.webm,.mov,.m4v,.mkv,.avi,.mp3,.wav,.m4a,.aac,.flac,.ogg,.pdf,.txt,.md,.markdown,.docx'
 
 function validateUploadFile(file: File): string | null {
   const ext = (file.name.split('.').pop() || '').toLowerCase()
@@ -206,11 +207,15 @@ function validateUploadFile(file: File): string | null {
     return null
   }
 
-  if (['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx'].includes(ext)) {
-    return 'Office 文档上传暂不支持，请先转换为 PDF、TXT 或 Markdown。'
+  if (ext === 'docx' || SUPPORTED_DOCX_MIME_TYPES.has(mime)) {
+    return null
   }
 
-  return '当前仅支持静态图片、常见视频音频、PDF、TXT 与 Markdown 上传。'
+  if (['doc', 'docm', 'xls', 'xlsx', 'ppt', 'pptx'].includes(ext)) {
+    return '当前仅支持 DOCX，其他 Office 文档请先转换为 PDF、TXT 或 Markdown。'
+  }
+
+  return '当前仅支持静态图片、常见视频音频、PDF、TXT、Markdown 与 DOCX 上传。'
 }
 
 function formatRelativeTime(input?: string) {
@@ -1345,7 +1350,7 @@ watch(isAddDialogOpen, (isOpen) => {
           <label class="flex cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-border bg-muted/20 px-6 py-10 text-center hover:bg-muted/40 transition-colors">
             <Upload class="w-8 h-8 mb-3 text-primary" />
             <div class="font-medium">{{ uploadFile ? uploadFile.name : '点击选择文件或拖入此处' }}</div>
-            <div class="text-sm text-muted-foreground mt-1">支持 PNG/JPG/WEBP/BMP、常见视频音频、PDF、TXT 与 Markdown，不支持 GIF 和 Office 文档。</div>
+            <div class="text-sm text-muted-foreground mt-1">支持 PNG/JPG/WEBP/BMP、常见视频音频、PDF、TXT、Markdown 与 DOCX，不支持 GIF 和其他 Office 文档。</div>
             <input type="file" class="hidden" :accept="UPLOAD_ACCEPT" @change="handleUploadFileChange" />
           </label>
 

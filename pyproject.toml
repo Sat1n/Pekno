@@ -25,6 +25,7 @@ dependencies = [
     "pillow>=11.3.0",
     "pypdf>=6.0.0",
     "pypdfium2>=4.30.0",
+    "python-docx>=1.2.0",
     "python-multipart>=0.0.22",
     "sqlalchemy>=2.0.48",
     "taskiq-redis>=1.2.2",
