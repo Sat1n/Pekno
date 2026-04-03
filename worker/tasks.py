@@ -292,6 +292,14 @@ def _build_timed_transcript(segments: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def _build_plain_transcript(segments: list[dict]) -> str:
+    return "\n".join(
+        str(segment.get("text", "")).strip()
+        for segment in (segments or [])
+        if str(segment.get("text", "")).strip()
+    )
+
+
 def _fallback_long_summary(item_ctx, reason: str) -> str:
     base_text = (item_ctx.summary or "").strip()
     if not base_text:
@@ -414,6 +422,8 @@ async def process_multimedia_task(item_id: str, url: str):
             return
 
         raw_transcript_json = json.dumps(segments, ensure_ascii=False)
+        timed_transcript_text = _build_timed_transcript(segments)
+        plain_transcript_text = _build_plain_transcript(segments)
 
         if low_confidence:
             worker_log.warning(
@@ -433,7 +443,6 @@ async def process_multimedia_task(item_id: str, url: str):
                 keyframe_timestamps=_pick_random_keyframe_timestamps(duration_seconds, count=5),
             )
         else:
-            timed_transcript_text = _build_timed_transcript(segments)
             worker_log.info("🧠 导演层: 大语言模型接入交叉融合语义纠偏...")
             summary_result = await summarize_video_transcript(item_ctx, timed_transcript_text)
         
@@ -490,6 +499,16 @@ async def process_multimedia_task(item_id: str, url: str):
                 worker_log.warning(f"⚠️ 关键帧流抽取中断: {e}")
         
         worker_log.info("💾 落地层: 将源数据与总结写入 Postgre 内核...")
+        ai = LLMManager()
+        feature_text = "\n\n".join(
+            part for part in [
+                f"标题：{item_data.title}" if item_data.title else "",
+                plain_transcript_text,
+            ]
+            if part
+        ).strip()
+        vector = await ai.get_vector(feature_text) if feature_text else None
+
         async with AsyncSessionLocal() as session:
             meta = dict(item_data.metadata_extra) if item_data.metadata_extra else {}
             meta["raw_transcript"] = raw_transcript_json
@@ -497,6 +516,7 @@ async def process_multimedia_task(item_id: str, url: str):
             meta["keyframe_timestamps"] = summary_result.keyframe_timestamps
             meta["has_long_summary"] = True
             meta["long_summary"] = summary_result.summary
+            meta["processing_status"] = "completed"
             if low_confidence:
                 meta["summary_fallback_reason"] = "transcription_low_confidence"
                 meta["transcription_language_probability"] = language_probability
@@ -505,7 +525,9 @@ async def process_multimedia_task(item_id: str, url: str):
                 ItemORM.__table__.update()
                 .where(ItemORM.id == item_id)
                 .values(
-                    metadata_extra=meta
+                    content_text=plain_transcript_text or item_data.content_text,
+                    metadata_extra=meta,
+                    embedding=vector if vector is not None else item_data.embedding,
                 )
             )
             await session.commit()
@@ -513,6 +535,18 @@ async def process_multimedia_task(item_id: str, url: str):
             
     except Exception as e:
         worker_log.error(f"❌ 多媒体任务核心链崩塌: {e}")
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(select(ItemORM).where(ItemORM.id == item_id))
+            failed_item = result.scalar_one_or_none()
+            if failed_item:
+                meta = dict(failed_item.metadata_extra or {})
+                meta["processing_status"] = "failed"
+                await session.execute(
+                    ItemORM.__table__.update()
+                    .where(ItemORM.id == item_id)
+                    .values(metadata_extra=meta, updated_at=now_in_app_timezone_naive())
+                )
+                await session.commit()
     finally:
         if task_cache_dir.exists():
             shutil.rmtree(task_cache_dir, ignore_errors=True)
@@ -717,6 +751,7 @@ async def process_image_understanding_task(item_id: str):
                 return
 
         metadata = dict(item.metadata_extra or {})
+        metadata["processing_status"] = "processing"
         if metadata.get("has_long_summary") and metadata.get("image_understanding"):
             worker_log.info(f"⏭️ 图片理解任务跳过：已有结果 {item_id}")
             return
@@ -804,6 +839,7 @@ async def process_image_understanding_task(item_id: str):
         metadata["has_long_summary"] = True
         metadata["long_summary"] = long_summary
         metadata["image_understanding"] = image_understanding_meta
+        metadata["processing_status"] = "completed"
         metadata.pop("image_understanding_error", None)
 
         async with AsyncSessionLocal() as session:
@@ -830,6 +866,7 @@ async def process_image_understanding_task(item_id: str):
             if item:
                 metadata = dict(item.metadata_extra or {})
                 metadata["image_understanding_error"] = str(e)
+                metadata["processing_status"] = "failed"
                 await session.execute(
                     ItemORM.__table__.update()
                     .where(ItemORM.id == item_id)
@@ -880,6 +917,7 @@ async def process_pdf_ocr_task(item_id: str):
             "processed_at": now_in_app_timezone_naive().isoformat(),
             "error": None,
         }
+        metadata["processing_status"] = "processing"
         async with AsyncSessionLocal() as session:
             async with session.begin():
                 await session.execute(
@@ -902,6 +940,7 @@ async def process_pdf_ocr_task(item_id: str):
             "processed_at": now_in_app_timezone_naive().isoformat(),
             "error": None,
         }
+        metadata["processing_status"] = "completed"
 
         values = {
             "metadata_extra": metadata,
@@ -941,6 +980,95 @@ async def process_pdf_ocr_task(item_id: str):
                     "processed_at": now_in_app_timezone_naive().isoformat(),
                     "error": str(exc),
                 }
+                metadata["processing_status"] = "disabled"
+                await session.execute(
+                    ItemORM.__table__.update()
+                    .where(ItemORM.id == item_id)
+                    .values(metadata_extra=metadata, updated_at=now_in_app_timezone_naive())
+                )
+                await session.commit()
+
+
+@broker.task(task_name="process_uploaded_text_document")
+async def process_uploaded_text_document_task(item_id: str):
+    worker_log.info(f"📝 开始文本上传分析任务: {item_id}")
+
+    try:
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(select(ItemORM).where(ItemORM.id == item_id))
+            item = result.scalar_one_or_none()
+            if not item:
+                worker_log.warning(f"⚠️ 文本上传分析任务跳过：条目不存在 {item_id}")
+                return
+
+        metadata = dict(item.metadata_extra or {})
+        mime_type = str(metadata.get("mime_type") or "").lower()
+        if mime_type not in {"text/plain", "text/markdown", "text/x-markdown"}:
+            worker_log.info(f"⏭️ 文本上传分析任务跳过：不是文本/Markdown {item_id}")
+            return
+        if item.embedding is not None and item.tags:
+            worker_log.info(f"⏭️ 文本上传分析任务跳过：已有向量和标签 {item_id}")
+            return
+        if not item.local_asset_path or not Path(item.local_asset_path).exists():
+            worker_log.warning(f"⚠️ 文本上传分析任务跳过：本地文件不存在 {item_id}")
+            return
+
+        metadata["processing_status"] = "processing"
+        async with AsyncSessionLocal() as session:
+            await session.execute(
+                ItemORM.__table__.update()
+                .where(ItemORM.id == item_id)
+                .values(metadata_extra=metadata, updated_at=now_in_app_timezone_naive())
+            )
+            await session.commit()
+
+        raw_bytes = Path(item.local_asset_path).read_bytes()
+        text_content = ""
+        for encoding in ("utf-8-sig", "utf-8", "utf-16", "gb18030"):
+            try:
+                text_content = raw_bytes.decode(encoding).strip()
+                break
+            except UnicodeDecodeError:
+                continue
+        if not text_content:
+            text_content = raw_bytes.decode("utf-8", errors="ignore").strip()
+
+        user_supplied_summary = str(metadata.get("user_supplied_summary") or "").strip()
+        content_text = "\n\n".join(part for part in [user_supplied_summary, text_content] if part).strip()
+
+        ai = LLMManager()
+        short_summary = await ai.generate_summary(content_text or item.title, length="short")
+        tags = await ai.extract_tags(content_text or item.title)
+        feature_text = "\n".join(part for part in [item.title, content_text, " ".join(tags)] if part).strip()
+        vector = await ai.get_vector(feature_text or item.title)
+
+        metadata["processing_status"] = "completed"
+        metadata.pop("text_processing_error", None)
+        async with AsyncSessionLocal() as session:
+            await session.execute(
+                ItemORM.__table__.update()
+                .where(ItemORM.id == item_id)
+                .values(
+                    content_text=content_text,
+                    summary=short_summary or item.summary,
+                    tags=tags,
+                    embedding=vector,
+                    metadata_extra=metadata,
+                    updated_at=now_in_app_timezone_naive(),
+                )
+            )
+            await session.commit()
+
+        worker_log.info(f"✅ 文本上传分析完成: {item_id}")
+    except Exception as exc:
+        worker_log.error(f"❌ 文本上传分析任务失败: {item_id} | {exc}")
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(select(ItemORM).where(ItemORM.id == item_id))
+            item = result.scalar_one_or_none()
+            if item:
+                metadata = dict(item.metadata_extra or {})
+                metadata["processing_status"] = "failed"
+                metadata["text_processing_error"] = str(exc)
                 await session.execute(
                     ItemORM.__table__.update()
                     .where(ItemORM.id == item_id)
@@ -964,6 +1092,7 @@ async def process_pdf_ocr_task(item_id: str):
                     "processed_at": now_in_app_timezone_naive().isoformat(),
                     "error": str(exc),
                 }
+                metadata["processing_status"] = "failed"
                 await session.execute(
                     ItemORM.__table__.update()
                     .where(ItemORM.id == item_id)

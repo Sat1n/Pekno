@@ -26,6 +26,52 @@ router = APIRouter(prefix="/api/items", tags=["Items"])
 
 UPLOAD_ROOT = Path("data/uploads")
 VAULT_ROOT = Path("data/vault")
+SUPPORTED_STATIC_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
+SUPPORTED_STATIC_IMAGE_MIME_TYPES = {
+    "image/png",
+    "image/jpeg",
+    "image/webp",
+    "image/bmp",
+}
+UNSUPPORTED_IMAGE_EXTENSIONS = {".gif"}
+UNSUPPORTED_IMAGE_MIME_TYPES = {"image/gif"}
+SUPPORTED_VIDEO_EXTENSIONS = {".mp4", ".webm", ".mov", ".m4v", ".mkv", ".avi"}
+SUPPORTED_VIDEO_MIME_TYPES = {
+    "video/mp4",
+    "video/webm",
+    "video/quicktime",
+    "video/x-matroska",
+    "video/x-msvideo",
+    "video/mpeg",
+}
+SUPPORTED_AUDIO_EXTENSIONS = {".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".webm"}
+SUPPORTED_AUDIO_MIME_TYPES = {
+    "audio/mpeg",
+    "audio/mp3",
+    "audio/wav",
+    "audio/x-wav",
+    "audio/mp4",
+    "audio/x-m4a",
+    "audio/aac",
+    "audio/flac",
+    "audio/ogg",
+    "audio/webm",
+}
+SUPPORTED_PDF_EXTENSIONS = {".pdf"}
+SUPPORTED_PDF_MIME_TYPES = {"application/pdf"}
+SUPPORTED_TEXT_EXTENSIONS = {".txt"}
+SUPPORTED_TEXT_MIME_TYPES = {"text/plain"}
+SUPPORTED_MARKDOWN_EXTENSIONS = {".md", ".markdown"}
+SUPPORTED_MARKDOWN_MIME_TYPES = {"text/markdown", "text/x-markdown"}
+UNSUPPORTED_OFFICE_EXTENSIONS = {".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx"}
+UNSUPPORTED_OFFICE_MIME_KEYWORDS = {
+    "officedocument",
+    "msword",
+    "excel",
+    "powerpoint",
+    "presentationml",
+    "spreadsheetml",
+}
 PLUGIN_NAME_ALIASES = {
     "github": "github_stars",
     "github_stars": "github_stars",
@@ -125,6 +171,66 @@ def _infer_upload_type(filename: str, content_type: Optional[str]) -> tuple[str,
     if guessed_type.startswith("audio/"):
         return "audio", guessed_type
     return "document", guessed_type
+
+
+def _normalize_upload_mime(filename: str, content_type: Optional[str]) -> str:
+    provided = (content_type or "").split(";", 1)[0].strip().lower()
+    guessed = (mimetypes.guess_type(filename)[0] or "").split(";", 1)[0].strip().lower()
+    return provided or guessed or "application/octet-stream"
+
+
+def _extract_text_from_upload_bytes(content: bytes) -> str:
+    for encoding in ("utf-8-sig", "utf-8", "utf-16", "gb18030"):
+        try:
+            return content.decode(encoding).strip()
+        except UnicodeDecodeError:
+            continue
+    return content.decode("utf-8", errors="ignore").strip()
+
+
+def _validate_and_classify_upload(filename: str, content_type: Optional[str]) -> tuple[str, str]:
+    ext = Path(filename or "").suffix.lower()
+    mime_type = _normalize_upload_mime(filename, content_type)
+
+    if ext in UNSUPPORTED_IMAGE_EXTENSIONS or mime_type in UNSUPPORTED_IMAGE_MIME_TYPES:
+        raise HTTPException(status_code=400, detail="GIF 动图暂不支持上传，请改用静态图片格式。")
+
+    if ext in SUPPORTED_STATIC_IMAGE_EXTENSIONS or mime_type in SUPPORTED_STATIC_IMAGE_MIME_TYPES:
+        return "image", mime_type
+
+    if mime_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="当前仅支持 PNG、JPG/JPEG、WEBP、BMP 静态图片上传。")
+
+    if ext in SUPPORTED_VIDEO_EXTENSIONS or mime_type in SUPPORTED_VIDEO_MIME_TYPES:
+        return "video", mime_type
+
+    if mime_type.startswith("video/"):
+        raise HTTPException(status_code=400, detail="当前仅支持 MP4、WEBM、MOV、M4V、MKV、AVI 等常见视频格式。")
+
+    if ext in SUPPORTED_AUDIO_EXTENSIONS or mime_type in SUPPORTED_AUDIO_MIME_TYPES:
+        return "audio", mime_type
+
+    if mime_type.startswith("audio/"):
+        raise HTTPException(status_code=400, detail="当前仅支持 MP3、WAV、M4A、AAC、FLAC、OGG、WEBM 等常见音频格式。")
+
+    if ext in SUPPORTED_PDF_EXTENSIONS or mime_type in SUPPORTED_PDF_MIME_TYPES:
+        return "document", "application/pdf"
+
+    if ext in SUPPORTED_MARKDOWN_EXTENSIONS or mime_type in SUPPORTED_MARKDOWN_MIME_TYPES:
+        return "document", "text/markdown"
+
+    if ext in SUPPORTED_TEXT_EXTENSIONS or mime_type in SUPPORTED_TEXT_MIME_TYPES:
+        return "document", "text/plain"
+
+    if ext in UNSUPPORTED_OFFICE_EXTENSIONS or any(keyword in mime_type for keyword in UNSUPPORTED_OFFICE_MIME_KEYWORDS):
+        raise HTTPException(status_code=400, detail="Office 文档上传暂不支持，请先转换为 PDF、TXT 或 Markdown。")
+
+    raise HTTPException(status_code=400, detail="当前仅支持静态图片、常见视频音频、PDF、TXT 与 Markdown 上传。")
+
+
+def _is_text_upload_mime(mime_type: str) -> bool:
+    normalized = (mime_type or "").strip().lower()
+    return normalized in SUPPORTED_TEXT_MIME_TYPES or normalized in SUPPORTED_MARKDOWN_MIME_TYPES
 
 
 def _is_pdf_item(item: ItemORM) -> bool:
@@ -333,6 +439,23 @@ async def _queue_image_summary_if_needed(item: ItemORM):
         hub_log.exception("投递图片理解任务失败")
 
 
+async def _queue_text_processing_if_needed(item: ItemORM):
+    metadata = item.metadata_extra or {}
+    mime_type = str(metadata.get("mime_type") or "").lower()
+    if not _is_text_upload_mime(mime_type):
+        return
+
+    if item.embedding is not None and item.tags:
+        return
+
+    try:
+        from worker.tasks import process_uploaded_text_document_task
+
+        await process_uploaded_text_document_task.kiq(item.id)
+    except Exception:
+        hub_log.exception("投递文本上传分析任务失败")
+
+
 async def _queue_pdf_ocr_if_needed(item: ItemORM):
     if not _is_pdf_item(item):
         return
@@ -449,6 +572,16 @@ async def upload_item(
             )
         else:
             state = await _ensure_user_item_state(current_user["id"], existing_item.id)
+
+        if existing_item.intent == "video":
+            await _queue_video_summary_if_needed(existing_item)
+        elif existing_item.intent == "image":
+            await _queue_image_summary_if_needed(existing_item)
+        elif _is_pdf_item(existing_item):
+            await _queue_pdf_ocr_if_needed(existing_item)
+        else:
+            await _queue_text_processing_if_needed(existing_item)
+
         response_item = _to_item_response(existing_item, state)
         return JSONResponse(
             status_code=409,
@@ -460,10 +593,12 @@ async def upload_item(
             },
         )
 
+    intent, mime_type = _validate_and_classify_upload(original_name, file.content_type)
+    extracted_text = _extract_text_from_upload_bytes(content) if _is_text_upload_mime(mime_type) else ""
+
     with open(target_path, "wb") as output_file:
         output_file.write(content)
 
-    intent, mime_type = _infer_upload_type(original_name, file.content_type)
     public_path = _public_upload_path(relative_dir / target_name)
     resolved_title = (title or Path(original_name).stem or "未命名上传内容").strip()
     resolved_summary = (summary or "").strip()
@@ -473,16 +608,19 @@ async def upload_item(
         "mime_type": mime_type,
         "file_size": len(content),
         "has_long_summary": False,
+        "processing_status": "queued",
     }
     if intent == "image":
         metadata_extra["cover_url"] = public_path
+    if resolved_summary:
+        metadata_extra["user_supplied_summary"] = resolved_summary
 
     item_payload = {
         "id": f"upload_{uuid.uuid4().hex}",
         "title": resolved_title,
         "source_type": "upload",
         "raw_link": public_path,
-        "content_text": resolved_summary,
+        "content_text": extracted_text or resolved_summary,
         "summary": resolved_summary or resolved_title,
         "intent": intent,
         "tags": [intent],
@@ -498,6 +636,16 @@ async def upload_item(
             is_favorited=True,
         )
     item, state = await _fetch_item_for_user(item_id, current_user["id"])
+
+    if intent == "video":
+        await _queue_video_summary_if_needed(item)
+    elif intent == "image":
+        await _queue_image_summary_if_needed(item)
+    elif _is_pdf_item(item):
+        await _queue_pdf_ocr_if_needed(item)
+    elif _is_text_upload_mime(mime_type):
+        await _queue_text_processing_if_needed(item)
+
     return _to_item_response(item, state)
 
 

@@ -160,6 +160,59 @@ function handleCardMouseLeave(item: LocalSearchResult) {
 
 const { toast } = useToast()
 
+const SUPPORTED_STATIC_IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'webp', 'bmp'])
+const SUPPORTED_VIDEO_EXTENSIONS = new Set(['mp4', 'webm', 'mov', 'm4v', 'mkv', 'avi'])
+const SUPPORTED_AUDIO_EXTENSIONS = new Set(['mp3', 'wav', 'm4a', 'aac', 'flac', 'ogg', 'webm'])
+const SUPPORTED_TEXT_EXTENSIONS = new Set(['txt', 'md', 'markdown', 'pdf'])
+const SUPPORTED_STATIC_IMAGE_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/bmp'])
+const SUPPORTED_VIDEO_MIME_TYPES = new Set(['video/mp4', 'video/webm', 'video/quicktime', 'video/x-matroska', 'video/x-msvideo', 'video/mpeg'])
+const SUPPORTED_AUDIO_MIME_TYPES = new Set(['audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/x-wav', 'audio/mp4', 'audio/x-m4a', 'audio/aac', 'audio/flac', 'audio/ogg', 'audio/webm'])
+const SUPPORTED_TEXT_MIME_TYPES = new Set(['text/plain', 'text/markdown', 'text/x-markdown', 'application/pdf'])
+const UPLOAD_ACCEPT = '.png,.jpg,.jpeg,.webp,.bmp,.mp4,.webm,.mov,.m4v,.mkv,.avi,.mp3,.wav,.m4a,.aac,.flac,.ogg,.pdf,.txt,.md,.markdown'
+
+function validateUploadFile(file: File): string | null {
+  const ext = (file.name.split('.').pop() || '').toLowerCase()
+  const mime = (file.type || '').toLowerCase()
+
+  if (ext === 'gif' || mime === 'image/gif') {
+    return 'GIF 动图暂不支持上传，请改用 PNG、JPG、WEBP 或 BMP。'
+  }
+
+  if (SUPPORTED_STATIC_IMAGE_EXTENSIONS.has(ext) || SUPPORTED_STATIC_IMAGE_MIME_TYPES.has(mime)) {
+    return null
+  }
+
+  if (mime.startsWith('image/')) {
+    return '当前仅支持 PNG、JPG/JPEG、WEBP、BMP 静态图片上传。'
+  }
+
+  if (SUPPORTED_VIDEO_EXTENSIONS.has(ext) || SUPPORTED_VIDEO_MIME_TYPES.has(mime)) {
+    return null
+  }
+
+  if (mime.startsWith('video/')) {
+    return '当前仅支持 MP4、WEBM、MOV、M4V、MKV、AVI 等常见视频格式。'
+  }
+
+  if (SUPPORTED_AUDIO_EXTENSIONS.has(ext) || SUPPORTED_AUDIO_MIME_TYPES.has(mime)) {
+    return null
+  }
+
+  if (mime.startsWith('audio/')) {
+    return '当前仅支持 MP3、WAV、M4A、AAC、FLAC、OGG、WEBM 等常见音频格式。'
+  }
+
+  if (SUPPORTED_TEXT_EXTENSIONS.has(ext) || SUPPORTED_TEXT_MIME_TYPES.has(mime)) {
+    return null
+  }
+
+  if (['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx'].includes(ext)) {
+    return 'Office 文档上传暂不支持，请先转换为 PDF、TXT 或 Markdown。'
+  }
+
+  return '当前仅支持静态图片、常见视频音频、PDF、TXT 与 Markdown 上传。'
+}
+
 function formatRelativeTime(input?: string) {
   if (!input) return '未知时间'
 
@@ -248,7 +301,7 @@ function normalizeRawItem(item: RawItem, index: number): LocalSearchResult {
   return {
     id: item.id,
     title: item.title,
-    summary: toPlainTextSnippet(item.content_text || item.summary || '', '暂无描述'),
+    summary: toPlainTextSnippet(item.summary || ((item as any).content_text as string | undefined) || '', '暂无描述'),
     long_summary: hasLongSummary ? (typeof metadata.long_summary === 'string' ? metadata.long_summary : item.summary || undefined) : undefined,
     has_long_summary: hasLongSummary,
     cover_url: typeof metadata.cover_url === 'string' ? metadata.cover_url : undefined,
@@ -274,7 +327,7 @@ function normalizeSearchResult(item: SearchResult): LocalSearchResult {
   const authorName = item.source === 'bilibili' ? item.author : undefined
   const metadataExtra = (item as any).metadata_extra || {}
   const hasLongSummary = Boolean(item.has_long_summary)
-  const displaySummary = toPlainTextSnippet(item.summary, '暂无描述')
+  const displaySummary = toPlainTextSnippet(item.summary || ((item as any).content_text as string | undefined), '暂无描述')
 
   return {
     ...item,
@@ -621,7 +674,25 @@ function openExternalLink(url?: string) {
 
 function handleUploadFileChange(event: Event) {
   const target = event.target as HTMLInputElement
-  uploadFile.value = target.files?.[0] || null
+  const nextFile = target.files?.[0] || null
+  if (!nextFile) {
+    uploadFile.value = null
+    return
+  }
+
+  const validationError = validateUploadFile(nextFile)
+  if (validationError) {
+    uploadFile.value = null
+    target.value = ''
+    toast({
+      title: '暂不支持该文件类型',
+      description: validationError,
+      variant: 'destructive',
+    })
+    return
+  }
+
+  uploadFile.value = nextFile
 }
 
 function resetAddContentDialog() {
@@ -637,6 +708,15 @@ function resetAddContentDialog() {
 
 async function handleSubmitUpload(autoFavorite: boolean = false) {
   if (!uploadFile.value || isSubmittingContent.value) return
+  const validationError = validateUploadFile(uploadFile.value)
+  if (validationError) {
+    toast({
+      title: '暂不支持该文件类型',
+      description: validationError,
+      variant: 'destructive',
+    })
+    return
+  }
   try {
     isSubmittingContent.value = true
     const createdItem = await uploadItem(uploadFile.value, {
@@ -652,8 +732,8 @@ async function handleSubmitUpload(autoFavorite: boolean = false) {
     selectedItem.value = normalized
     isSheetOpen.value = true
     toast({
-      title: autoFavorite ? '上传并收藏成功' : '上传成功',
-      description: normalized.title,
+      title: autoFavorite ? '已上传并收藏' : '已上传',
+      description: `${normalized.title}，AI 正在后台分析。`,
     })
   } catch (error: any) {
     if (error?.response?.status === 409 && error?.response?.data?.deduplicated) {
@@ -1265,8 +1345,8 @@ watch(isAddDialogOpen, (isOpen) => {
           <label class="flex cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-border bg-muted/20 px-6 py-10 text-center hover:bg-muted/40 transition-colors">
             <Upload class="w-8 h-8 mb-3 text-primary" />
             <div class="font-medium">{{ uploadFile ? uploadFile.name : '点击选择文件或拖入此处' }}</div>
-            <div class="text-sm text-muted-foreground mt-1">支持图片、视频、音频、PDF 与常见文档。</div>
-            <input type="file" class="hidden" @change="handleUploadFileChange" />
+            <div class="text-sm text-muted-foreground mt-1">支持 PNG/JPG/WEBP/BMP、常见视频音频、PDF、TXT 与 Markdown，不支持 GIF 和 Office 文档。</div>
+            <input type="file" class="hidden" :accept="UPLOAD_ACCEPT" @change="handleUploadFileChange" />
           </label>
 
           <div class="space-y-2">
