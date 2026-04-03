@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useColorMode } from '@vueuse/core'
 import { Search, Activity, Clock, Settings, Sun, Moon, Monitor, LayoutList, LayoutGrid, Rows3, Bell, Plus, Archive } from 'lucide-vue-next'
@@ -10,7 +10,15 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import SettingsDialog from '@/components/SettingsDialog.vue'
 import PluginSettingsDialog from '@/components/PluginSettingsDialog.vue'
-import { clearStoredToken, getStoredAuthUser } from '@/lib/api'
+import {
+  clearNotifications,
+  clearStoredToken,
+  getNotifications,
+  getStoredAuthUser,
+  markAllNotificationsRead,
+  markNotificationRead,
+  type NotificationItem,
+} from '@/lib/api'
 
 const props = withDefaults(defineProps<{
   searchPlaceholder?: string
@@ -23,62 +31,68 @@ defineEmits<{
   addContent: []
 }>()
 
-// 通知类型
-export interface AppNotification {
-  id: string
-  title: string
-  description: string
-  type: 'success' | 'error' | 'info' | 'warning'
-  timestamp: Date
-  read: boolean
+const notifications = ref<NotificationItem[]>([])
+const isLoadingNotifications = ref(false)
+const unreadCount = computed(() => notifications.value.filter((notification) => notification.status !== 'read').length)
+let notificationPollTimer: number | undefined
+
+function addNotification(notification: NotificationItem) {
+  const exists = notifications.value.some((existing) => existing.id === notification.id)
+  if (exists) return
+  notifications.value.unshift(notification)
 }
 
-// 通知列表
-const notifications = ref<AppNotification[]>([])
-const unreadCount = ref(0)
-
-// 添加通知的方法（供子组件调用）
-function addNotification(notification: Omit<AppNotification, 'id' | 'timestamp' | 'read'>) {
-  const newNotification: AppNotification = {
-    ...notification,
-    id: Date.now().toString(),
-    timestamp: new Date(),
-    read: false,
-  }
-  notifications.value.unshift(newNotification)
-  unreadCount.value++
-  
-  // 3秒后自动标记为已读
-  setTimeout(() => {
-    markAsRead(newNotification.id)
-  }, 5000)
-}
-
-// 标记为已读
-function markAsRead(id: string) {
-  const notification = notifications.value.find(n => n.id === id)
-  if (notification && !notification.read) {
-    notification.read = true
-    unreadCount.value = Math.max(0, unreadCount.value - 1)
+async function loadNotifications() {
+  if (isLoadingNotifications.value) return
+  isLoadingNotifications.value = true
+  try {
+    notifications.value = await getNotifications(30)
+  } catch (error) {
+    console.error('加载通知失败:', error)
+  } finally {
+    isLoadingNotifications.value = false
   }
 }
 
-// 全部标记为已读
-function markAllAsRead() {
-  notifications.value.forEach(n => n.read = true)
-  unreadCount.value = 0
+async function markAsRead(id: string) {
+  const notification = notifications.value.find((entry) => entry.id === id)
+  if (!notification || notification.status === 'read') return
+
+  try {
+    const updated = await markNotificationRead(id)
+    notifications.value = notifications.value.map((entry) => (entry.id === id ? updated : entry))
+  } catch (error) {
+    console.error('标记通知已读失败:', error)
+  }
 }
 
-// 清除所有通知
-function clearAll() {
-  notifications.value = []
-  unreadCount.value = 0
+async function markAllAsRead() {
+  if (!notifications.value.length) return
+  try {
+    await markAllNotificationsRead()
+    notifications.value = notifications.value.map((notification) => ({
+      ...notification,
+      status: 'read',
+      read_at: notification.read_at || new Date().toISOString(),
+    }))
+  } catch (error) {
+    console.error('全部标记已读失败:', error)
+  }
 }
 
-// 格式化时间
-function formatTime(date: Date): string {
-  const now = new Date()
-  const diff = now.getTime() - date.getTime()
+async function clearAll() {
+  try {
+    await clearNotifications()
+    notifications.value = []
+  } catch (error) {
+    console.error('清空通知失败:', error)
+  }
+}
+
+function formatTime(value: string): string {
+  const date = new Date(value)
+  const now = Date.now()
+  const diff = now - date.getTime()
   const minutes = Math.floor(diff / 60000)
   
   if (minutes < 1) return '刚刚'
@@ -116,7 +130,6 @@ function openPluginSettings(pluginId: string) {
   isPluginSettingsOpen.value = true
 }
 
-// 暴露方法给子组件
 defineExpose({
   addNotification,
 })
@@ -151,16 +164,81 @@ onMounted(() => {
     sidebarOpen.value = false
   }
 
+  void loadNotifications()
+  notificationPollTimer = window.setInterval(() => {
+    void loadNotifications()
+  }, 45000)
+  window.addEventListener('focus', handleWindowFocus)
+
   if (route.query.openSettings === 'models') {
     settingsTab.value = 'models'
     isSettingsOpen.value = true
     router.replace({ path: route.path })
+  }
+  if (route.query.openSettings === 'plugins') {
+    settingsTab.value = 'plugins'
+    isSettingsOpen.value = true
+  }
+  if (typeof route.query.pluginId === 'string' && route.query.pluginId) {
+    openPluginSettings(route.query.pluginId)
   }
 })
 
 watch(sidebarOpen, (value) => {
   window.localStorage.setItem(SIDEBAR_STATE_KEY, String(value))
 })
+
+watch(
+  () => route.query,
+  (query) => {
+    if (query.openSettings === 'plugins') {
+      settingsTab.value = 'plugins'
+      isSettingsOpen.value = true
+    }
+    if (typeof query.pluginId === 'string' && query.pluginId) {
+      openPluginSettings(query.pluginId)
+    }
+  }
+)
+
+onBeforeUnmount(() => {
+  if (notificationPollTimer !== undefined) {
+    window.clearInterval(notificationPollTimer)
+  }
+  window.removeEventListener('focus', handleWindowFocus)
+})
+
+function handleWindowFocus() {
+  void loadNotifications()
+}
+
+async function handleNotificationClick(notification: NotificationItem) {
+  await markAsRead(notification.id)
+
+  if (notification.related_plugin_id) {
+    await router.push({
+      path: route.path,
+      query: {
+        ...route.query,
+        openSettings: 'plugins',
+        pluginId: notification.related_plugin_id,
+      },
+    })
+    return
+  }
+
+  if (!notification.related_item_id) {
+    return
+  }
+
+  const targetPath = notification.category === 'vault_processing' ? '/vault' : route.path === '/vault' ? '/vault' : '/'
+  await router.push({
+    path: targetPath,
+    query: {
+      item: notification.related_item_id,
+    },
+  })
+}
 </script>
 
 <template>
@@ -282,8 +360,8 @@ watch(sidebarOpen, (value) => {
                   v-for="notification in notifications" 
                   :key="notification.id"
                   class="px-3 py-2 border-b last:border-0 hover:bg-muted/50 cursor-pointer transition-colors"
-                  :class="{ 'bg-muted/30': !notification.read }"
-                  @click="markAsRead(notification.id)"
+                  :class="{ 'bg-muted/30': notification.status !== 'read' }"
+                  @click="handleNotificationClick(notification)"
                 >
                   <div class="flex gap-2">
                     <div 
@@ -298,7 +376,7 @@ watch(sidebarOpen, (value) => {
                     <div class="flex-1 min-w-0">
                       <div class="flex items-center justify-between">
                         <span class="font-medium text-sm truncate">{{ notification.title }}</span>
-                        <span class="text-xs text-muted-foreground ml-2">{{ formatTime(notification.timestamp) }}</span>
+                        <span class="text-xs text-muted-foreground ml-2">{{ formatTime(notification.created_at) }}</span>
                       </div>
                       <p class="text-xs text-muted-foreground truncate">{{ notification.description }}</p>
                     </div>

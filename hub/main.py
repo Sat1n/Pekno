@@ -71,7 +71,7 @@ def _build_local_asset_url(local_asset_path: str | None) -> str | None:
         return None
 
 from hub.api import data
-from hub.api.routers import admin, annotations, auth, items, plugins, vault
+from hub.api.routers import admin, annotations, auth, items, notifications, plugins, vault
 from hub.api.mcp import mcp_app
 from hub.api.middlewares.mcp_auth import MCPAuthMiddleware
 import os
@@ -98,6 +98,7 @@ app.include_router(auth.router)
 app.include_router(items.router)
 app.include_router(annotations.router)
 app.include_router(vault.router)
+app.include_router(notifications.router)
 app.include_router(admin.router)
 protected_mcp_app = MCPAuthMiddleware(mcp_app)
 app.mount("/api/mcp", protected_mcp_app)

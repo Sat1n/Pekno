@@ -1,6 +1,7 @@
 from shared.plugins.base import PluginContext
 from shared.plugins.manager import plugin_manager
 from shared.entities import UniversalItem
+from hub.core.notifications import create_notification_for_user
 from worker.ingestion.pipeline import process_new_item_task
 from shared.logger import worker_log
 from worker.broker import broker
@@ -77,6 +78,15 @@ async def run_plugin_pipeline_task(plugin_id: str, limit: int = None, user_id: s
         # 1. 抓取原始数据
         raw_items = await plugin.fetch_data(ctx)
         if not raw_items:
+            if user_id:
+                await create_notification_for_user(
+                    user_id,
+                    type="success",
+                    category="plugin_sync",
+                    title="手动同步已完成",
+                    description=f"{plugin.manifest.get('name', plugin_id)} 没有新的内容。",
+                    related_plugin_id=plugin_id,
+                )
             return
 
         cache_hit_count = 0
@@ -138,9 +148,27 @@ async def run_plugin_pipeline_task(plugin_id: str, limit: int = None, user_id: s
                 await process_new_item_task.kiq(item.model_dump())
 
         worker_log.info(f"✅ [{plugin_id}] 同步指令下发完毕，共处理 {len(raw_items)} 条记录。")
+        if user_id:
+            await create_notification_for_user(
+                user_id,
+                type="success",
+                category="plugin_sync",
+                title="手动同步已完成",
+                description=f"{plugin.manifest.get('name', plugin_id)} 已完成同步。",
+                related_plugin_id=plugin_id,
+            )
 
     except Exception as e:
         worker_log.error(f"❌ [{plugin_id}] 任务执行出错: {e}")
+        if user_id:
+            await create_notification_for_user(
+                user_id,
+                type="error",
+                category="plugin_sync",
+                title="手动同步失败",
+                description=str(e)[:160],
+                related_plugin_id=plugin_id,
+            )
     finally:
         await ConfigManager.set_config(plugin_id, ConfigKeys.SYNC_STATUS, "idle", user_id=user_id)
         await ConfigManager.set_config(plugin_id, ConfigKeys.LAST_SYNC_TIME, datetime.datetime.now().isoformat(), user_id=user_id)
@@ -212,7 +240,7 @@ async def parse_single_plugin_item_task(plugin_id: str, url: str, user_id: str, 
 
 
 @broker.task(task_name="summarize_repo")
-async def summarize_repo_task(item_id: str, task_id: str):
+async def summarize_repo_task(item_id: str, task_id: str, user_id: str | None = None):
     """
     临时预留：AI 补总结调度任务（依然由前端原样调用，所以暂时保留名字，内部改用 plugin manager 取）
     """
@@ -277,9 +305,25 @@ async def summarize_repo_task(item_id: str, task_id: str):
                 )
             )
             await session.commit()
+        await create_notification_for_user(
+            user_id,
+            type="success",
+            category="summary",
+            title="AI 总结已完成",
+            description=f"{item.title or '该内容'} 已生成 AI 总结。",
+            related_item_id=item_id,
+        )
             
     except Exception as e:
         worker_log.error(f"❌ AI 总结任务失败: {e}")
+        await create_notification_for_user(
+            user_id,
+            type="error",
+            category="summary",
+            title="AI 总结失败",
+            description=str(e)[:160],
+            related_item_id=item_id,
+        )
         raise
 
 @broker.task(task_name="reload_system_plugins")

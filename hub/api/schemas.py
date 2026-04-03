@@ -148,3 +148,16 @@ class InvitationCreateResponse(BaseModel):
     code: str
     is_used: bool
     created_at: datetime
+
+
+class NotificationResponse(BaseModel):
+    id: str
+    type: str
+    category: str
+    title: str
+    description: str
+    status: str
+    related_item_id: Optional[str] = None
+    related_plugin_id: Optional[str] = None
+    created_at: datetime
+    read_at: Optional[datetime] = None

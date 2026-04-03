@@ -170,6 +170,23 @@ class VaultCategoryORM(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=now_in_app_timezone_naive, onupdate=now_in_app_timezone_naive)
 
 
+class UserNotificationORM(Base):
+    """用户异步任务通知"""
+    __tablename__ = "user_notifications"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    type: Mapped[str] = mapped_column(String, default="info")
+    category: Mapped[str] = mapped_column(String, default="summary")
+    title: Mapped[str] = mapped_column(String)
+    description: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String, default="unread")
+    related_item_id: Mapped[Optional[str]] = mapped_column(String, nullable=True, index=True)
+    related_plugin_id: Mapped[Optional[str]] = mapped_column(String, nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now_in_app_timezone_naive)
+    read_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+
 class InvitationCodeORM(Base):
     """邀请码追踪表"""
     __tablename__ = "invitation_codes"

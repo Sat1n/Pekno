@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import MainLayout from '@/layouts/MainLayout.vue'
 import MarkdownContent from '@/components/MarkdownContent.vue'
 import PdfViewer from '@/components/PdfViewer.vue'
@@ -147,6 +148,7 @@ const intentPillClass = 'inline-flex min-w-[2.9rem] shrink-0 items-center justif
 const hasUnsavedAnnotationDraft = computed(() => (
   Boolean(annotationDraft.value.trim()) || Object.keys(pendingAnnotationAnchor.value).length > 0
 ))
+const route = useRoute()
 
 function toAbsoluteUrl(url?: string | null) {
   if (!url) return ''
@@ -246,6 +248,14 @@ function parseTranscriptSegments(rawTranscript: unknown): TranscriptSegment[] {
       } satisfies TranscriptSegment
     })
     .filter((segment): segment is TranscriptSegment => Boolean(segment))
+}
+
+function syncActiveItemFromRoute(candidateItems: RawItem[]) {
+  const targetItemId = typeof route.query.item === 'string' ? route.query.item : ''
+  if (!targetItemId) return
+  const matchedItem = candidateItems.find((item) => item.id === targetItemId)
+  if (!matchedItem) return
+  selectItem(matchedItem)
 }
 
 function formatTimestamp(totalSeconds: number) {
@@ -433,6 +443,7 @@ async function loadFavoritedItems() {
     favoritedItems.value = await getItems(undefined, 0, { favoritedOnly: true })
     if (!searchQuery.value.trim()) {
       syncActiveItem(favoritedItems.value)
+      syncActiveItemFromRoute(favoritedItems.value)
     } else if (activeItem.value) {
       const refreshed = favoritedItems.value.find((item) => item.id === activeItem.value?.id)
       if (refreshed) {
@@ -529,6 +540,7 @@ async function performVaultSearch(rawQuery: string) {
     isSearching.value = false
     searchResults.value = []
     syncActiveItem(favoritedItems.value)
+    syncActiveItemFromRoute(favoritedItems.value)
     return
   }
 
@@ -544,6 +556,7 @@ async function performVaultSearch(rawQuery: string) {
 
     searchResults.value = mappedResults
     syncActiveItem(mappedResults)
+    syncActiveItemFromRoute(mappedResults)
   } catch (error) {
     if (requestId !== activeSearchRequestId) return
     console.error('Vault 搜索失败:', error)
@@ -1059,8 +1072,17 @@ watch(
 watch(favoritedItems, (items) => {
   if (!searchQuery.value.trim()) {
     syncActiveItem(items)
+    syncActiveItemFromRoute(items)
   }
 })
+
+watch(
+  () => route.query.item,
+  async () => {
+    await nextTick()
+    syncActiveItemFromRoute(isSearchMode.value ? searchResults.value : favoritedItems.value)
+  }
+)
 
 watch(
   () => activeItem.value?.id,

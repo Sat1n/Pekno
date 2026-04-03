@@ -423,7 +423,7 @@ async def ensure_vault_asset(item_id: str, current_user=Depends(get_current_user
     return _to_item_response(item, state)
 
 
-async def _queue_video_summary_if_needed(item: ItemORM):
+async def _queue_video_summary_if_needed(item: ItemORM, user_id: str | None = None):
     if item.intent != "video":
         return
 
@@ -434,12 +434,12 @@ async def _queue_video_summary_if_needed(item: ItemORM):
     try:
         from worker.tasks import process_multimedia_task
 
-        await process_multimedia_task.kiq(item.id, item.raw_link)
+        await process_multimedia_task.kiq(item.id, item.raw_link, user_id)
     except Exception:
         hub_log.exception("投递视频总结任务失败")
 
 
-async def _queue_image_summary_if_needed(item: ItemORM):
+async def _queue_image_summary_if_needed(item: ItemORM, user_id: str | None = None):
     if item.intent != "image":
         return
 
@@ -450,12 +450,12 @@ async def _queue_image_summary_if_needed(item: ItemORM):
     try:
         from worker.tasks import process_image_understanding_task
 
-        await process_image_understanding_task.kiq(item.id)
+        await process_image_understanding_task.kiq(item.id, user_id)
     except Exception:
         hub_log.exception("投递图片理解任务失败")
 
 
-async def _queue_text_processing_if_needed(item: ItemORM):
+async def _queue_text_processing_if_needed(item: ItemORM, user_id: str | None = None):
     metadata = item.metadata_extra or {}
     mime_type = str(metadata.get("mime_type") or "").lower()
     if not _is_text_upload_mime(mime_type):
@@ -467,12 +467,12 @@ async def _queue_text_processing_if_needed(item: ItemORM):
     try:
         from worker.tasks import process_uploaded_text_document_task
 
-        await process_uploaded_text_document_task.kiq(item.id)
+        await process_uploaded_text_document_task.kiq(item.id, user_id)
     except Exception:
         hub_log.exception("投递文本上传分析任务失败")
 
 
-async def _queue_pdf_ocr_if_needed(item: ItemORM):
+async def _queue_pdf_ocr_if_needed(item: ItemORM, user_id: str | None = None):
     if not _is_pdf_item(item):
         return
 
@@ -486,7 +486,7 @@ async def _queue_pdf_ocr_if_needed(item: ItemORM):
     try:
         from worker.tasks import process_pdf_ocr_task
 
-        await process_pdf_ocr_task.kiq(item.id)
+        await process_pdf_ocr_task.kiq(item.id, user_id)
     except Exception:
         hub_log.exception("投递 PDF OCR 任务失败")
 
@@ -590,13 +590,13 @@ async def upload_item(
             state = await _ensure_user_item_state(current_user["id"], existing_item.id)
 
         if existing_item.intent == "video":
-            await _queue_video_summary_if_needed(existing_item)
+            await _queue_video_summary_if_needed(existing_item, current_user["id"])
         elif existing_item.intent == "image":
-            await _queue_image_summary_if_needed(existing_item)
+            await _queue_image_summary_if_needed(existing_item, current_user["id"])
         elif _is_pdf_item(existing_item):
-            await _queue_pdf_ocr_if_needed(existing_item)
+            await _queue_pdf_ocr_if_needed(existing_item, current_user["id"])
         else:
-            await _queue_text_processing_if_needed(existing_item)
+            await _queue_text_processing_if_needed(existing_item, current_user["id"])
 
         response_item = _to_item_response(existing_item, state)
         return JSONResponse(
@@ -654,13 +654,13 @@ async def upload_item(
     item, state = await _fetch_item_for_user(item_id, current_user["id"])
 
     if intent == "video":
-        await _queue_video_summary_if_needed(item)
+        await _queue_video_summary_if_needed(item, current_user["id"])
     elif intent == "image":
-        await _queue_image_summary_if_needed(item)
+        await _queue_image_summary_if_needed(item, current_user["id"])
     elif _is_pdf_item(item):
-        await _queue_pdf_ocr_if_needed(item)
+        await _queue_pdf_ocr_if_needed(item, current_user["id"])
     elif _is_text_upload_mime(mime_type):
-        await _queue_text_processing_if_needed(item)
+        await _queue_text_processing_if_needed(item, current_user["id"])
 
     return _to_item_response(item, state)
 
@@ -759,11 +759,11 @@ async def toggle_item_favorite(item_id: str, current_user=Depends(get_current_us
     if should_queue_download:
         await _queue_vault_download_if_needed(item_id, item, current_user["id"])
     if should_queue_video_summary:
-        await _queue_video_summary_if_needed(item)
+        await _queue_video_summary_if_needed(item, current_user["id"])
     if should_queue_image_summary:
-        await _queue_image_summary_if_needed(item)
+        await _queue_image_summary_if_needed(item, current_user["id"])
     if should_queue_pdf_ocr:
-        await _queue_pdf_ocr_if_needed(item)
+        await _queue_pdf_ocr_if_needed(item, current_user["id"])
 
     return ItemStateResponse(
         item_id=item_id,
@@ -898,7 +898,7 @@ async def summarize_item(item_id: str, current_user=Depends(get_current_user)):
                 "message": "该视频已经完成过多媒体分析，无需重复生成。",
             }
         from worker.tasks import process_multimedia_task
-        await process_multimedia_task.kiq(item_id, item.raw_link)
+        await process_multimedia_task.kiq(item_id, item.raw_link, current_user["id"])
         msg = "AI 多媒体分析管线已启动，正在剥离音轨并生成胶卷快照，请稍后..."
     elif item.intent == "image":
         if metadata.get("has_long_summary") and metadata.get("image_understanding"):
@@ -908,11 +908,11 @@ async def summarize_item(item_id: str, current_user=Depends(get_current_user)):
                 "message": "该图片已经完成过图片理解，无需重复生成。",
             }
         from worker.tasks import process_image_understanding_task
-        await process_image_understanding_task.kiq(item_id)
+        await process_image_understanding_task.kiq(item_id, current_user["id"])
         msg = "图片理解任务已启动，正在提取视觉描述与图片文字，请稍后..."
     else:
         from worker.plugins.pipeline import summarize_repo_task
-        await summarize_repo_task.kiq(item_id, task_id)
+        await summarize_repo_task.kiq(item_id, task_id, current_user["id"])
         msg = "AI 深度总结任务已启动，请稍后查询结果"
 
     return {

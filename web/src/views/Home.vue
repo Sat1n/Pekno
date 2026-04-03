@@ -357,6 +357,15 @@ function getDisplayTags(item: LocalSearchResult) {
   return item.displayTags && item.displayTags.length > 0 ? item.displayTags : item.tags
 }
 
+function syncSelectedItemFromRoute() {
+  const targetItemId = typeof route.query.item === 'string' ? route.query.item : ''
+  if (!targetItemId) return
+  const matchedItem = searchResults.value.find((item) => item.id === targetItemId)
+  if (!matchedItem) return
+  selectedItem.value = matchedItem
+  isSheetOpen.value = true
+}
+
 async function loadData(query: string = '') {
   await flushPendingReads()
   isLoading.value = true
@@ -377,6 +386,7 @@ async function loadData(query: string = '') {
       } else {
         searchResults.value = normalized
       }
+      syncSelectedItemFromRoute()
       return
     }
 
@@ -384,6 +394,7 @@ async function loadData(query: string = '') {
       const results = await search({ q: query, source_type: sourceFilter })
       initialAnchorItemId.value = null
       searchResults.value = results.map(normalizeSearchResult)
+      syncSelectedItemFromRoute()
       return
     }
 
@@ -391,6 +402,7 @@ async function loadData(query: string = '') {
     const normalized = items.map((item, index) => normalizeRawItem(item, index))
     initialAnchorItemId.value = normalized.find((item) => item.isRead)?.id ?? null
     searchResults.value = normalized
+    syncSelectedItemFromRoute()
   } catch (error) {
     console.error('搜索失败:', error)
     initialAnchorItemId.value = null
@@ -911,6 +923,7 @@ watch(
   async () => {
     await nextTick()
     setupIntersectionObserver()
+    syncSelectedItemFromRoute()
   },
   { flush: 'post' }
 )
@@ -922,6 +935,14 @@ watch(
     activeSource.value = 'all'
     initialAnchorItemId.value = null
     await loadData()
+  }
+)
+
+watch(
+  () => route.query.item,
+  async () => {
+    await nextTick()
+    syncSelectedItemFromRoute()
   }
 )
 

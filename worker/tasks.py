@@ -6,6 +6,7 @@ from hub.core.media.downloader import YTDlpService
 from hub.core.media.transcriber import TranscriberFactory
 from hub.core.llm.summarizer import summarize_video_transcript
 from hub.core.ocr import OCRConfigError, OCRDisabledError, run_image_ocr, run_pdf_ocr
+from hub.core.notifications import create_notification_for_item_users
 from hub.core.model_settings import get_model_assignments
 from hub.core.llm.service import LLMManager
 from shared.time_utils import now_in_app_timezone_naive
@@ -358,7 +359,7 @@ def _pick_random_keyframe_timestamps(duration_seconds: float | int | None, count
 
 
 @broker.task(task_name="process_multimedia")
-async def process_multimedia_task(item_id: str, url: str):
+async def process_multimedia_task(item_id: str, url: str, user_id: str | None = None):
     """
     终端多媒体 Worker 流水线：
     YTDlp 剥离音轨 -> Whisper 识别 JSON 阵列 -> AI 导演对峙转录偏差生成报告 -> 数据库双写合并
@@ -559,6 +560,14 @@ async def process_multimedia_task(item_id: str, url: str):
             )
             await session.commit()
             worker_log.info("🎯 多媒体终极流水线完美收官！")
+        await create_notification_for_item_users(
+            item_id,
+            type="success",
+            category="upload_processing",
+            title="多媒体分析已完成",
+            description=f"{item_data.title or '该内容'} 已完成转录与总结。",
+            preferred_user_id=user_id,
+        )
             
     except Exception as e:
         worker_log.error(f"❌ 多媒体任务核心链崩塌: {e}")
@@ -574,6 +583,14 @@ async def process_multimedia_task(item_id: str, url: str):
                     .values(metadata_extra=meta, updated_at=now_in_app_timezone_naive())
                 )
                 await session.commit()
+        await create_notification_for_item_users(
+            item_id,
+            type="error",
+            category="upload_processing",
+            title="多媒体分析失败",
+            description=str(e)[:160],
+            preferred_user_id=user_id,
+        )
     finally:
         if task_cache_dir.exists():
             shutil.rmtree(task_cache_dir, ignore_errors=True)
@@ -681,14 +698,14 @@ async def _download_vault_asset_impl(item_id: str, user_id: str | None = None):
         )
 
         if item.intent in {"video", "audio"} and not already_processed:
-            await process_multimedia_task.kiq(item_id, source_url)
+            await process_multimedia_task.kiq(item_id, source_url, user_id)
         elif item.intent in {"video", "audio"}:
             worker_log.info(f"⏭️ 已存在多媒体分析结果，跳过重复处理: {item_id}")
 
         if _is_pdf_item(item):
             ocr_meta = metadata.get("ocr") if isinstance(metadata.get("ocr"), dict) else {}
             if ocr_meta.get("status") not in {"processing", "completed"}:
-                await process_pdf_ocr_task.kiq(item_id)
+                await process_pdf_ocr_task.kiq(item_id, user_id)
     except Exception as e:
         worker_log.error(f"❌ Vault 下载失败: {item_id} | {e}")
         metadata = dict(item.metadata_extra or {})
@@ -763,7 +780,7 @@ def _resolve_image_source_path(item: ItemORM) -> Path | None:
 
 
 @broker.task(task_name="process_image_understanding")
-async def process_image_understanding_task(item_id: str):
+async def process_image_understanding_task(item_id: str, user_id: str | None = None):
     worker_log.info(f"🖼️ 开始图片理解任务: {item_id}")
     cache_root = Path("data") / "cache" / "images"
     cache_root.mkdir(parents=True, exist_ok=True)
@@ -884,6 +901,14 @@ async def process_image_understanding_task(item_id: str):
             )
             await session.commit()
         worker_log.info(f"✅ 图片理解完成: {item_id}")
+        await create_notification_for_item_users(
+            item_id,
+            type="success",
+            category="upload_processing",
+            title="图片分析已完成",
+            description=f"{item.title or '该图片'} 已完成识别与总结。",
+            preferred_user_id=user_id,
+        )
 
     except Exception as e:
         worker_log.error(f"❌ 图片理解任务失败: {item_id} | {e}")
@@ -903,13 +928,21 @@ async def process_image_understanding_task(item_id: str):
                     )
                 )
                 await session.commit()
+        await create_notification_for_item_users(
+            item_id,
+            type="error",
+            category="upload_processing",
+            title="图片分析失败",
+            description=str(e)[:160],
+            preferred_user_id=user_id,
+        )
     finally:
         if task_cache_dir.exists():
             shutil.rmtree(task_cache_dir, ignore_errors=True)
 
 
 @broker.task(task_name="process_pdf_ocr")
-async def process_pdf_ocr_task(item_id: str):
+async def process_pdf_ocr_task(item_id: str, user_id: str | None = None):
     worker_log.info(f"📄 开始 PDF OCR 任务: {item_id}")
 
     try:
@@ -990,6 +1023,14 @@ async def process_pdf_ocr_task(item_id: str):
                 )
 
         worker_log.info(f"✅ PDF OCR 完成: {item_id}")
+        await create_notification_for_item_users(
+            item_id,
+            type="success",
+            category="upload_processing",
+            title="PDF OCR 已完成",
+            description=f"{item.title or '该 PDF'} 已完成文本识别。",
+            preferred_user_id=user_id,
+        )
     except OCRDisabledError as exc:
         worker_log.warning(f"⚠️ PDF OCR 已禁用: {item_id}")
         async with AsyncSessionLocal() as session:
@@ -1014,11 +1055,44 @@ async def process_pdf_ocr_task(item_id: str):
                     .values(metadata_extra=metadata, updated_at=now_in_app_timezone_naive())
                 )
                 await session.commit()
+    except Exception as exc:
+        worker_log.error(f"❌ PDF OCR 任务失败: {item_id} | {exc}")
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(select(ItemORM).where(ItemORM.id == item_id))
+            item = result.scalar_one_or_none()
+            if item:
+                metadata = dict(item.metadata_extra or {})
+                metadata["ocr"] = {
+                    "kind": "pdf",
+                    "status": "failed",
+                    "full_text": "",
+                    "pages": [],
+                    "provider": "paddleocr_v5_cpu",
+                    "model": "PP-OCRv5",
+                    "processed_at": now_in_app_timezone_naive().isoformat(),
+                    "error": str(exc),
+                }
+                metadata["processing_status"] = "failed"
+                await session.execute(
+                    ItemORM.__table__.update()
+                    .where(ItemORM.id == item_id)
+                    .values(metadata_extra=metadata, updated_at=now_in_app_timezone_naive())
+                )
+                await session.commit()
+        await create_notification_for_item_users(
+            item_id,
+            type="error",
+            category="upload_processing",
+            title="PDF OCR 失败",
+            description=str(exc)[:160],
+            preferred_user_id=user_id,
+        )
 
 
 @broker.task(task_name="process_uploaded_text_document")
-async def process_uploaded_text_document_task(item_id: str):
+async def process_uploaded_text_document_task(item_id: str, user_id: str | None = None):
     worker_log.info(f"📝 开始文本上传分析任务: {item_id}")
+    mime_type = ""
 
     try:
         async with AsyncSessionLocal() as session:
@@ -1083,6 +1157,7 @@ async def process_uploaded_text_document_task(item_id: str):
 
         metadata["processing_status"] = "completed"
         metadata.pop("text_processing_error", None)
+        metadata.pop("docx_extract_error", None)
         async with AsyncSessionLocal() as session:
             await session.execute(
                 ItemORM.__table__.update()
@@ -1099,6 +1174,14 @@ async def process_uploaded_text_document_task(item_id: str):
             await session.commit()
 
         worker_log.info(f"✅ 文本上传分析完成: {item_id}")
+        await create_notification_for_item_users(
+            item_id,
+            type="success",
+            category="upload_processing",
+            title="文档分析已完成",
+            description=f"{item.title or '该文档'} 已完成摘要与索引。",
+            preferred_user_id=user_id,
+        )
     except Exception as exc:
         worker_log.error(f"❌ 文本上传分析任务失败: {item_id} | {exc}")
         async with AsyncSessionLocal() as session:
@@ -1116,27 +1199,11 @@ async def process_uploaded_text_document_task(item_id: str):
                     .values(metadata_extra=metadata, updated_at=now_in_app_timezone_naive())
                 )
                 await session.commit()
-    except Exception as exc:
-        worker_log.error(f"❌ PDF OCR 任务失败: {item_id} | {exc}")
-        async with AsyncSessionLocal() as session:
-            result = await session.execute(select(ItemORM).where(ItemORM.id == item_id))
-            item = result.scalar_one_or_none()
-            if item:
-                metadata = dict(item.metadata_extra or {})
-                metadata["ocr"] = {
-                    "kind": "pdf",
-                    "status": "failed",
-                    "full_text": "",
-                    "pages": [],
-                    "provider": "paddleocr_v5_cpu",
-                    "model": "PP-OCRv5",
-                    "processed_at": now_in_app_timezone_naive().isoformat(),
-                    "error": str(exc),
-                }
-                metadata["processing_status"] = "failed"
-                await session.execute(
-                    ItemORM.__table__.update()
-                    .where(ItemORM.id == item_id)
-                    .values(metadata_extra=metadata, updated_at=now_in_app_timezone_naive())
-                )
-                await session.commit()
+        await create_notification_for_item_users(
+            item_id,
+            type="error",
+            category="upload_processing",
+            title="文档分析失败",
+            description=str(exc)[:160],
+            preferred_user_id=user_id,
+        )

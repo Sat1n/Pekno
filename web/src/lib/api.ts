@@ -177,6 +177,19 @@ export interface VaultCategory {
   created_at: string
 }
 
+export interface NotificationItem {
+  id: string
+  type: 'success' | 'error' | 'info' | 'warning'
+  category: 'summary' | 'upload_processing' | 'plugin_sync' | 'vault_processing' | string
+  title: string
+  description: string
+  status: 'unread' | 'read' | string
+  related_item_id?: string | null
+  related_plugin_id?: string | null
+  created_at: string
+  read_at?: string | null
+}
+
 export interface UploadDedupResponse {
   message: string
   item_id: string
@@ -372,6 +385,26 @@ export async function createAnnotation(
     anchor_data: payload.anchor_data ?? {},
   })
   return response.data
+}
+
+export async function getNotifications(limit: number = 30): Promise<NotificationItem[]> {
+  const response = await apiClient.get<NotificationItem[]>('/api/notifications', {
+    params: { limit },
+  })
+  return response.data
+}
+
+export async function markNotificationRead(notificationId: string): Promise<NotificationItem> {
+  const response = await apiClient.post<NotificationItem>(`/api/notifications/${notificationId}/read`)
+  return response.data
+}
+
+export async function markAllNotificationsRead(): Promise<void> {
+  await apiClient.post('/api/notifications/read-all')
+}
+
+export async function clearNotifications(): Promise<void> {
+  await apiClient.delete('/api/notifications')
 }
 
 export async function uploadAnnotationAsset(
