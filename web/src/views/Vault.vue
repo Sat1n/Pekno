@@ -9,6 +9,13 @@ import { Separator } from '@/components/ui/separator'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import {
   Archive,
   Camera,
   Check,
@@ -91,6 +98,8 @@ const isSearching = ref(false)
 const categoriesLoading = ref(true)
 const activeInspectorTab = ref<InspectorTab>('summary')
 const annotationDraft = ref('')
+const isUnsavedAnnotationDialogOpen = ref(false)
+const pendingItemSelection = ref<RawItem | null>(null)
 const annotations = ref<AnnotationItem[]>([])
 const annotationsLoading = ref(false)
 const savingAnnotation = ref(false)
@@ -135,6 +144,9 @@ let activeSearchRequestId = 0
 const transcriptRowRefs = new Map<string, HTMLElement>()
 const ensuringVaultAssetIds = new Set<string>()
 const intentPillClass = 'inline-flex min-w-[2.9rem] shrink-0 items-center justify-center rounded-full border bg-background px-2.5 py-1 text-[10px] font-medium leading-none text-foreground whitespace-nowrap'
+const hasUnsavedAnnotationDraft = computed(() => (
+  Boolean(annotationDraft.value.trim()) || Object.keys(pendingAnnotationAnchor.value).length > 0
+))
 
 function toAbsoluteUrl(url?: string | null) {
   if (!url) return ''
@@ -446,7 +458,7 @@ async function loadAnnotations() {
 }
 
 async function saveAnnotation() {
-  if (!activeItem.value || !annotationDraft.value.trim()) return
+  if (!activeItem.value || !annotationDraft.value.trim()) return false
   savingAnnotation.value = true
   try {
     await createAnnotation(activeItem.value.id, {
@@ -454,9 +466,9 @@ async function saveAnnotation() {
       content_raw: annotationDraft.value.trim(),
       anchor_data: pendingAnnotationAnchor.value,
     })
-    annotationDraft.value = ''
-    pendingAnnotationAnchor.value = {}
+    resetPendingAnnotationDraftState()
     await loadAnnotations()
+    return true
   } finally {
     savingAnnotation.value = false
   }
@@ -555,7 +567,41 @@ function scheduleVaultSearch(rawQuery: string) {
 }
 
 function selectItem(item: RawItem) {
+  if (activeItem.value?.id === item.id) return
+
+  if (hasUnsavedAnnotationDraft.value && !savingAnnotation.value) {
+    pendingItemSelection.value = item
+    isUnsavedAnnotationDialogOpen.value = true
+    return
+  }
+
   activeItem.value = item
+}
+
+function cancelPendingItemSelection() {
+  pendingItemSelection.value = null
+  isUnsavedAnnotationDialogOpen.value = false
+}
+
+function discardDraftAndSwitchItem() {
+  const nextItem = pendingItemSelection.value
+  resetPendingAnnotationDraftState()
+  pendingItemSelection.value = null
+  isUnsavedAnnotationDialogOpen.value = false
+  if (nextItem) {
+    activeItem.value = nextItem
+  }
+}
+
+async function saveDraftAndSwitchItem() {
+  const nextItem = pendingItemSelection.value
+  const saved = await saveAnnotation()
+  if (!saved) return
+  pendingItemSelection.value = null
+  isUnsavedAnnotationDialogOpen.value = false
+  if (nextItem) {
+    activeItem.value = nextItem
+  }
 }
 
 function toggleSection(sectionId: string) {
@@ -972,15 +1018,21 @@ async function handleSearch() {
   await performVaultSearch(searchQuery.value)
 }
 
+function resetPendingAnnotationDraftState() {
+  pendingAnnotationAnchor.value = {}
+  annotationDraft.value = ''
+}
+
 watch(
   () => activeItem.value?.id,
   async () => {
-    pendingAnnotationAnchor.value = {}
+    resetPendingAnnotationDraftState()
     activePdfHighlight.value = null
     pdfCaptureMode.value = false
     videoAspect.value = { width: 16, height: 9 }
     videoCurrentTime.value = 0
     transcriptCollapsed.value = false
+    cancelPendingItemSelection()
     void ensureActiveVaultAsset()
     await loadAnnotations()
   },
@@ -1611,5 +1663,27 @@ onBeforeUnmount(() => {
         </section>
       </div>
     </div>
+
+    <AlertDialog :open="isUnsavedAnnotationDialogOpen" @update:open="(open) => { if (!open) cancelPendingItemSelection() }">
+      <AlertDialogContent class="max-w-[420px]">
+        <AlertDialogHeader>
+          <AlertDialogTitle>切换前保存这条草稿？</AlertDialogTitle>
+          <AlertDialogDescription>
+            你当前的内化日志还没有保存。可以先保存后再切换，也可以放弃这次草稿。
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <div class="mt-4 flex flex-wrap justify-end gap-2">
+          <Button variant="outline" @click="cancelPendingItemSelection">
+            取消
+          </Button>
+          <Button variant="outline" @click="discardDraftAndSwitchItem">
+            放弃并切换
+          </Button>
+          <Button :disabled="savingAnnotation || !annotationDraft.trim()" @click="saveDraftAndSwitchItem">
+            保存并切换
+          </Button>
+        </div>
+      </AlertDialogContent>
+    </AlertDialog>
   </MainLayout>
 </template>
