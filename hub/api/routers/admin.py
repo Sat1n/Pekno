@@ -3,7 +3,13 @@ import secrets
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 
-from hub.api.schemas import InvitationCodeResponse, InvitationCreateResponse
+from hub.api.schemas import (
+    BillingSettingsRequest,
+    BillingSettingsResponse,
+    InvitationCodeResponse,
+    InvitationCreateResponse,
+)
+from hub.core.billing import get_billing_state, save_billing_config
 from hub.core import model_settings
 from hub.core.security import require_admin
 from shared.database import AsyncSessionLocal
@@ -90,3 +96,14 @@ async def update_model_assignments(payload: dict, current_user=Depends(require_a
         return {"assignments": await model_settings.save_model_assignments(assignments)}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.get("/system/billing", response_model=BillingSettingsResponse)
+async def get_system_billing(current_user=Depends(require_admin)):
+    return await get_billing_state()
+
+
+@router.put("/system/billing", response_model=BillingSettingsResponse)
+async def update_system_billing(payload: BillingSettingsRequest, current_user=Depends(require_admin)):
+    await save_billing_config(payload.model_dump())
+    return await get_billing_state()

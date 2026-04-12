@@ -248,6 +248,15 @@ export interface ModelAssignmentInfo {
   model: string
 }
 
+export interface SystemBillingSettings {
+  api_limit_type: 'token' | 'cost'
+  api_limit_value: number
+  currency: 'USD' | 'CNY' | 'EUR'
+  used_tokens: number
+  used_cost: number
+  limit_exceeded: boolean
+}
+
 // 搜索参数接口
 export interface SearchParams {
   q?: string
@@ -561,6 +570,16 @@ export async function saveModelAssignments(assignments: ModelAssignmentInfo[]): 
   const response = await apiClient.put('/api/admin/models/assignments', {
     assignments,
   })
+  return response.data
+}
+
+export async function getSystemBillingSettings(): Promise<SystemBillingSettings> {
+  const response = await apiClient.get<SystemBillingSettings>('/api/admin/system/billing')
+  return response.data
+}
+
+export async function saveSystemBillingSettings(payload: Pick<SystemBillingSettings, 'api_limit_type' | 'api_limit_value' | 'currency'>): Promise<SystemBillingSettings> {
+  const response = await apiClient.put<SystemBillingSettings>('/api/admin/system/billing', payload)
   return response.data
 }
 

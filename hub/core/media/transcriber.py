@@ -1,7 +1,22 @@
 from shared.logger import hub_log
 from hub.core.llm.ollama_manager import clear_vram_for_whisper
+from hub.core.billing import estimate_tokens, record_api_usage
 import os
 from typing import Any
+
+
+async def _record_whisper_usage(model_name: str, transcript_text: str = "") -> None:
+    try:
+        tokens = estimate_tokens(transcript_text)
+        await record_api_usage(
+            model_name=f"whisper:{model_name}",
+            prompt_tokens=0,
+            completion_tokens=tokens,
+            total_tokens=tokens,
+            force_zero_cost=True,
+        )
+    except Exception as exc:
+        hub_log.warning(f"⚠️ Whisper usage 记录失败: {exc}")
 
 async def resolve_huggingface_env():
     """解析并注入 HuggingFace 环境设置：智能镜像探测与 Token 鉴权"""
@@ -109,6 +124,7 @@ class TranscriberFactory:
                         close_fn()
                     except Exception:
                         pass
+                await _record_whisper_usage(model_name, "")
                 return {
                     "segments": [],
                     "language": language,
@@ -125,6 +141,7 @@ class TranscriberFactory:
                     "end": s.end,
                     "text": s.text.strip()
                 })
+            await _record_whisper_usage(model_name, "\n".join(item["text"] for item in result))
             return {
                 "segments": result,
                 "language": language,

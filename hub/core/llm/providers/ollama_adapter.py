@@ -3,6 +3,13 @@ from ..base import BaseLLMProvider
 import re
 import json
 
+from hub.core.billing import (
+    check_api_limit_or_raise,
+    estimate_tokens,
+    read_response_usage,
+    record_api_usage,
+)
+
 
 def _parse_tag_list(raw_text: str) -> list[str]:
     parts = re.split(r"[,，\n]+", raw_text or "")
@@ -24,6 +31,7 @@ class OllamaProvider(BaseLLMProvider):
         self.model_name = model
 
     async def generate_summary(self, text: str, length: str = "short") -> str:
+        await check_api_limit_or_raise()
         if length == "short":
             prompt = f"请提取这段内容的最核心信息，生成一段30-50字的极简摘要。必须直接输出摘要结果，不要输出任何如'好的'、'这段内容'之类的解释词汇：\n{text[:2000]}"
         else:
@@ -37,16 +45,41 @@ class OllamaProvider(BaseLLMProvider):
             model=self.model_name,
             messages=[{"role": "user", "content": prompt}]
         )
-        return response.choices[0].message.content
+        content = response.choices[0].message.content or ""
+        usage = read_response_usage(response)
+        if usage:
+            await record_api_usage(self.model_name, *usage, force_zero_cost=True)
+        else:
+            await record_api_usage(
+                self.model_name,
+                prompt_tokens=estimate_tokens(prompt),
+                completion_tokens=estimate_tokens(content),
+                force_zero_cost=True,
+            )
+        return content
 
     async def extract_tags(self, text: str) -> list[str]:
+        await check_api_limit_or_raise()
+        prompt = f"提取3个关键词，逗号隔开：\n{text[:500]}"
         response = await self.client.chat.completions.create(
             model=self.model_name,
-            messages=[{"role": "user", "content": f"提取3个关键词，逗号隔开：\n{text[:500]}"}]
+            messages=[{"role": "user", "content": prompt}]
         )
-        return _parse_tag_list(response.choices[0].message.content)
+        content = response.choices[0].message.content or ""
+        usage = read_response_usage(response)
+        if usage:
+            await record_api_usage(self.model_name, *usage, force_zero_cost=True)
+        else:
+            await record_api_usage(
+                self.model_name,
+                prompt_tokens=estimate_tokens(prompt),
+                completion_tokens=estimate_tokens(content),
+                force_zero_cost=True,
+            )
+        return _parse_tag_list(content)
 
     async def understand_image(self, image_data_url: str, ocr_text: str = "") -> dict:
+        await check_api_limit_or_raise()
         prompt = (
             "你是一个图片理解助手。请分析图片，并只返回 JSON 对象。"
             'JSON schema: {"short_caption": string, "detailed_summary_markdown": string, "tags": string[], '
@@ -69,6 +102,16 @@ class OllamaProvider(BaseLLMProvider):
             response_format={"type": "json_object"},
         )
         raw = response.choices[0].message.content or "{}"
+        usage = read_response_usage(response)
+        if usage:
+            await record_api_usage(self.model_name, *usage, force_zero_cost=True)
+        else:
+            await record_api_usage(
+                self.model_name,
+                prompt_tokens=estimate_tokens(prompt),
+                completion_tokens=estimate_tokens(raw),
+                force_zero_cost=True,
+            )
         try:
             parsed = json.loads(raw)
         except json.JSONDecodeError:

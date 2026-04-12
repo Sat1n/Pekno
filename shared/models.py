@@ -1,5 +1,5 @@
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
-from sqlalchemy import String, DateTime, JSON, Text, Integer, Boolean, ForeignKey, UniqueConstraint
+from sqlalchemy import String, DateTime, JSON, Text, Integer, Boolean, ForeignKey, UniqueConstraint, Float
 from sqlalchemy.dialects.postgresql import ARRAY
 from pgvector.sqlalchemy import Vector # 处理向量的核心
 from datetime import datetime, timedelta
@@ -185,6 +185,33 @@ class UserNotificationORM(Base):
     related_plugin_id: Mapped[Optional[str]] = mapped_column(String, nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now_in_app_timezone_naive)
     read_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+
+class ApiUsageORM(Base):
+    """大模型与本地智能引擎调用账本"""
+    __tablename__ = "api_usage"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    model_name: Mapped[str] = mapped_column(String)
+    prompt_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    completion_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    total_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    estimated_cost: Mapped[float] = mapped_column(Float, default=0.0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now_in_app_timezone_naive)
+
+
+class SystemConfigORM(Base):
+    """管理员全局系统配置"""
+    __tablename__ = "system_configs"
+
+    key: Mapped[str] = mapped_column(String, primary_key=True)
+    value: Mapped[dict] = mapped_column(JSON, default={})
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now_in_app_timezone_naive)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=now_in_app_timezone_naive,
+        onupdate=now_in_app_timezone_naive,
+    )
 
 
 class InvitationCodeORM(Base):

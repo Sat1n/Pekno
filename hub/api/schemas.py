@@ -1,5 +1,5 @@
 from pydantic import BaseModel, HttpUrl, Field
-from typing import List, Optional, Any
+from typing import List, Optional, Any, Literal
 from datetime import datetime
 class ItemResponse(BaseModel):
     """用于列表和搜索结果展示的响应模型"""
@@ -161,3 +161,15 @@ class NotificationResponse(BaseModel):
     related_plugin_id: Optional[str] = None
     created_at: datetime
     read_at: Optional[datetime] = None
+
+
+class BillingSettingsRequest(BaseModel):
+    api_limit_type: Literal["token", "cost"]
+    api_limit_value: float = Field(ge=0)
+    currency: Literal["USD", "CNY", "EUR"] = "USD"
+
+
+class BillingSettingsResponse(BillingSettingsRequest):
+    used_tokens: int
+    used_cost: float
+    limit_exceeded: bool

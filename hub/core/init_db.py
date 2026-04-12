@@ -105,6 +105,9 @@ END $$;
         await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_user_notifications_user_id ON user_notifications (user_id)"))
         await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_user_notifications_status ON user_notifications (status)"))
         await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_user_notifications_created_at ON user_notifications (created_at DESC)"))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_api_usage_created_at ON api_usage (created_at DESC)"))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_api_usage_model_name ON api_usage (model_name)"))
+        await conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_system_configs_key ON system_configs (key)"))
         
         # 确保内置插件始终存在于注册表中 (即使不运行 init_db 也能在第一次启动时载入)
         hub_log.info("🌱 正在检查并补齐内置插件...")

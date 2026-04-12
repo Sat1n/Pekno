@@ -3,6 +3,13 @@ from ..base import BaseLLMProvider
 import re
 import json
 
+from hub.core.billing import (
+    check_api_limit_or_raise,
+    estimate_tokens,
+    read_response_usage,
+    record_api_usage,
+)
+
 
 def _parse_tag_list(raw_text: str) -> list[str]:
     parts = re.split(r"[,，\n]+", raw_text or "")
@@ -21,6 +28,7 @@ class OpenAIProvider(BaseLLMProvider):
         self.model_name = model
 
     async def generate_summary(self, text: str, length: str = "short") -> str:
+        await check_api_limit_or_raise()
         if length == "short":
             prompt = f"请提取这段内容的最核心信息，生成一段30-50字的极简摘要。必须直接输出摘要结果，不要输出任何额外解释：\n{text[:2000]}"
         else:
@@ -32,18 +40,40 @@ class OpenAIProvider(BaseLLMProvider):
             model=self.model,
             messages=[{"role": "user", "content": prompt}]
         )
-        return response.choices[0].message.content
+        content = response.choices[0].message.content or ""
+        usage = read_response_usage(response)
+        if usage:
+            await record_api_usage(self.model, *usage)
+        else:
+            await record_api_usage(
+                self.model,
+                prompt_tokens=estimate_tokens(prompt),
+                completion_tokens=estimate_tokens(content),
+            )
+        return content
 
     async def extract_tags(self, text: str) -> list[str]:
+        await check_api_limit_or_raise()
+        prompt_text = text[:1000]
         response = await self.client.chat.completions.create(
             model=self.model,
             messages=[{"role": "system", "content": "你是一个标签提取器，仅返回逗号分隔的关键词"},
-                      {"role": "user", "content": text[:1000]}]
+                      {"role": "user", "content": prompt_text}]
         )
-        tags_raw = response.choices[0].message.content
+        tags_raw = response.choices[0].message.content or ""
+        usage = read_response_usage(response)
+        if usage:
+            await record_api_usage(self.model, *usage)
+        else:
+            await record_api_usage(
+                self.model,
+                prompt_tokens=estimate_tokens(prompt_text) + estimate_tokens("你是一个标签提取器，仅返回逗号分隔的关键词"),
+                completion_tokens=estimate_tokens(tags_raw),
+            )
         return _parse_tag_list(tags_raw)
 
     async def understand_image(self, image_data_url: str, ocr_text: str = "") -> dict:
+        await check_api_limit_or_raise()
         prompt = (
             "你是一个图片理解助手。请仔细分析图片，并只返回 JSON 对象，不要输出 Markdown 或解释。"
             'JSON schema: {"short_caption": string, "detailed_summary_markdown": string, "tags": string[], '
@@ -67,6 +97,15 @@ class OpenAIProvider(BaseLLMProvider):
             response_format={"type": "json_object"},
         )
         raw = response.choices[0].message.content or "{}"
+        usage = read_response_usage(response)
+        if usage:
+            await record_api_usage(self.model, *usage)
+        else:
+            await record_api_usage(
+                self.model,
+                prompt_tokens=estimate_tokens(prompt),
+                completion_tokens=estimate_tokens(raw),
+            )
         try:
             parsed = json.loads(raw)
         except json.JSONDecodeError:

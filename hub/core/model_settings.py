@@ -10,6 +10,7 @@ from langchain_ollama import OllamaEmbeddings
 from shared.config import SYSTEM_CONFIG_USER_ID, ConfigManager
 from hub.core.llm.providers.ollama_adapter import OllamaProvider
 from hub.core.llm.providers.openai_adapter import OpenAIProvider
+from hub.core.billing import check_api_limit_or_raise, estimate_tokens, read_response_usage, record_api_usage
 
 MODEL_SETTINGS_NAMESPACE = "__model_settings__"
 
@@ -479,6 +480,7 @@ async def extract_tags(text: str) -> Tuple[List[str], str]:
 
 
 async def embed_text(text: str) -> Tuple[List[float], str]:
+    await check_api_limit_or_raise()
     assignment = await _resolve_assignment("embedding")
     provider_id = assignment["provider"]
     model_name = assignment["model"]
@@ -490,6 +492,12 @@ async def embed_text(text: str) -> Tuple[List[float], str]:
             base_url=_normalize_ollama_host(provider_config.get("host", "http://127.0.0.1:11434")),
         )
         vector = await asyncio.to_thread(client.embed_query, text)
+        await record_api_usage(
+            model_name,
+            prompt_tokens=estimate_tokens(text),
+            completion_tokens=0,
+            force_zero_cost=True,
+        )
         return vector, model_name
 
     api_key = provider_config.get("api_key")
@@ -499,6 +507,11 @@ async def embed_text(text: str) -> Tuple[List[float], str]:
 
     client = openai.AsyncOpenAI(api_key=api_key, base_url=base_url)
     response = await client.embeddings.create(model=model_name, input=text)
+    usage = read_response_usage(response)
+    if usage:
+        await record_api_usage(model_name, *usage)
+    else:
+        await record_api_usage(model_name, prompt_tokens=estimate_tokens(text), completion_tokens=0)
     return response.data[0].embedding, model_name
 
 

@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Blocks, User, ChevronRight, Database, Trash2, Loader2, HardDrive, Puzzle, Plus, MailPlus, LogOut, KeyRound, Copy, BrainCircuit, SlidersHorizontal, Cpu, Save, Search, Sparkles, GalleryVerticalEnd, Shield, Server } from 'lucide-vue-next'
 import { usePluginStore } from '@/store/usePluginStore'
-import { changePassword, clearStoredToken, createInvitationCode, getDataSources, getInvitationCodes, getModelProviders, getStoredAuthUser, clearDataSource, saveModelAssignments, saveModelProvider, getPATs, createPAT, deletePAT, type DataSourceStat, type InvitationCodeInfo, type ModelAssignmentInfo, type ModelProviderInfo, type PATItem } from '@/lib/api'
+import { changePassword, clearStoredToken, createInvitationCode, getDataSources, getInvitationCodes, getModelProviders, getStoredAuthUser, clearDataSource, saveModelAssignments, saveModelProvider, getPATs, createPAT, deletePAT, getSystemBillingSettings, saveSystemBillingSettings, type DataSourceStat, type InvitationCodeInfo, type ModelAssignmentInfo, type ModelProviderInfo, type PATItem, type SystemBillingSettings } from '@/lib/api'
 import { useToast } from '@/components/ui/toast/use-toast'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import PluginInstallDialog from './PluginInstallDialog.vue'
@@ -41,6 +41,14 @@ const providerDraft = ref<Record<string, string>>({})
 const modelSettingsTab = ref<'providers' | 'assignments'>('providers')
 const providerSearch = ref('')
 const providerCapabilityFilter = ref<'all' | string>('all')
+const billingSettings = ref<SystemBillingSettings | null>(null)
+const billingDraft = ref<Pick<SystemBillingSettings, 'api_limit_type' | 'api_limit_value' | 'currency'>>({
+  api_limit_type: 'token',
+  api_limit_value: 0,
+  currency: 'USD',
+})
+const isLoadingBilling = ref(false)
+const isSavingBilling = ref(false)
 
 const currentPassword = ref('')
 const newPassword = ref('')
@@ -89,6 +97,7 @@ const menuItems = computed(() => {
     return [
       { id: 'plugins', label: '插件管理', icon: Blocks },
       { id: 'models', label: '模型设置', icon: BrainCircuit },
+      { id: 'billing', label: '系统与计费控制', icon: Server },
       { id: 'data', label: '数据管理', icon: Database },
       { id: 'invites', label: '邀请管理', icon: MailPlus },
       { id: 'tokens', label: '访问令牌', icon: Shield },
@@ -294,6 +303,57 @@ async function handleSaveAssignments() {
   }
 }
 
+async function loadBillingSettings() {
+  if (!isAdmin.value) return
+  isLoadingBilling.value = true
+  try {
+    const settings = await getSystemBillingSettings()
+    billingSettings.value = settings
+    billingDraft.value = {
+      api_limit_type: settings.api_limit_type,
+      api_limit_value: settings.api_limit_value,
+      currency: settings.currency,
+    }
+  } catch (error) {
+    console.error('加载计费设置失败:', error)
+    toast({
+      title: '加载失败',
+      description: '无法获取系统计费设置',
+      variant: 'destructive',
+    })
+  } finally {
+    isLoadingBilling.value = false
+  }
+}
+
+async function handleSaveBillingSettings() {
+  isSavingBilling.value = true
+  try {
+    const settings = await saveSystemBillingSettings({
+      ...billingDraft.value,
+      api_limit_value: Number(billingDraft.value.api_limit_value) || 0,
+    })
+    billingSettings.value = settings
+    billingDraft.value = {
+      api_limit_type: settings.api_limit_type,
+      api_limit_value: settings.api_limit_value,
+      currency: settings.currency,
+    }
+    toast({
+      title: '计费控制已保存',
+      description: settings.api_limit_value > 0 ? '新的 API 限额配置已生效' : 'API 限额已关闭',
+    })
+  } catch (error: any) {
+    toast({
+      title: '保存失败',
+      description: error?.response?.data?.detail || '无法保存计费控制设置',
+      variant: 'destructive',
+    })
+  } finally {
+    isSavingBilling.value = false
+  }
+}
+
 const openClearDialog = (sourceType: string) => {
   sourceToClear.value = sourceType
   isClearDialogOpen.value = true
@@ -376,6 +436,9 @@ watch(
 watch(activeTab, (newTab) => {
   if (newTab === 'models') {
     void loadModelSettings()
+  }
+  if (newTab === 'billing') {
+    void loadBillingSettings()
   }
   if (newTab === 'data') {
     void loadDataSources()
@@ -495,6 +558,10 @@ function formatPatScopes(scopes: string[]): string {
     'write:system_config': '系统配置写入',
   }
   return scopes.map((scope) => labels[scope] || scope).join(' / ')
+}
+
+function formatBillingCost(value: number | undefined, currency: string | undefined): string {
+  return `${currency || 'USD'} ${(value || 0).toFixed(4)}`
 }
 </script>
 
@@ -780,6 +847,89 @@ function formatPatScopes(scopes: string[]): string {
                       </div>
                     </div>
                   </ScrollArea>
+                </div>
+              </div>
+
+              <div v-else-if="activeTab === 'billing'" class="space-y-8 animate-in fade-in slide-in-from-right-4 duration-300">
+                <div class="flex items-center justify-between">
+                  <div>
+                    <h3 class="text-2xl font-bold tracking-tight">系统与计费控制</h3>
+                    <p class="text-muted-foreground text-sm mt-1 text-balance">管理本自然月 API 使用上限，并查看当前大模型调用账本汇总。</p>
+                  </div>
+                  <Button @click="handleSaveBillingSettings" :disabled="isSavingBilling || isLoadingBilling">
+                    <Loader2 v-if="isSavingBilling" class="w-4 h-4 mr-2 animate-spin" />
+                    <Save v-else class="w-4 h-4 mr-2" />
+                    保存设置
+                  </Button>
+                </div>
+
+                <div v-if="isLoadingBilling" class="flex justify-center items-center py-12">
+                  <Loader2 class="w-8 h-8 animate-spin text-muted-foreground" />
+                </div>
+
+                <div v-else class="space-y-6">
+                  <div class="grid gap-4 md:grid-cols-3">
+                    <div class="rounded-2xl border bg-card p-5">
+                      <div class="text-xs text-muted-foreground">本月 Token</div>
+                      <div class="text-2xl font-bold mt-2">{{ billingSettings?.used_tokens?.toLocaleString() || '0' }}</div>
+                    </div>
+                    <div class="rounded-2xl border bg-card p-5">
+                      <div class="text-xs text-muted-foreground">本月预估消耗</div>
+                      <div class="text-2xl font-bold mt-2">{{ formatBillingCost(billingSettings?.used_cost, billingSettings?.currency) }}</div>
+                    </div>
+                    <div class="rounded-2xl border bg-card p-5">
+                      <div class="text-xs text-muted-foreground">限额状态</div>
+                      <div class="text-2xl font-bold mt-2" :class="billingSettings?.limit_exceeded ? 'text-destructive' : 'text-green-600'">
+                        {{ billingSettings?.limit_exceeded ? '已触顶' : '正常' }}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="rounded-2xl border bg-card p-6 space-y-6 max-w-2xl">
+                    <div class="space-y-2">
+                      <Label>限制方式</Label>
+                      <div class="grid gap-3 sm:grid-cols-2">
+                        <label class="rounded-xl border p-4 cursor-pointer hover:bg-muted/30 transition-colors" :class="billingDraft.api_limit_type === 'token' ? 'border-primary bg-primary/5' : ''">
+                          <div class="flex items-center gap-3">
+                            <input v-model="billingDraft.api_limit_type" type="radio" value="token" />
+                            <div>
+                              <div class="font-semibold text-sm">按 Token 数</div>
+                              <p class="text-xs text-muted-foreground mt-1">限制本月所有 LLM / Embedding 的 token 总量。</p>
+                            </div>
+                          </div>
+                        </label>
+                        <label class="rounded-xl border p-4 cursor-pointer hover:bg-muted/30 transition-colors" :class="billingDraft.api_limit_type === 'cost' ? 'border-primary bg-primary/5' : ''">
+                          <div class="flex items-center gap-3">
+                            <input v-model="billingDraft.api_limit_type" type="radio" value="cost" />
+                            <div>
+                              <div class="font-semibold text-sm">按消耗金额</div>
+                              <p class="text-xs text-muted-foreground mt-1">限制本月预估 API 成本。未配置价格的模型按 0 记录。</p>
+                            </div>
+                          </div>
+                        </label>
+                      </div>
+                    </div>
+
+                    <div class="grid gap-4 sm:grid-cols-2">
+                      <div class="space-y-2">
+                        <Label>上限值</Label>
+                        <Input v-model.number="billingDraft.api_limit_value" type="number" min="0" step="1" />
+                        <p class="text-xs text-muted-foreground">填 0 表示不启用限额拦截。</p>
+                      </div>
+                      <div class="space-y-2">
+                        <Label>主要货币</Label>
+                        <select v-model="billingDraft.currency" class="w-full rounded-md border bg-background px-3 py-2 text-sm">
+                          <option value="USD">USD</option>
+                          <option value="CNY">CNY</option>
+                          <option value="EUR">EUR</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div class="rounded-xl border border-dashed bg-muted/20 p-4 text-xs text-muted-foreground leading-6">
+                      限额按自然月统计。Ollama、本地 OCR 和本地 Whisper 会记录调用量，但预估费用为 0；云端模型会按后端内置的临时价格表估算费用。
+                    </div>
+                  </div>
                 </div>
               </div>
 
