@@ -163,6 +163,20 @@ class NotificationResponse(BaseModel):
     read_at: Optional[datetime] = None
 
 
+class UserCredentialUpsertRequest(BaseModel):
+    platform: str
+    token_value: str = Field(min_length=1)
+
+
+class UserCredentialResponse(BaseModel):
+    id: str
+    platform: str
+    label: str
+    masked_value: str
+    created_at: datetime
+    updated_at: datetime
+
+
 class BillingSettingsRequest(BaseModel):
     api_limit_type: Literal["token", "cost"]
     api_limit_value: float = Field(ge=0)

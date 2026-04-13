@@ -5,6 +5,12 @@ import MainLayout from '@/layouts/MainLayout.vue'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { Loader2, RefreshCw, Server, Waves, TerminalSquare, Flame, Siren, Rocket, Filter } from 'lucide-vue-next'
 import {
   forceProcessQueue,
@@ -520,22 +526,30 @@ onBeforeUnmount(() => {
                   </Button>
                 </div>
 
-                <label class="flex items-center gap-2 rounded-md border border-border/70 bg-background/70 px-3 py-1.5 text-xs text-muted-foreground">
-                  <Filter class="h-3.5 w-3.5" />
-                  <span>{{ t('dashboard.filter') }}</span>
-                  <select
-                    v-model="logFilterLevel"
-                    class="bg-transparent text-foreground outline-none"
-                  >
-                    <option
+                <DropdownMenu>
+                  <DropdownMenuTrigger as-child>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      class="gap-2 border-border/70 bg-background/70 text-foreground hover:bg-accent"
+                    >
+                      <Filter class="h-3.5 w-3.5" />
+                      <span>{{ t('dashboard.filter') }}</span>
+                      <span class="text-muted-foreground">{{ logFilterOptions.find((option) => option.value === logFilterLevel)?.label }}</span>
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" class="w-40">
+                    <DropdownMenuItem
                       v-for="option in logFilterOptions"
                       :key="option.value"
-                      :value="option.value"
+                      class="flex items-center justify-between"
+                      @click="logFilterLevel = option.value"
                     >
-                      {{ option.label }}
-                    </option>
-                  </select>
-                </label>
+                      <span>{{ option.label }}</span>
+                      <span v-if="logFilterLevel === option.value" class="text-xs text-primary">✓</span>
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
 
               <div class="overflow-hidden rounded-2xl border border-zinc-800 bg-[#1e1e1e]">

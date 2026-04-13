@@ -1,6 +1,8 @@
 from shared.plugins.base import PluginContext
 from shared.plugins.manager import plugin_manager
 from shared.entities import UniversalItem
+from shared.constants import PLATFORM_WHITELIST
+from shared.credentials import get_user_credential, validate_required_credentials
 from hub.core.notifications import create_notification_for_user
 from hub.core.billing import QuotaExceededException
 from worker.ingestion.pipeline import process_new_item_task
@@ -16,6 +18,10 @@ import re
 import inspect
 
 
+class MissingPluginCredentialError(RuntimeError):
+    pass
+
+
 async def _build_plugin_context_for_user(plugin_id: str, plugin, user_id: str | None):
     config_dict = {}
     for key, schema in plugin.manifest.get("settings_schema", {}).items():
@@ -24,6 +30,43 @@ async def _build_plugin_context_for_user(plugin_id: str, plugin, user_id: str | 
             config_dict[key] = int(val) if schema.get("type") == "integer" else (val == "true" if schema.get("type") == "boolean" else val)
         else:
             config_dict[key] = schema.get("default")
+
+    runtime_credentials = {}
+    runtime_env = {}
+    required_credentials = validate_required_credentials(plugin.manifest.get("required_credentials"))
+    for platform in required_credentials:
+        binding_enabled = await ConfigManager.get_config(
+            plugin_id,
+            ConfigKeys.credential_binding(platform),
+            user_id=user_id,
+        )
+        credential = None
+        if binding_enabled == "true" and user_id:
+            credential = await get_user_credential(user_id, platform)
+            if credential is None:
+                raise MissingPluginCredentialError(
+                    f"[{plugin_id}] Missing required global credential for platform '{platform}'"
+                )
+
+        if credential is None:
+            legacy_key = PLATFORM_WHITELIST[platform].get("legacy_config_key")
+            if legacy_key:
+                legacy_value = await ConfigManager.get_config(plugin_id, legacy_key, user_id=user_id)
+                if legacy_value:
+                    runtime_credentials[platform] = legacy_value
+                    config_key = PLATFORM_WHITELIST[platform].get("config_key")
+                    if config_key and not config_dict.get(config_key):
+                        config_dict[config_key] = legacy_value
+                    continue
+
+        if credential is not None:
+            runtime_credentials[platform] = credential.token_value
+            config_key = PLATFORM_WHITELIST[platform].get("config_key")
+            env_var = PLATFORM_WHITELIST[platform].get("env_var")
+            if config_key and not config_dict.get(config_key):
+                config_dict[config_key] = credential.token_value
+            if env_var:
+                runtime_env[env_var] = credential.token_value
 
     import httpx
     http_client = None
@@ -39,7 +82,9 @@ async def _build_plugin_context_for_user(plugin_id: str, plugin, user_id: str | 
     return PluginContext(
         config=config_dict,
         http_client=http_client,
-        logger=worker_log
+        logger=worker_log,
+        credentials=runtime_credentials,
+        env=runtime_env,
     )
 
 @broker.task(task_name="run_plugin_pipeline")
@@ -163,6 +208,10 @@ async def run_plugin_pipeline_task(plugin_id: str, limit: int = None, user_id: s
                 related_plugin_id=plugin_id,
             )
 
+    except MissingPluginCredentialError as e:
+        worker_log.warning(f"Skipping plugin execution due to missing credential: {e}")
+        await ConfigManager.set_config(plugin_id, ConfigKeys.LAST_SYNC_RESULT, "warning", user_id=user_id)
+        await ConfigManager.set_config(plugin_id, ConfigKeys.LAST_SYNC_ERROR, str(e)[:500], user_id=user_id)
     except Exception as e:
         worker_log.error(f"❌ [{plugin_id}] Sync task failed: {e}")
         await ConfigManager.set_config(plugin_id, ConfigKeys.LAST_SYNC_RESULT, "error", user_id=user_id)
@@ -201,7 +250,11 @@ async def parse_single_plugin_item_task(
         worker_log.error(f"❌ Plugin not found for single-item parsing: {plugin_id}")
         return
 
-    ctx = await _build_plugin_context_for_user(plugin_id, plugin, user_id)
+    try:
+        ctx = await _build_plugin_context_for_user(plugin_id, plugin, user_id)
+    except MissingPluginCredentialError as e:
+        worker_log.warning(f"Skipping single-item parsing due to missing credential: {e}")
+        raise ValueError(str(e))
     try:
         parse_signature = inspect.signature(plugin.parse_single_item)
         if "ctx" in parse_signature.parameters:

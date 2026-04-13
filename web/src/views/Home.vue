@@ -45,6 +45,13 @@ interface LocalSearchResult extends SearchResult {
   uploadMimeType?: string
 }
 
+interface TranscriptSegment {
+  id: string
+  start: number
+  end: number
+  text: string
+}
+
 const savedLayout = (localStorage.getItem('pekno-layout') as 'list' | 'grid' | 'compact') || 'list'
 const layoutMode = ref<'list' | 'grid' | 'compact'>(savedLayout)
 watch(layoutMode, (val) => localStorage.setItem('pekno-layout', val))
@@ -119,6 +126,62 @@ const renderedSummary = computed(() => {
   const normalized = raw.replace(/\\n/g, '\n')
   return marked.parse(normalized) as string
 })
+
+function parseTimestampValue(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string') {
+    const parsed = Number(value)
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return null
+}
+
+function parseTranscriptSegments(rawTranscript: unknown): TranscriptSegment[] {
+  if (!rawTranscript) return []
+
+  let parsed: unknown = rawTranscript
+  if (typeof rawTranscript === 'string') {
+    try {
+      parsed = JSON.parse(rawTranscript)
+    } catch {
+      return []
+    }
+  }
+
+  if (!Array.isArray(parsed)) return []
+
+  return parsed
+    .map((entry, index) => {
+      if (!entry || typeof entry !== 'object') return null
+      const record = entry as Record<string, unknown>
+      const start = parseTimestampValue(record.start ?? record.start_time ?? record.timestamp)
+      const end = parseTimestampValue(record.end ?? record.end_time)
+      const text = String(record.text || '').trim()
+      if (start === null || !text) return null
+      return {
+        id: `segment-${index}-${start}`,
+        start,
+        end: end ?? start,
+        text,
+      } satisfies TranscriptSegment
+    })
+    .filter((segment): segment is TranscriptSegment => Boolean(segment))
+}
+
+function formatMediaTimestamp(seconds: number) {
+  const whole = Math.max(0, Math.floor(seconds))
+  const secs = whole % 60
+  const minutes = Math.floor(whole / 60) % 60
+  const hours = Math.floor(whole / 3600)
+  if (hours > 0) {
+    return [hours, minutes, secs].map((value) => String(value).padStart(2, '0')).join(':')
+  }
+  return [minutes, secs].map((value) => String(value).padStart(2, '0')).join(':')
+}
+
+const selectedTranscriptSegments = computed(() =>
+  parseTranscriptSegments(selectedItem.value?.metadataExtra?.raw_transcript),
+)
 
 const hoverTimers = new Map<string, number>()
 const hoverDataMap = ref<Record<string, HoverResponse>>({})
@@ -1323,6 +1386,33 @@ watch(isAddDialogOpen, (isOpen) => {
               <Badge v-for="tag in selectedItem?.tags" :key="tag" variant="secondary">
                 {{ tag }}
               </Badge>
+            </div>
+          </div>
+
+          <div v-if="selectedItem?.intentType === 'video'">
+            <h4 class="font-medium mb-2">{{ t('vault.videoTranscript') }}</h4>
+            <div
+              v-if="selectedTranscriptSegments.length"
+              class="max-h-64 space-y-2 overflow-y-auto rounded-lg border bg-muted/30 p-3"
+            >
+              <div
+                v-for="segment in selectedTranscriptSegments"
+                :key="segment.id"
+                class="rounded-md border border-border/60 bg-background/80 px-3 py-2"
+              >
+                <div class="text-xs font-medium text-primary">
+                  {{ formatMediaTimestamp(segment.start) }}
+                </div>
+                <div class="mt-1 whitespace-pre-wrap break-words text-sm text-muted-foreground">
+                  {{ segment.text }}
+                </div>
+              </div>
+            </div>
+            <div
+              v-else
+              class="rounded-lg border border-dashed px-4 py-3 text-sm text-muted-foreground"
+            >
+              {{ t('vault.transcriptUnavailable') }}
             </div>
           </div>
         </div>

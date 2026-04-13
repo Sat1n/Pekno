@@ -13,7 +13,9 @@ from sqlalchemy import and_, delete, select
 from sqlalchemy.dialects.postgresql import insert
 
 from hub.api.schemas import ItemResponse, ItemStateResponse, ReadBatchRequest
-from shared.config import ConfigManager
+from shared.config import ConfigKeys, ConfigManager
+from shared.constants import PLATFORM_WHITELIST
+from shared.credentials import get_user_credential
 from hub.core.security import get_current_user
 from shared.database import AsyncSessionLocal
 from shared.logger import hub_log
@@ -1014,6 +1016,21 @@ async def get_item_hover_blocks(item_id: str, current_user=Depends(get_current_u
         )
         if value is not None:
             user_config_dict[key] = value
+
+    for platform in manifest.get("required_credentials", []) or []:
+        binding_enabled = await ConfigManager.get_config(
+            plugin_id=plugin_id,
+            key=ConfigKeys.credential_binding(platform),
+            user_id=current_user["id"],
+        )
+        if binding_enabled != "true":
+            continue
+        credential = await get_user_credential(current_user["id"], platform)
+        if not credential:
+            continue
+        config_key = PLATFORM_WHITELIST.get(platform, {}).get("config_key")
+        if config_key and config_key not in user_config_dict:
+            user_config_dict[config_key] = credential.token_value
 
     try:
         blocks = await plugin.get_hover_blocks(item_url=item.raw_link, user_config=user_config_dict)

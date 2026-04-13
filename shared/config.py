@@ -12,6 +12,7 @@ from sqlalchemy import select
 
 class ConfigKeys:
     TOKEN = "token"
+    COOKIE = "cookie"
     SYNC_LIMIT = "sync_limit"
     AUTO_SYNC = "auto_sync"
     AUTO_SYNC_INTERVAL = "auto_sync_interval"
@@ -22,6 +23,10 @@ class ConfigKeys:
     SYNC_STATUS = "sync_status"
     AUTO_SHORT_SUMMARY = "auto_short_summary"
     RETENTION_HOURS = "retention_hours"
+
+    @staticmethod
+    def credential_binding(platform: str) -> str:
+        return f"credential_binding:{platform}"
 
 
 SYSTEM_CONFIG_USER_ID = "system"

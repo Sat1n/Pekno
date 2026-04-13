@@ -3,10 +3,12 @@ from typing import List, Dict, Any
 
 class PluginContext:
     """插件运行的安全上下文"""
-    def __init__(self, config: dict, http_client, logger):
+    def __init__(self, config: dict, http_client, logger, credentials: dict | None = None, env: dict | None = None):
         self.config = config  # 该插件的配置字典 (已从数据库加载，如 sync_limit)
         self.http = http_client  # TODO: 封装的受限 HTTP 客户端
         self.log = logger
+        self.credentials = credentials or {}
+        self.env = env or {}
 
 class BasePlugin(ABC):
     def __init__(self):

@@ -4,6 +4,7 @@ import inspect
 from copy import deepcopy
 from sqlalchemy import select
 from shared.plugins.base import BasePlugin
+from shared.credentials import validate_required_credentials
 from shared.logger import hub_log
 from shared.models import PluginRegistryORM
 
@@ -30,6 +31,7 @@ class PluginManager:
 
     def _inject_global_settings(self, manifest: Dict) -> Dict:
         normalized = deepcopy(manifest)
+        normalized["required_credentials"] = validate_required_credentials(normalized.get("required_credentials"))
         settings_schema = dict(normalized.get("settings_schema") or {})
 
         for legacy_key in (
@@ -86,7 +88,11 @@ class PluginManager:
         return normalized
 
     def register(self, plugin: BasePlugin):
-        manifest = self._inject_global_settings(plugin.manifest)
+        try:
+            manifest = self._inject_global_settings(plugin.manifest)
+        except Exception as exc:
+            hub_log.error(f"Failed to register plugin due to invalid manifest credentials: {exc}")
+            return
         plugin_id = manifest.get("id")
         if not plugin_id:
             hub_log.error("❌ Failed to register plugin: plugin id is missing.")

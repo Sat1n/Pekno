@@ -187,6 +187,25 @@ class UserNotificationORM(Base):
     read_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
 
+class UserCredentialORM(Base):
+    """User-scoped reusable credentials for approved platforms."""
+    __tablename__ = "user_credentials"
+    __table_args__ = (
+        UniqueConstraint("user_id", "platform", name="uq_user_credentials_user_platform"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    platform: Mapped[str] = mapped_column(String, index=True)
+    token_value: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now_in_app_timezone_naive)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=now_in_app_timezone_naive,
+        onupdate=now_in_app_timezone_naive,
+    )
+
+
 class ApiUsageORM(Base):
     """大模型与本地智能引擎调用账本"""
     __tablename__ = "api_usage"

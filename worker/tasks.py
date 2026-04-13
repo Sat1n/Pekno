@@ -25,6 +25,7 @@ import re
 from pathlib import Path
 from urllib.parse import quote, unquote, urlparse
 from shared.config import ConfigManager, ConfigKeys
+from shared.credentials import get_user_credential
 from shared.locale import normalize_preferred_locale
 
 
@@ -91,6 +92,10 @@ def _parse_github_repo_ref(item: ItemORM) -> tuple[str, str] | None:
 
 
 async def _get_github_access_token(user_id: str | None = None) -> str | None:
+    if user_id:
+        credential = await get_user_credential(user_id, "github")
+        if credential:
+            return credential.token_value
     token = await ConfigManager.get_config("github_stars", ConfigKeys.TOKEN, user_id=user_id)
     if token:
         return token
@@ -416,6 +421,25 @@ def _pick_random_keyframe_timestamps(duration_seconds: float | int | None, count
     return sorted(random.sample(candidates, sample_size))
 
 
+def _sanitize_keyframe_timestamps(
+    timestamps: list[int] | None,
+    duration_seconds: float | int | None,
+) -> list[int]:
+    if not timestamps:
+        return []
+
+    if not duration_seconds or duration_seconds <= 0:
+        return sorted(dict.fromkeys(max(0, int(ts)) for ts in timestamps))
+
+    max_allowed = max(0, int(float(duration_seconds)) - 1)
+    sanitized: list[int] = []
+    for ts in timestamps:
+        normalized = min(max(0, int(ts)), max_allowed)
+        if normalized not in sanitized:
+            sanitized.append(normalized)
+    return sorted(sanitized)
+
+
 @broker.task(task_name="process_multimedia")
 async def process_multimedia_task(
     item_id: str,
@@ -543,11 +567,17 @@ async def process_multimedia_task(
                 preferred_locale=effective_locale,
             )
         
-        worker_log.info(f"📝 Extracted keyframe anchors: {summary_result.keyframe_timestamps}")
+        raw_keyframe_timestamps = list(summary_result.keyframe_timestamps or [])
+        sanitized_keyframe_timestamps = _sanitize_keyframe_timestamps(raw_keyframe_timestamps, duration_seconds)
+        if sanitized_keyframe_timestamps != raw_keyframe_timestamps:
+            worker_log.info(
+                f"🛠️ Adjusted keyframe anchors to fit media duration: {raw_keyframe_timestamps} -> {sanitized_keyframe_timestamps}"
+            )
+        worker_log.info(f"📝 Extracted keyframe anchors: {sanitized_keyframe_timestamps}")
         
         # 4. FFmpeg 截帧落地
         keyframes_urls = []
-        if summary_result.keyframe_timestamps:
+        if sanitized_keyframe_timestamps:
             worker_log.info("📸 Starting keyframe extraction with FFmpeg...")
             os.makedirs(os.path.join("data", "static", "keyframes"), exist_ok=True)
             try:
@@ -563,7 +593,7 @@ async def process_multimedia_task(
                     )
                     worker_log.info(f"🎞️ Video cached locally: {video_path}")
 
-                for idx, ts in enumerate(summary_result.keyframe_timestamps):
+                for idx, ts in enumerate(sanitized_keyframe_timestamps):
                     filename = f"{item_id}_{idx}_{ts}.jpg"
                     filepath = os.path.join("data", "static", "keyframes", filename)
 
@@ -588,7 +618,7 @@ async def process_multimedia_task(
                     else:
                         err_text = stderr.decode("utf-8", errors="ignore").strip()
                         worker_log.warning(
-                            f"⚠️ 关键帧抽取失败 [timestamp={ts}] returncode={proc.returncode}: {err_text[:500]}"
+                            f"⚠️ Keyframe extraction failed [timestamp={ts}] returncode={proc.returncode}: {err_text[:500]}"
                         )
 
                 worker_log.info(f"✅ Successfully generated {len(keyframes_urls)} keyframe images")
@@ -610,7 +640,7 @@ async def process_multimedia_task(
             meta = dict(item_data.metadata_extra) if item_data.metadata_extra else {}
             meta["raw_transcript"] = raw_transcript_json
             meta["keyframes"] = keyframes_urls
-            meta["keyframe_timestamps"] = summary_result.keyframe_timestamps
+            meta["keyframe_timestamps"] = sanitized_keyframe_timestamps
             meta["has_long_summary"] = True
             meta["long_summary"] = summary_result.summary
             meta["processing_status"] = "completed"

@@ -193,6 +193,15 @@ export interface NotificationItem {
   read_at?: string | null
 }
 
+export interface UserCredentialItem {
+  id: string
+  platform: string
+  label: string
+  masked_value: string
+  created_at: string
+  updated_at: string
+}
+
 export interface UploadDedupResponse {
   message: string
   item_id: string
@@ -745,7 +754,17 @@ export interface PluginManifestData {
   description: string
   version: string
   author: string
+  required_credentials?: string[]
   settings_schema: Record<string, PluginSettingSchema>
+}
+
+export interface PluginCredentialState {
+  platform: string
+  label: string
+  status: 'missing' | 'available' | 'applied'
+  masked_value?: string | null
+  is_bound: boolean
+  has_global: boolean
 }
 
 export interface PluginInfo {
@@ -753,6 +772,8 @@ export interface PluginInfo {
   config: Record<string, any>
   has_token: boolean
   token_preview: string | null
+  credential_bindings: string[]
+  credential_states: PluginCredentialState[]
 }
 
 export interface ActivePlugin {
@@ -776,6 +797,16 @@ export async function getParsePlugins(): Promise<ActivePlugin[]> {
  */
 export async function getAllPlugins(): Promise<PluginInfo[]> {
   const response = await apiClient.get<PluginInfo[]>('/api/plugins')
+  return response.data
+}
+
+export async function getUserCredentials(): Promise<UserCredentialItem[]> {
+  const response = await apiClient.get<UserCredentialItem[]>('/api/user/credentials')
+  return response.data
+}
+
+export async function saveUserCredential(payload: { platform: string; token_value: string }): Promise<UserCredentialItem> {
+  const response = await apiClient.put<UserCredentialItem>('/api/user/credentials', payload)
   return response.data
 }
 

@@ -1,0 +1,12 @@
+{
+  "id": "github_token_probe",
+  "name": "GitHub Token Probe",
+  "version": "1.0.0",
+  "description": "A minimal diagnostic plugin used to verify shared GitHub credential injection.",
+  "source_type": "github_token_probe",
+  "author": "Pekno RC",
+  "required_credentials": ["github"],
+  "permissions": [],
+  "settings_schema": {}
+}
+

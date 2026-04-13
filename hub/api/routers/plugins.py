@@ -7,27 +7,131 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 from shared.plugins.manager import plugin_manager
-from shared.config import ConfigManager, SYSTEM_SCOPED_CONFIG_KEYS
+from shared.config import ConfigManager, SYSTEM_SCOPED_CONFIG_KEYS, ConfigKeys
+from shared.constants import PLATFORM_WHITELIST
+from shared.credentials import get_user_credential, mask_credential, validate_required_credentials, upsert_user_credential
 from shared.models import ConfigORM, PluginRegistryORM
 from shared.database import AsyncSessionLocal
 from shared.utils.zip_utils import safe_extract_zip
 from worker.plugins.pipeline import reload_system_plugins_task, run_plugin_pipeline_task
 from sqlalchemy import select, delete
 from hub.core.security import get_current_user, require_admin
+from shared.api_errors import ApiError
 
 router = APIRouter(prefix="/api/plugins", tags=["Plugins"])
 
-# 插件安装相关配置
+# Plugin installation paths
 PLUGIN_INSTALL_DIR = Path("worker/plugins/third_party").resolve()
 TEMP_PREVIEW_DIR = Path(tempfile.gettempdir()) / "iris_plugins"
+
+
+async def _get_bound_credentials(plugin_id: str, user_id: str, required_credentials: list[str]) -> list[str]:
+    bound: list[str] = []
+    for platform in required_credentials:
+        is_bound = await ConfigManager.get_config(
+            plugin_id,
+            ConfigKeys.credential_binding(platform),
+            user_id=user_id,
+        )
+        if is_bound == "true":
+            bound.append(platform)
+    return bound
+
+
+async def _resolve_plugin_credential_state(
+    plugin_id: str,
+    user_id: str,
+    manifest: dict[str, Any],
+    settings_schema: dict[str, Any],
+) -> dict[str, Any]:
+    required_credentials = validate_required_credentials(manifest.get("required_credentials"))
+    bound_credentials = await _get_bound_credentials(plugin_id, user_id, required_credentials)
+
+    token_preview = None
+    secret_configured = False
+    config_values: dict[str, Any] = {}
+
+    for key, schema in settings_schema.items():
+        val = await ConfigManager.get_config(plugin_id, key, user_id=user_id)
+        if val is not None:
+            if schema.get("type") == "integer":
+                val = int(val)
+            elif schema.get("type") == "boolean":
+                val = (val == "true")
+            if schema.get("secret"):
+                secret_configured = True
+                token_preview = f"{val[:4]}..." if len(val) > 4 else val
+                continue
+            config_values[key] = val
+        else:
+            config_values[key] = schema.get("default")
+
+    credential_states: list[dict[str, Any]] = []
+    has_required_credentials = True
+    for platform in required_credentials:
+        global_credential = await get_user_credential(user_id, platform)
+        has_global = global_credential is not None
+        is_bound = platform in bound_credentials
+        status = "missing"
+        masked_value = mask_credential(global_credential.token_value) if global_credential else None
+        if is_bound and has_global:
+            status = "applied"
+        elif has_global:
+            status = "available"
+            has_required_credentials = False
+        else:
+            has_required_credentials = False
+        credential_states.append(
+            {
+                "platform": platform,
+                "label": PLATFORM_WHITELIST[platform]["label"],
+                "status": status,
+                "masked_value": masked_value,
+                "is_bound": is_bound,
+                "has_global": has_global,
+            }
+        )
+
+    required_keys = [key for key, schema in settings_schema.items() if schema.get("required")]
+    required_configured = True
+    for key in required_keys:
+        val = await ConfigManager.get_config(plugin_id, key, user_id=user_id)
+        if val in (None, ""):
+            required_configured = False
+            break
+
+    has_secret_field = any(schema.get("secret") for schema in settings_schema.values())
+    if has_secret_field and required_keys:
+        base_configured = secret_configured and required_configured
+    elif has_secret_field:
+        base_configured = secret_configured
+    elif required_keys:
+        base_configured = required_configured
+    else:
+        base_configured = True
+    if required_credentials:
+        is_configured = (base_configured and has_required_credentials) if (has_secret_field or required_keys) else has_required_credentials
+        if not token_preview:
+            first_applied = next((state for state in credential_states if state["status"] == "applied"), None)
+            if first_applied:
+                token_preview = first_applied["masked_value"]
+    else:
+        is_configured = base_configured
+
+    return {
+        "config_values": config_values,
+        "token_preview": token_preview,
+        "is_configured": is_configured,
+        "credential_bindings": bound_credentials,
+        "credential_states": credential_states,
+    }
 
 @router.post("/upload_preview")
 async def upload_plugin_preview(file: UploadFile = File(...), current_user=Depends(require_admin)):
     """
-    步骤1：上传并预检插件
-    解压到临时目录，读取 manifest 和源码供审查
+    Step 1: Upload and preview a plugin package before installation.
     """
-    # 确保临时目录存在
+    # Ensure the temporary preview directory exists
     if TEMP_PREVIEW_DIR.exists():
         shutil.rmtree(TEMP_PREVIEW_DIR)
     TEMP_PREVIEW_DIR.mkdir(parents=True, exist_ok=True)
@@ -35,12 +139,11 @@ async def upload_plugin_preview(file: UploadFile = File(...), current_user=Depen
     temp_zip_path = TEMP_PREVIEW_DIR / file.filename
     
     try:
-        # 1. 保存 ZIP
+        # 1. Persist ZIP
         with open(temp_zip_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
             
-        # 2. 安全解压
-        # 为每个插件创建一个随机子目录，避免冲突
+        # 2. Extract safely into an isolated directory
         import uuid
         extract_dir_name = str(uuid.uuid4())
         extract_path = TEMP_PREVIEW_DIR / extract_dir_name
@@ -48,24 +151,24 @@ async def upload_plugin_preview(file: UploadFile = File(...), current_user=Depen
         
         safe_extract_zip(str(temp_zip_path), str(extract_path))
         
-        # 3. 寻找 manifest.json (假设在根目录)
+        # 3. Find manifest.json
         manifest_path = extract_path / "manifest.json"
         if not manifest_path.exists():
-            # 尝试在子目录找（有些压缩包会多一层文件夹）
+            # Some archives wrap plugin files inside an extra root directory
             subdirs = [d for d in extract_path.iterdir() if d.is_dir()]
             if len(subdirs) == 1:
                 extract_path = subdirs[0]
                 manifest_path = extract_path / "manifest.json"
-        
+
         if not manifest_path.exists():
-            raise HTTPException(status_code=400, detail="未找到 manifest.json 描述文件")
-            
-        # 4. 读取清单 (纯文本解析，不加载代码)
+            raise HTTPException(status_code=400, detail="manifest.json was not found in the uploaded plugin package.")
+
+        # 4. Read manifest as plain text only, without importing plugin code
         with open(manifest_path, "r", encoding="utf-8") as f:
             manifest = json.load(f)
-            
-        # 5. 读取主入口源码 (仅预览)
-        # 假设入口文件通常是 plugin.py 或 __init__.py
+        manifest["required_credentials"] = validate_required_credentials(manifest.get("required_credentials"))
+
+        # 5. Read the main entry source for preview only
         source_code = ""
         main_py = extract_path / "plugin.py"
         if not main_py.exists():
@@ -75,7 +178,7 @@ async def upload_plugin_preview(file: UploadFile = File(...), current_user=Depen
             with open(main_py, "r", encoding="utf-8") as f:
                 source_code = f.read()
         else:
-            source_code = "# 未找到标准入口文件 (plugin.py 或 __init__.py)"
+            source_code = "# No standard entry file was found (plugin.py or __init__.py)"
             
         return {
             "temp_token": extract_dir_name, # 用于下一步确认安装
@@ -84,23 +187,25 @@ async def upload_plugin_preview(file: UploadFile = File(...), current_user=Depen
             "file_structure": [p.name for p in extract_path.iterdir()]
         }
         
+    except ApiError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.detail)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"预检失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Plugin preview failed: {str(e)}")
 
 @router.post("/confirm_install")
 async def confirm_install_plugin(token: str, current_user=Depends(require_admin)):
     """
-    步骤2：确认安装
-    将临时目录移动到插件目录，写入数据库，触发热重载
+    Step 2: Confirm installation, move files into place, persist registry state,
+    and trigger hot reload on runtime services.
     """
     source_path = TEMP_PREVIEW_DIR / token
     if not source_path.exists():
-        raise HTTPException(status_code=404, detail="安装会话已过期，请重新上传")
+        raise HTTPException(status_code=404, detail="The installation session expired. Please upload the plugin again.")
         
     try:
-        # 1. 读取 Manifest 获取 ID
+        # 1. Read manifest to get plugin id
         manifest_path = source_path / "manifest.json"
-        # 再次检查子目录逻辑
+        # Re-check nested root directory layout
         if not manifest_path.exists():
             subdirs = [d for d in source_path.iterdir() if d.is_dir()]
             if len(subdirs) == 1:
@@ -109,21 +214,22 @@ async def confirm_install_plugin(token: str, current_user=Depends(require_admin)
         
         with open(manifest_path, "r", encoding="utf-8") as f:
             manifest = json.load(f)
-            
+        manifest["required_credentials"] = validate_required_credentials(manifest.get("required_credentials"))
+
         plugin_id = manifest.get("id")
         if not plugin_id:
-            raise HTTPException(status_code=400, detail="Manifest 缺少插件 ID")
-            
-        # 2. 移动文件到正式目录
+            raise HTTPException(status_code=400, detail="The plugin manifest is missing an id field.")
+
+        # 2. Move files into the installed plugin directory
         target_path = PLUGIN_INSTALL_DIR / plugin_id
         if target_path.exists():
-            shutil.rmtree(target_path) # 覆盖安装
+            shutil.rmtree(target_path)
             
         shutil.move(str(source_path), str(target_path))
         
-        # 3. 写入数据库注册表
+        # 3. Persist plugin registry entry
         module_path = f"worker.plugins.third_party.{plugin_id}.plugin"
-        # 尝试猜测入口模块，如果 plugin.py 存在则用 .plugin，否则用包名
+        # If plugin.py is missing, fall back to the package root module
         if not (target_path / "plugin.py").exists():
             module_path = f"worker.plugins.third_party.{plugin_id}"
 
@@ -148,56 +254,55 @@ async def confirm_install_plugin(token: str, current_user=Depends(require_admin)
             await session.execute(stmt)
             await session.commit()
             
-            # 4. 触发双端热重载
-            # Hub 端
+            # 4. Trigger hot reload for Hub
             await plugin_manager.load_enabled_plugins(session)
-            
-        # Worker 端
+
+        # Worker side
         await reload_system_plugins_task.kiq()
-        
-        return {"status": "success", "message": f"插件 {plugin_id} 安装成功！"}
-        
+
+        return {"status": "success", "message": f"Plugin {plugin_id} was installed successfully."}
+
+    except ApiError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.detail)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"安装失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Plugin installation failed: {str(e)}")
 
 @router.delete("/{plugin_id}")
 async def uninstall_plugin(plugin_id: str, current_user=Depends(require_admin)):
-    """
-    卸载插件
-    """
+    """Uninstall a plugin."""
     try:
-        # 1. 从数据库移除
+        # 1. Remove plugin metadata from the database
         async with AsyncSessionLocal() as session:
-            # 1.1 删除插件注册记录
+            # Remove registry row
             stmt_registry = delete(PluginRegistryORM).where(PluginRegistryORM.plugin_id == plugin_id)
             await session.execute(stmt_registry)
-            
-            # 1.2 删除插件相关配置 (Fix: 卸载时清理配置)
+
+            # Remove plugin-related configuration
             stmt_config = delete(ConfigORM).where(ConfigORM.plugin_id == plugin_id)
             await session.execute(stmt_config)
-            
+
             await session.commit()
-            
-            # 触发 Hub 重载 (从内存移除)
+
+            # Remove it from Hub in-memory registry
             if plugin_id in plugin_manager.plugins:
                 del plugin_manager.plugins[plugin_id]
-        
-        # 2. 删除物理文件
+
+        # 2. Remove files
         plugin_dir = PLUGIN_INSTALL_DIR / plugin_id
         if plugin_dir.exists():
             shutil.rmtree(plugin_dir)
-            
-        # 3. 触发 Worker 重载
+
+        # 3. Trigger worker reload
         await reload_system_plugins_task.kiq()
-        
-        return {"status": "success", "message": f"插件 {plugin_id} 已卸载"}
-        
+
+        return {"status": "success", "message": f"Plugin {plugin_id} was uninstalled."}
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"卸载失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Plugin uninstall failed: {str(e)}")
 
 @router.get("/active")
 async def get_active_plugins(current_user=Depends(get_current_user)):
-    """获取当前用户已配置好的启用的插件列表 (用于前端顶级导航标签)"""
+    """Return active plugins configured for the current user."""
     manifests = plugin_manager.get_all_manifests()
     result = []
     
@@ -205,22 +310,9 @@ async def get_active_plugins(current_user=Depends(get_current_user)):
         plugin_id = manifest["id"]
         source_type = manifest.get("source_type", plugin_id)
         settings_schema = manifest.get("settings_schema", {})
-        
-        has_secret_field = any(s.get("secret") for s in settings_schema.values())
-        is_configured = True
-        
-        # 简单判断只要有 secret 配置上就是可用的 （你也可以根据实际必填逻辑调整）
-        if has_secret_field:
-            secret_configured = False
-            for key, schema in settings_schema.items():
-                if schema.get("secret"):
-                    val = await ConfigManager.get_config(plugin_id, key, user_id=current_user["id"])
-                    if val:
-                        secret_configured = True
-                        break
-            is_configured = secret_configured
-            
-        if is_configured:
+        plugin_state = await _resolve_plugin_credential_state(plugin_id, current_user["id"], manifest, settings_schema)
+
+        if plugin_state["is_configured"]:
             result.append({
                 "id": plugin_id,
                 "name": manifest.get("name", plugin_id),
@@ -231,67 +323,70 @@ async def get_active_plugins(current_user=Depends(get_current_user)):
 
 @router.get("")
 async def get_plugins(current_user=Depends(get_current_user)):
-    """获取所有插件清单和当前配置"""
+    """Return all plugin manifests with the current user's resolved configuration state."""
     manifests = plugin_manager.get_all_manifests()
     result = []
     
     for manifest in manifests:
         plugin_id = manifest["id"]
         settings_schema = manifest.get("settings_schema", {})
-        config_values = {}
-        token_preview = None
-        secret_configured = False
-        
-        for key, schema in settings_schema.items():
-            val = await ConfigManager.get_config(plugin_id, key, user_id=current_user["id"])
-            if val is not None:
-                if schema.get("type") == "integer":
-                    val = int(val)
-                elif schema.get("type") == "boolean":
-                    val = (val == "true")
-                    
-                if schema.get("secret"):
-                    secret_configured = True
-                    token_preview = f"{val[:4]}..." if len(val) > 4 else val
-                    # 不返回真实敏感数据
-                    continue
-                
-                config_values[key] = val
-            else:
-                config_values[key] = schema.get("default")
-
-        has_secret_field = any(schema.get("secret") for schema in settings_schema.values())
-        required_keys = [key for key, schema in settings_schema.items() if schema.get("required")]
-
-        required_configured = True
-        for key in required_keys:
-            val = await ConfigManager.get_config(plugin_id, key, user_id=current_user["id"])
-            if val in (None, ""):
-                required_configured = False
-                break
-
-        is_configured = secret_configured if has_secret_field else required_configured
-        if has_secret_field and required_keys:
-            is_configured = secret_configured and required_configured
+        plugin_state = await _resolve_plugin_credential_state(plugin_id, current_user["id"], manifest, settings_schema)
         
         result.append({
             "manifest": manifest,
-            "config": config_values,
-            "has_token": is_configured, # 用 is_configured 替代单纯的 has_token
-            "token_preview": token_preview
+            "config": plugin_state["config_values"],
+            "has_token": plugin_state["is_configured"],
+            "token_preview": plugin_state["token_preview"],
+            "credential_bindings": plugin_state["credential_bindings"],
+            "credential_states": plugin_state["credential_states"],
         })
         
     return result
 
 @router.post("/{plugin_id}/config")
 async def save_plugin_config(plugin_id: str, config: Dict[str, Any], current_user=Depends(get_current_user)):
-    """动态保存插件配置"""
+    """Save plugin configuration and optional global credential bindings."""
     plugin = plugin_manager.get_plugin(plugin_id)
     if not plugin:
-        raise HTTPException(status_code=404, detail=f"找不到插件: {plugin_id}")
+        raise HTTPException(status_code=404, detail=f"Plugin was not found: {plugin_id}")
         
     settings_schema = plugin.manifest.get("settings_schema", {})
-    
+    required_credentials = validate_required_credentials(plugin.manifest.get("required_credentials"))
+
+    apply_global_credentials = {
+        platform
+        for platform in config.pop("__apply_global_credentials", []) or []
+        if platform in required_credentials
+    }
+    global_credential_values = dict(config.pop("__global_credentials", {}) or {})
+
+    for platform in required_credentials:
+        entered_value = str(global_credential_values.get(platform, "") or "").strip()
+        if entered_value:
+            await upsert_user_credential(current_user["id"], platform, entered_value)
+            success = await ConfigManager.set_config(
+                plugin_id,
+                ConfigKeys.credential_binding(platform),
+                "true",
+                description=f"Credential binding for {platform}",
+                user_id=current_user["id"],
+            )
+            if not success:
+                raise HTTPException(status_code=500, detail=f"Failed to save credential binding: {platform}")
+        elif platform in apply_global_credentials:
+            credential = await get_user_credential(current_user["id"], platform)
+            if not credential:
+                raise HTTPException(status_code=400, detail=f"Global credential is not available for platform: {platform}")
+            success = await ConfigManager.set_config(
+                plugin_id,
+                ConfigKeys.credential_binding(platform),
+                "true",
+                description=f"Credential binding for {platform}",
+                user_id=current_user["id"],
+            )
+            if not success:
+                raise HTTPException(status_code=500, detail=f"Failed to save credential binding: {platform}")
+
     for key, val in config.items():
         if key not in settings_schema:
             continue
@@ -300,30 +395,30 @@ async def save_plugin_config(plugin_id: str, config: Dict[str, Any], current_use
         if key in SYSTEM_SCOPED_CONFIG_KEYS and current_user["role"] not in {"admin", "super_admin"}:
             continue
         
-        # 针对空值的密码(secret)字段，通常表示不修改
+        # Empty secret input usually means "leave unchanged"
         if schema.get("secret") and (val is None or str(val).strip() == ""):
             continue
             
         str_val = str(val) if not isinstance(val, bool) else ("true" if val else "false")
         
         success = await ConfigManager.set_config(
-            plugin_id, 
-            key, 
-            str_val, 
+            plugin_id,
+            key,
+            str_val,
             description=schema.get("label", key),
             user_id=current_user["id"],
         )
         if not success:
-            raise HTTPException(status_code=500, detail=f"保存配置失败: {key}")
-        
-    return {"status": "success", "message": f"{plugin.manifest.get('name')} 配置已保存"}
+            raise HTTPException(status_code=500, detail=f"Failed to save plugin setting: {key}")
+
+    return {"status": "success", "message": f"{plugin.manifest.get('name')} configuration was saved."}
 
 @router.post("/{plugin_id}/sync")
 async def trigger_plugin_sync(plugin_id: str, current_user=Depends(get_current_user)):
-    """触发插件同步"""
+    """Trigger a manual sync for a plugin."""
     plugin = plugin_manager.get_plugin(plugin_id)
     if not plugin:
-        raise HTTPException(status_code=404, detail=f"找不到插件: {plugin_id}")
+        raise HTTPException(status_code=404, detail=f"Plugin was not found: {plugin_id}")
         
     # 异步触发，取代之前的 sync_github_stars_task
     task = await run_plugin_pipeline_task.kiq(plugin_id, None, current_user["id"])
@@ -331,5 +426,5 @@ async def trigger_plugin_sync(plugin_id: str, current_user=Depends(get_current_u
     return {
         "status": "accepted",
         "task_id": task.task_id if task else None,
-        "message": f"{plugin.manifest.get('name')} 同步任务已加入队列"
+        "message": f"{plugin.manifest.get('name')} sync task has been queued."
     }

@@ -16,14 +16,13 @@ class GitHubStarsPlugin(BasePlugin):
             "source_type": "github_star",
             "description": "同步你 Star 的 GitHub 仓库",
             "version": "1.0.0",
+            "required_credentials": ["github"],
             "auto_sync_supported": True,
             "framework_defaults": {
                 "retention_hours": -1,
                 "auto_short_summary": True,
             },
-            "settings_schema": {
-                "token": {"type": "string", "secret": True, "label": "Personal Access Token"}
-            }
+            "settings_schema": {}
         }
 
     async def fetch_data(self, ctx: PluginContext) -> List[Dict[str, Any]]:
