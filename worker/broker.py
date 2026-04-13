@@ -2,9 +2,12 @@ import os
 import taskiq_redis
 from taskiq import InMemoryBroker, TaskiqEvents, TaskiqState
 
-from shared.logger import worker_log
+from shared.logger import configure_logging, worker_log
 from shared.plugins.manager import plugin_manager
 from shared.database import AsyncSessionLocal 
+
+os.environ.setdefault("IRIS_SERVICE", "worker")
+configure_logging()
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://127.0.0.1:6379")
 

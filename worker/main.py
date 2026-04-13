@@ -1,10 +1,18 @@
-from worker.broker import broker  # 从纯净定义导入
-from shared.logger import detect_service_name, scheduler_log, worker_log
+import os
+import sys
+
+service_name = "scheduler" if "scheduler" in " ".join(sys.argv).lower() else "worker"
+os.environ["IRIS_SERVICE"] = service_name
+
+from shared.logger import configure_logging, detect_service_name, scheduler_log, worker_log
 from taskiq.schedule_sources import LabelScheduleSource
 from taskiq.scheduler.scheduler import TaskiqScheduler
+from worker.broker import broker  # 从纯净定义导入
 import worker.ingestion.pipeline
 import worker.maintenance
 import worker.plugins.pipeline  # 导入通用插件流水线模块
+
+configure_logging()
 
 scheduler = TaskiqScheduler(broker, sources=[LabelScheduleSource(broker)])
 

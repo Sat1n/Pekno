@@ -9,6 +9,11 @@ from pathlib import Path
 LOG_DIR = Path("data/logs")
 LOG_MAX_BYTES = int(os.getenv("LOG_MAX_BYTES", str(10 * 1024 * 1024)))
 LOG_BACKUP_COUNT = int(os.getenv("LOG_BACKUP_COUNT", "5"))
+SERVICE_DISPLAY_NAMES = {
+    "hub": "Iris-Hub",
+    "worker": "Iris-Worker",
+    "scheduler": "Iris-Scheduler",
+}
 
 
 class ColorFormatter(logging.Formatter):
@@ -34,6 +39,17 @@ class ColorFormatter(logging.Formatter):
         log_fmt = self.FORMATS.get(record.levelno, self.format_str)
         formatter = logging.Formatter(log_fmt, datefmt="%H:%M:%S")
         return formatter.format(record)
+
+
+class ServiceNameFilter(logging.Filter):
+    def __init__(self, service_name: str):
+        super().__init__()
+        self.display_name = SERVICE_DISPLAY_NAMES.get(service_name, SERVICE_DISPLAY_NAMES["hub"])
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.name in SERVICE_DISPLAY_NAMES.values():
+            record.name = self.display_name
+        return True
 
 
 def _get_log_level() -> int:
@@ -87,8 +103,21 @@ def _build_file_handler(service_name: str) -> logging.Handler:
     return handler
 
 
+def _configure_named_logger(logger_name: str, handlers: list[logging.Handler], level: int) -> None:
+    logger = logging.getLogger(logger_name)
+    logger.setLevel(level)
+    logger.propagate = False
+    for handler in list(logger.handlers):
+        if getattr(handler, "_iris_owned", False):
+            logger.removeHandler(handler)
+            handler.close()
+    for handler in handlers:
+        logger.addHandler(handler)
+
+
 def configure_logging(service_name: str | None = None) -> str:
-    service = service_name or detect_service_name()
+    explicit_service = os.getenv("IRIS_SERVICE", "").strip().lower()
+    service = explicit_service if explicit_service in SERVICE_DISPLAY_NAMES else (service_name or detect_service_name())
     root = logging.getLogger()
     configured_service = getattr(root, "_iris_service_name", None)
     if configured_service == service:
@@ -100,13 +129,18 @@ def configure_logging(service_name: str | None = None) -> str:
             root.removeHandler(handler)
             handler.close()
 
-    root.addHandler(_build_console_handler())
-    root.addHandler(_build_file_handler(service))
+    console_handler = _build_console_handler()
+    file_handler = _build_file_handler(service)
+    owned_handlers = [console_handler, file_handler]
+    for handler in owned_handlers:
+        root.addHandler(handler)
+    for handler in root.handlers:
+        if getattr(handler, "_iris_owned", False):
+            handler.addFilter(ServiceNameFilter(service))
+    for logger_name in ("uvicorn", "uvicorn.error", "uvicorn.access", "fastapi"):
+        _configure_named_logger(logger_name, owned_handlers, root.level)
     root._iris_service_name = service  # type: ignore[attr-defined]
     return service
-
-
-configure_logging()
 
 hub_log = logging.getLogger("Iris-Hub")
 worker_log = logging.getLogger("Iris-Worker")

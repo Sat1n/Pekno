@@ -4,6 +4,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Optional
 from datetime import datetime
 from pathlib import Path
+import os
+from shared.logger import configure_logging
+
+os.environ.setdefault("IRIS_SERVICE", "hub")
+configure_logging()
+
 from hub.core.search import SearchService
 from shared.database import AsyncSessionLocal
 from shared.models import ItemORM, UserItemStateORM
@@ -74,7 +80,6 @@ from hub.api import data
 from hub.api.routers import admin, annotations, auth, items, monitor, notifications, plugins, vault
 from hub.api.mcp import mcp_app
 from hub.api.middlewares.mcp_auth import MCPAuthMiddleware
-import os
 from fastapi.staticfiles import StaticFiles
 from starlette.responses import Response
 
@@ -416,4 +421,11 @@ def format_github_time(time_str: str) -> str:
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8001, reload=True)
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=8001,
+        reload=True,
+        log_config=None,
+        access_log=True,
+    )

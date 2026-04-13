@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useColorMode } from '@vueuse/core'
-import { Search, Activity, Clock, Settings, Sun, Moon, Monitor, LayoutList, LayoutGrid, Rows3, Bell, Plus, Archive } from 'lucide-vue-next'
+import { Search, Clock, Settings, Sun, Moon, Monitor, LayoutList, LayoutGrid, Rows3, Bell, Plus, Archive, BarChart3 } from 'lucide-vue-next'
 import { Sidebar, SidebarContent, SidebarGroup, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -141,10 +141,7 @@ const navMain = computed(() => {
     { title: '收藏库 / Vault', icon: Archive, to: '/vault' },
   ]
   if (['admin', 'super_admin'].includes(currentUser.value.role || '')) {
-    items.push({ title: '监控看板', icon: Activity, to: '/dashboard' })
-  }
-  if (currentUser.value.role === 'super_admin') {
-    items.push({ title: '动态 (Activity) [开发中]', icon: Activity, to: '/activity', disabled: true })
+    items.push({ title: '监控看板', icon: BarChart3, to: '/dashboard' })
   }
   return items
 })

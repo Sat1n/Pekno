@@ -4,7 +4,7 @@ import MainLayout from '@/layouts/MainLayout.vue'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Loader2, RefreshCw, Server, Waves, TerminalSquare, Flame, Siren, Rocket } from 'lucide-vue-next'
+import { Loader2, RefreshCw, Server, Waves, TerminalSquare, Flame, Siren, Rocket, Filter } from 'lucide-vue-next'
 import {
   forceProcessQueue,
   getAdminLogTail,
@@ -27,7 +27,8 @@ import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/compon
 use([CanvasRenderer, LineChart, GridComponent, TooltipComponent, LegendComponent])
 
 type LogService = 'hub' | 'worker' | 'scheduler'
-type HighlightLevel = 'error' | 'warning' | 'normal'
+type HighlightLevel = 'debug' | 'info' | 'warning' | 'error' | 'critical'
+type LogFilterLevel = 'debug' | 'info' | 'warning' | 'error' | 'critical'
 
 const { toast } = useToast()
 const currentUser = computed(() => getStoredAuthUser())
@@ -49,7 +50,24 @@ const loadingLog = ref<Record<LogService, boolean>>({
 })
 const retryingPlugins = ref<Record<string, boolean>>({})
 const logTerminalRef = ref<HTMLElement | null>(null)
+const logFilterLevel = ref<LogFilterLevel>('info')
 let pollTimer: number | undefined
+
+const LOG_LEVEL_PRIORITY: Record<LogFilterLevel, number> = {
+  debug: 10,
+  info: 20,
+  warning: 30,
+  error: 40,
+  critical: 50,
+}
+
+const logFilterOptions: Array<{ label: string; value: LogFilterLevel }> = [
+  { label: 'DEBUG+', value: 'debug' },
+  { label: 'INFO+', value: 'info' },
+  { label: 'WARNING+', value: 'warning' },
+  { label: 'ERROR+', value: 'error' },
+  { label: 'CRITICAL', value: 'critical' },
+]
 
 const cards = computed(() => [
   {
@@ -173,10 +191,19 @@ const parsedLogLines = computed(() => {
   }))
 })
 
+const filteredLogLines = computed(() => {
+  const threshold = LOG_LEVEL_PRIORITY[logFilterLevel.value]
+  return parsedLogLines.value.filter((line) => {
+    return LOG_LEVEL_PRIORITY[line.level] >= threshold
+  })
+})
+
 function classifyLogLine(line: string): HighlightLevel {
-  if (/ERROR|Exception/i.test(line)) return 'error'
+  if (/CRITICAL|FATAL/i.test(line)) return 'critical'
+  if (/\[CIRCUIT BREAKER\]|ERROR|Exception|Traceback/i.test(line)) return 'error'
   if (/WARNING/i.test(line)) return 'warning'
-  return 'normal'
+  if (/DEBUG/i.test(line)) return 'debug'
+  return 'info'
 }
 
 function formatTime(value?: string | null) {
@@ -287,7 +314,7 @@ watch(activeLogTab, async (service) => {
 })
 
 watch(
-  () => logContent.value[activeLogTab.value],
+  () => [logContent.value[activeLogTab.value], logFilterLevel.value],
   async () => {
     await scrollLogToBottom()
   },
@@ -465,51 +492,77 @@ onBeforeUnmount(() => {
                 深渊终端
               </CardTitle>
               <p class="mt-1 text-sm text-muted-foreground">
-                黑底终端视图，自动滚动至底部，并按 ERROR / WARNING 高亮日志。
+                黑底终端视图，自动滚动到底部，并支持按日志等级筛选与高亮。
               </p>
             </CardHeader>
             <CardContent class="space-y-4">
-              <div class="flex flex-wrap gap-2">
-                <Button
-                  v-for="service in (['hub', 'worker', 'scheduler'] as LogService[])"
-                  :key="service"
-                  :variant="activeLogTab === service ? 'default' : 'outline'"
-                  size="sm"
-                  @click="activeLogTab = service"
-                >
-                  {{ service.toUpperCase() }}
-                </Button>
+              <div class="flex flex-wrap items-center justify-between gap-3">
+                <div class="flex flex-wrap gap-2">
+                  <Button
+                    v-for="service in (['hub', 'worker', 'scheduler'] as LogService[])"
+                    :key="service"
+                    :variant="activeLogTab === service ? 'default' : 'outline'"
+                    size="sm"
+                    @click="activeLogTab = service"
+                  >
+                    {{ service.toUpperCase() }}
+                  </Button>
+                </div>
+
+                <label class="flex items-center gap-2 rounded-md border border-border/70 bg-background/70 px-3 py-1.5 text-xs text-muted-foreground">
+                  <Filter class="h-3.5 w-3.5" />
+                  <span>Filter</span>
+                  <select
+                    v-model="logFilterLevel"
+                    class="bg-transparent text-foreground outline-none"
+                  >
+                    <option
+                      v-for="option in logFilterOptions"
+                      :key="option.value"
+                      :value="option.value"
+                    >
+                      {{ option.label }}
+                    </option>
+                  </select>
+                </label>
               </div>
 
               <div class="overflow-hidden rounded-2xl border border-zinc-800 bg-[#1e1e1e]">
                 <div class="flex items-center justify-between border-b border-zinc-800 px-4 py-2 text-xs text-zinc-400">
                   <span>{{ activeLogTab.toUpperCase() }} LOG TAIL</span>
-                  <span>{{ parsedLogLines.length }} lines</span>
+                  <span>{{ filteredLogLines.length }} / {{ parsedLogLines.length }} lines</span>
                 </div>
                 <div
                   ref="logTerminalRef"
-                  class="h-[32rem] overflow-auto px-4 py-3 font-mono text-xs leading-6"
+                  class="abyss-terminal-scroll h-[32rem] overflow-auto px-4 py-3 font-mono text-xs leading-6"
                   style="font-family: 'Fira Code', ui-monospace, SFMono-Regular, Consolas, monospace;"
                 >
                   <div v-if="loadingLog[activeLogTab]" class="flex h-full min-h-[28rem] items-center justify-center text-sm text-zinc-300">
                     <Loader2 class="mr-2 h-4 w-4 animate-spin" />
                     正在读取 {{ activeLogTab }} 日志...
                   </div>
-                  <div v-else class="space-y-0.5">
+                  <div v-else-if="filteredLogLines.length" class="space-y-0.5">
                     <div
-                      v-for="(line, index) in parsedLogLines"
+                      v-for="(line, index) in filteredLogLines"
                       :key="`${activeLogTab}-${index}`"
                       :class="[
                         'whitespace-pre-wrap break-words',
-                        line.level === 'error'
-                          ? 'text-red-400'
-                          : line.level === 'warning'
-                            ? 'text-yellow-300'
-                            : 'text-zinc-100',
+                        line.level === 'critical'
+                          ? 'text-fuchsia-300'
+                          : line.level === 'error'
+                            ? 'text-red-400'
+                            : line.level === 'warning'
+                              ? 'text-yellow-300'
+                              : line.level === 'info'
+                                ? 'text-emerald-300'
+                                : 'text-sky-300',
                       ]"
                     >
                       {{ line.text || ' ' }}
                     </div>
+                  </div>
+                  <div v-else class="flex h-full min-h-[28rem] items-center justify-center text-sm text-zinc-400">
+                    当前筛选等级下没有可显示的日志。
                   </div>
                 </div>
               </div>
@@ -522,3 +575,34 @@ onBeforeUnmount(() => {
     <Toaster />
   </MainLayout>
 </template>
+
+<style scoped>
+.abyss-terminal-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(113, 113, 122, 0.78) rgba(24, 24, 27, 0.88);
+}
+
+.abyss-terminal-scroll::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.abyss-terminal-scroll::-webkit-scrollbar-track {
+  background: rgba(24, 24, 27, 0.9);
+  border-left: 1px solid rgba(63, 63, 70, 0.85);
+}
+
+.abyss-terminal-scroll::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, rgba(82, 82, 91, 0.92), rgba(113, 113, 122, 0.82));
+  border: 2px solid rgba(24, 24, 27, 0.9);
+  border-radius: 999px;
+}
+
+.abyss-terminal-scroll::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, rgba(113, 113, 122, 0.98), rgba(161, 161, 170, 0.88));
+}
+
+.abyss-terminal-scroll::-webkit-scrollbar-corner {
+  background: rgba(24, 24, 27, 0.9);
+}
+</style>
