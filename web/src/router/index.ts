@@ -1,11 +1,12 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
 import Home from '@/views/Home.vue'
+import Dashboard from '@/views/Dashboard.vue'
 import Init from '@/views/Init.vue'
 import Login from '@/views/Login.vue'
 import Register from '@/views/Register.vue'
 import Vault from '@/views/Vault.vue'
-import { getAuthStatus, getStoredToken } from '@/lib/api'
+import { getAuthStatus, getStoredAuthUser, getStoredToken } from '@/lib/api'
 
 let authStatusCache: { needs_initialization: boolean } | null = null
 
@@ -36,6 +37,12 @@ const router = createRouter({
       name: 'watch-later',
       component: Home,
       meta: { requiresAuth: true },
+    },
+    {
+      path: '/dashboard',
+      name: 'dashboard',
+      component: Dashboard,
+      meta: { requiresAuth: true, requiresAdmin: true },
     },
     {
       path: '/vault',
@@ -90,6 +97,11 @@ router.beforeEach(async (to) => {
   }
 
   if ((to.path === '/login' || to.path === '/register') && getStoredToken()) {
+    return { path: '/' }
+  }
+
+  const currentUser = getStoredAuthUser()
+  if (to.meta.requiresAdmin === true && !['admin', 'super_admin'].includes(currentUser.role || '')) {
     return { path: '/' }
   }
 

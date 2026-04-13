@@ -140,6 +140,9 @@ const navMain = computed(() => {
     { title: '稍后再看', icon: Clock, to: '/watch-later' },
     { title: '收藏库 / Vault', icon: Archive, to: '/vault' },
   ]
+  if (['admin', 'super_admin'].includes(currentUser.value.role || '')) {
+    items.push({ title: '监控看板', icon: Activity, to: '/dashboard' })
+  }
   if (currentUser.value.role === 'super_admin') {
     items.push({ title: '动态 (Activity) [开发中]', icon: Activity, to: '/activity', disabled: true })
   }

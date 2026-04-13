@@ -257,6 +257,32 @@ export interface SystemBillingSettings {
   limit_exceeded: boolean
 }
 
+export interface PluginHealthItem {
+  plugin_id: string
+  name: string
+  last_successful_sync_at?: string | null
+  last_sync_at?: string | null
+  sync_status: string
+  status: 'Healthy' | 'Stale' | 'Error'
+  auto_sync: boolean
+  auto_sync_interval?: number | null
+  last_error?: string | null
+}
+
+export interface AdminMetricsResponse {
+  rag_backlog_count: number
+  api_today_total_cost: number
+  billing_currency: 'USD' | 'CNY' | 'EUR'
+  abnormal_plugin_count: number
+  plugins: PluginHealthItem[]
+}
+
+export interface AdminLogTailResponse {
+  service: 'hub' | 'worker' | 'scheduler'
+  content: string
+  lines: number
+}
+
 // 搜索参数接口
 export interface SearchParams {
   q?: string
@@ -580,6 +606,16 @@ export async function getSystemBillingSettings(): Promise<SystemBillingSettings>
 
 export async function saveSystemBillingSettings(payload: Pick<SystemBillingSettings, 'api_limit_type' | 'api_limit_value' | 'currency'>): Promise<SystemBillingSettings> {
   const response = await apiClient.put<SystemBillingSettings>('/api/admin/system/billing', payload)
+  return response.data
+}
+
+export async function getAdminMetrics(): Promise<AdminMetricsResponse> {
+  const response = await apiClient.get<AdminMetricsResponse>('/api/admin/metrics')
+  return response.data
+}
+
+export async function getAdminLogTail(service: 'hub' | 'worker' | 'scheduler'): Promise<AdminLogTailResponse> {
+  const response = await apiClient.get<AdminLogTailResponse>(`/api/admin/logs/${service}`)
   return response.data
 }
 

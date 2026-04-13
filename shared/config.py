@@ -16,6 +16,9 @@ class ConfigKeys:
     AUTO_SYNC = "auto_sync"
     AUTO_SYNC_INTERVAL = "auto_sync_interval"
     LAST_SYNC_TIME = "last_sync_time"
+    LAST_SUCCESSFUL_SYNC_TIME = "last_successful_sync_time"
+    LAST_SYNC_RESULT = "last_sync_result"
+    LAST_SYNC_ERROR = "last_sync_error"
     SYNC_STATUS = "sync_status"
     AUTO_SHORT_SUMMARY = "auto_short_summary"
     RETENTION_HOURS = "retention_hours"
@@ -26,6 +29,9 @@ SYSTEM_SCOPED_CONFIG_KEYS = {
     ConfigKeys.SYNC_LIMIT,
     ConfigKeys.AUTO_SYNC,
     ConfigKeys.AUTO_SYNC_INTERVAL,
+    ConfigKeys.LAST_SUCCESSFUL_SYNC_TIME,
+    ConfigKeys.LAST_SYNC_RESULT,
+    ConfigKeys.LAST_SYNC_ERROR,
     ConfigKeys.AUTO_SHORT_SUMMARY,
     ConfigKeys.RETENTION_HOURS,
 }

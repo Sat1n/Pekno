@@ -71,7 +71,7 @@ def _build_local_asset_url(local_asset_path: str | None) -> str | None:
         return None
 
 from hub.api import data
-from hub.api.routers import admin, annotations, auth, items, notifications, plugins, vault
+from hub.api.routers import admin, annotations, auth, items, monitor, notifications, plugins, vault
 from hub.api.mcp import mcp_app
 from hub.api.middlewares.mcp_auth import MCPAuthMiddleware
 import os
@@ -82,6 +82,7 @@ from starlette.responses import Response
 os.makedirs(os.path.join("data", "static", "keyframes"), exist_ok=True)
 os.makedirs(os.path.join("data", "uploads"), exist_ok=True)
 os.makedirs(os.path.join("data", "vault"), exist_ok=True)
+os.makedirs(os.path.join("data", "logs"), exist_ok=True)
 class CachedStaticFiles(StaticFiles):
     def file_response(self, full_path, stat_result, scope, status_code=200) -> Response:
         response = super().file_response(full_path, stat_result, scope, status_code)
@@ -100,6 +101,7 @@ app.include_router(annotations.router)
 app.include_router(vault.router)
 app.include_router(notifications.router)
 app.include_router(admin.router)
+app.include_router(monitor.router)
 protected_mcp_app = MCPAuthMiddleware(mcp_app)
 app.mount("/api/mcp", protected_mcp_app)
 

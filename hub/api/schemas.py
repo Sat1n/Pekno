@@ -173,3 +173,29 @@ class BillingSettingsResponse(BillingSettingsRequest):
     used_tokens: int
     used_cost: float
     limit_exceeded: bool
+
+
+class PluginHealthResponse(BaseModel):
+    plugin_id: str
+    name: str
+    last_successful_sync_at: Optional[datetime] = None
+    last_sync_at: Optional[datetime] = None
+    sync_status: str = "idle"
+    status: Literal["Healthy", "Stale", "Error"]
+    auto_sync: bool = False
+    auto_sync_interval: Optional[int] = None
+    last_error: Optional[str] = None
+
+
+class MonitorMetricsResponse(BaseModel):
+    rag_backlog_count: int
+    api_today_total_cost: float
+    billing_currency: Literal["USD", "CNY", "EUR"]
+    abnormal_plugin_count: int
+    plugins: List[PluginHealthResponse]
+
+
+class LogTailResponse(BaseModel):
+    service: Literal["hub", "worker", "scheduler"]
+    content: str
+    lines: int

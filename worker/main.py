@@ -1,5 +1,5 @@
 from worker.broker import broker  # 从纯净定义导入
-from shared.logger import worker_log
+from shared.logger import detect_service_name, scheduler_log, worker_log
 from taskiq.schedule_sources import LabelScheduleSource
 from taskiq.scheduler.scheduler import TaskiqScheduler
 import worker.ingestion.pipeline
@@ -10,7 +10,10 @@ scheduler = TaskiqScheduler(broker, sources=[LabelScheduleSource(broker)])
 
 @broker.on_event("startup")
 async def startup():
-    worker_log.info("🚀 Iris-Worker 正在启动，准备接入神经中枢...")
+    if detect_service_name() == "scheduler":
+        scheduler_log.info("⏰ Iris-Scheduler 已完成装配，计划任务调度器正在待命。")
+    else:
+        worker_log.info("🚀 Iris-Worker 正在启动，准备接入神经中枢...")
     
     # 动态加载插件
     from shared.database import AsyncSessionLocal
@@ -20,4 +23,7 @@ async def startup():
 
 @broker.on_event("shutdown")
 async def shutdown():
-    worker_log.info("🛑 Iris-Worker 正在安全关闭...")
+    if detect_service_name() == "scheduler":
+        scheduler_log.info("⏰ Iris-Scheduler 正在安全关闭...")
+    else:
+        worker_log.info("🛑 Iris-Worker 正在安全关闭...")

@@ -65,6 +65,8 @@ async def run_plugin_pipeline_task(plugin_id: str, limit: int = None, user_id: s
         return
 
     await ConfigManager.set_config(plugin_id, ConfigKeys.SYNC_STATUS, "running", user_id=user_id)
+    await ConfigManager.set_config(plugin_id, ConfigKeys.LAST_SYNC_RESULT, "running", user_id=user_id)
+    await ConfigManager.set_config(plugin_id, ConfigKeys.LAST_SYNC_ERROR, "", user_id=user_id)
 
     try:
         # 获取基础配置字典
@@ -78,6 +80,9 @@ async def run_plugin_pipeline_task(plugin_id: str, limit: int = None, user_id: s
         # 1. 抓取原始数据
         raw_items = await plugin.fetch_data(ctx)
         if not raw_items:
+            now_iso = datetime.datetime.now().isoformat()
+            await ConfigManager.set_config(plugin_id, ConfigKeys.LAST_SUCCESSFUL_SYNC_TIME, now_iso, user_id=user_id)
+            await ConfigManager.set_config(plugin_id, ConfigKeys.LAST_SYNC_RESULT, "success", user_id=user_id)
             if user_id:
                 await create_notification_for_user(
                     user_id,
@@ -148,6 +153,9 @@ async def run_plugin_pipeline_task(plugin_id: str, limit: int = None, user_id: s
                 await process_new_item_task.kiq(item.model_dump())
 
         worker_log.info(f"✅ [{plugin_id}] 同步指令下发完毕，共处理 {len(raw_items)} 条记录。")
+        now_iso = datetime.datetime.now().isoformat()
+        await ConfigManager.set_config(plugin_id, ConfigKeys.LAST_SUCCESSFUL_SYNC_TIME, now_iso, user_id=user_id)
+        await ConfigManager.set_config(plugin_id, ConfigKeys.LAST_SYNC_RESULT, "success", user_id=user_id)
         if user_id:
             await create_notification_for_user(
                 user_id,
@@ -160,6 +168,8 @@ async def run_plugin_pipeline_task(plugin_id: str, limit: int = None, user_id: s
 
     except Exception as e:
         worker_log.error(f"❌ [{plugin_id}] 任务执行出错: {e}")
+        await ConfigManager.set_config(plugin_id, ConfigKeys.LAST_SYNC_RESULT, "error", user_id=user_id)
+        await ConfigManager.set_config(plugin_id, ConfigKeys.LAST_SYNC_ERROR, str(e)[:500], user_id=user_id)
         if user_id:
             await create_notification_for_user(
                 user_id,
@@ -170,8 +180,9 @@ async def run_plugin_pipeline_task(plugin_id: str, limit: int = None, user_id: s
                 related_plugin_id=plugin_id,
             )
     finally:
+        now_iso = datetime.datetime.now().isoformat()
         await ConfigManager.set_config(plugin_id, ConfigKeys.SYNC_STATUS, "idle", user_id=user_id)
-        await ConfigManager.set_config(plugin_id, ConfigKeys.LAST_SYNC_TIME, datetime.datetime.now().isoformat(), user_id=user_id)
+        await ConfigManager.set_config(plugin_id, ConfigKeys.LAST_SYNC_TIME, now_iso, user_id=user_id)
 
 
 @broker.task(task_name="parse_single_plugin_item")
