@@ -2,6 +2,7 @@ import openai
 from ..base import BaseLLMProvider
 import re
 import json
+from shared.locale import build_output_language_instruction
 
 from hub.core.billing import (
     check_api_limit_or_raise,
@@ -30,14 +31,20 @@ class OllamaProvider(BaseLLMProvider):
         )
         self.model_name = model
 
-    async def generate_summary(self, text: str, length: str = "short") -> str:
+    async def generate_summary(self, text: str, length: str = "short", preferred_locale: str | None = None) -> str:
         await check_api_limit_or_raise()
+        language_instruction = build_output_language_instruction(preferred_locale)
         if length == "short":
-            prompt = f"请提取这段内容的最核心信息，生成一段30-50字的极简摘要。必须直接输出摘要结果，不要输出任何如'好的'、'这段内容'之类的解释词汇：\n{text[:2000]}"
+            prompt = (
+                "请提取这段内容的最核心信息，生成一段30-50字的极简摘要。"
+                "必须直接输出摘要结果，不要输出任何如'好的'、'这段内容'之类的解释词汇。\n"
+                f"{language_instruction}\n{text[:2000]}"
+            )
         else:
             prompt = (
                 f"你是一个开源项目分析专家。请根据这段 README 内容详细总结项目的:\n"
                 f"1. 核心功能与亮点\n2. 技术架构栈\n3. 简易部署与使用方式\n\n"
+                f"{language_instruction}\n"
                 f"字数不限，要求排版精美的 Markdown 格式，层级清晰，重点突出：\n{text[:8000]}"
             )
             
@@ -58,9 +65,12 @@ class OllamaProvider(BaseLLMProvider):
             )
         return content
 
-    async def extract_tags(self, text: str) -> list[str]:
+    async def extract_tags(self, text: str, preferred_locale: str | None = None) -> list[str]:
         await check_api_limit_or_raise()
-        prompt = f"提取3个关键词，逗号隔开：\n{text[:500]}"
+        prompt = (
+            "提取3个关键词，逗号隔开。\n"
+            f"{build_output_language_instruction(preferred_locale, style='tags')}\n{text[:500]}"
+        )
         response = await self.client.chat.completions.create(
             model=self.model_name,
             messages=[{"role": "user", "content": prompt}]
@@ -78,13 +88,14 @@ class OllamaProvider(BaseLLMProvider):
             )
         return _parse_tag_list(content)
 
-    async def understand_image(self, image_data_url: str, ocr_text: str = "") -> dict:
+    async def understand_image(self, image_data_url: str, ocr_text: str = "", preferred_locale: str | None = None) -> dict:
         await check_api_limit_or_raise()
         prompt = (
             "你是一个图片理解助手。请分析图片，并只返回 JSON 对象。"
             'JSON schema: {"short_caption": string, "detailed_summary_markdown": string, "tags": string[], '
             '"ocr_text": string, "objects": string[], "scene": string}. '
-            "不要输出额外说明。"
+            "不要输出额外说明。 "
+            f"{build_output_language_instruction(preferred_locale, style='json')}"
         )
         if ocr_text.strip():
             prompt += f"\n\n已通过本地 OCR 识别到部分文字，可作为辅助参考：\n{ocr_text[:4000]}"

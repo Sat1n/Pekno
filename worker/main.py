@@ -19,9 +19,9 @@ scheduler = TaskiqScheduler(broker, sources=[LabelScheduleSource(broker)])
 @broker.on_event("startup")
 async def startup():
     if detect_service_name() == "scheduler":
-        scheduler_log.info("⏰ Iris-Scheduler 已完成装配，计划任务调度器正在待命。")
+        scheduler_log.info("⏰ Iris-Scheduler is ready and waiting for scheduled jobs.")
     else:
-        worker_log.info("🚀 Iris-Worker 正在启动，准备接入神经中枢...")
+        worker_log.info("🚀 Iris-Worker is starting and connecting to the processing core...")
     
     # 动态加载插件
     from shared.database import AsyncSessionLocal
@@ -32,6 +32,6 @@ async def startup():
 @broker.on_event("shutdown")
 async def shutdown():
     if detect_service_name() == "scheduler":
-        scheduler_log.info("⏰ Iris-Scheduler 正在安全关闭...")
+        scheduler_log.info("⏰ Iris-Scheduler is shutting down gracefully...")
     else:
-        worker_log.info("🛑 Iris-Worker 正在安全关闭...")
+        worker_log.info("🛑 Iris-Worker is shutting down gracefully...")

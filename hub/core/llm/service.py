@@ -4,12 +4,12 @@ from hub.core import model_settings
 
 
 class LLMService:
-    async def generate_summary(self, text: str, length: str = "short") -> str:
-        summary, _ = await model_settings.generate_summary(text, length=length)
+    async def generate_summary(self, text: str, length: str = "short", preferred_locale: str | None = None) -> str:
+        summary, _ = await model_settings.generate_summary(text, length=length, preferred_locale=preferred_locale)
         return summary
 
-    async def extract_tags(self, text: str) -> List[str]:
-        tags, _ = await model_settings.extract_tags(text)
+    async def extract_tags(self, text: str, preferred_locale: str | None = None) -> List[str]:
+        tags, _ = await model_settings.extract_tags(text, preferred_locale=preferred_locale)
         return tags
 
     async def current_model_name(self, purpose: str = "short_summary") -> str:
@@ -17,8 +17,19 @@ class LLMService:
         match = next((item for item in assignments if item["key"] == purpose), None)
         return match["model"] if match else ""
 
-    async def understand_image(self, image_bytes: bytes, mime_type: str, ocr_text: str = "") -> tuple[dict, str, str]:
-        return await model_settings.understand_image(image_bytes, mime_type, ocr_text=ocr_text)
+    async def understand_image(
+        self,
+        image_bytes: bytes,
+        mime_type: str,
+        ocr_text: str = "",
+        preferred_locale: str | None = None,
+    ) -> tuple[dict, str, str]:
+        return await model_settings.understand_image(
+            image_bytes,
+            mime_type,
+            ocr_text=ocr_text,
+            preferred_locale=preferred_locale,
+        )
 
 
 class EmbeddingService:
@@ -37,11 +48,11 @@ class LLMManager:
         self.llm = LLMService()
         self.embed = EmbeddingService()
 
-    async def generate_summary(self, text: str, length: str = "short") -> str:
-        return await self.llm.generate_summary(text, length=length)
+    async def generate_summary(self, text: str, length: str = "short", preferred_locale: str | None = None) -> str:
+        return await self.llm.generate_summary(text, length=length, preferred_locale=preferred_locale)
 
-    async def extract_tags(self, text: str) -> List[str]:
-        return await self.llm.extract_tags(text)
+    async def extract_tags(self, text: str, preferred_locale: str | None = None) -> List[str]:
+        return await self.llm.extract_tags(text, preferred_locale=preferred_locale)
 
     async def get_vector(self, text: str) -> List[float]:
         return await self.embed.get_vector(text)
@@ -55,5 +66,16 @@ class LLMManager:
     async def get_embedding_model_name(self) -> str:
         return await self.embed.current_model_name()
 
-    async def understand_image(self, image_bytes: bytes, mime_type: str, ocr_text: str = "") -> tuple[dict, str, str]:
-        return await self.llm.understand_image(image_bytes, mime_type, ocr_text=ocr_text)
+    async def understand_image(
+        self,
+        image_bytes: bytes,
+        mime_type: str,
+        ocr_text: str = "",
+        preferred_locale: str | None = None,
+    ) -> tuple[dict, str, str]:
+        return await self.llm.understand_image(
+            image_bytes,
+            mime_type,
+            ocr_text=ocr_text,
+            preferred_locale=preferred_locale,
+        )

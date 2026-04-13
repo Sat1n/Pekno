@@ -5,16 +5,18 @@ from typing import Any
 from hub.core.model_settings import _build_llm_provider
 from hub.core.llm.providers.openai_adapter import OpenAIProvider
 from shared.logger import hub_log
+from shared.locale import build_output_language_instruction, normalize_preferred_locale
 
 class VideoSummaryResult(BaseModel):
     summary: str
     keyframe_timestamps: list[int]  # 推荐截取画面的整数秒数列表（1-3个）
 
-async def summarize_video_transcript(item: Any, transcript: str) -> VideoSummaryResult:
+async def summarize_video_transcript(item: Any, transcript: str, preferred_locale: str | None = None) -> VideoSummaryResult:
     """
     AI 导演总结引擎 - 防幻觉机制与复合约束注入
     将语音识别输出作为输入交给大模型，通过约束提示指令强制输出带有关键画面时间轴节点的标准结构体。
     """
+    normalized_locale = normalize_preferred_locale(preferred_locale)
     prompt = f"""你是一个专业视频分析师。请根据以下信息总结：
 
     【高信度参考资料】（利用此处的语境纠正转录错误）：
@@ -29,9 +31,10 @@ async def summarize_video_transcript(item: Any, transcript: str) -> VideoSummary
     2. 总结必须尽量写成分点结构，避免大段连续正文。
     3. 每个重点尽量带一个时间标记，推荐写成 `- [mm:ss] 重点内容`。
     4. 挑选 1-3 个最具代表性的高光画面时间戳（整数秒）。
+    5. {build_output_language_instruction(normalized_locale)}
 
     输出要求：
-    1. `summary` 字段必须是简体中文 Markdown。
+    1. `summary` 字段必须是符合语言要求的 Markdown。
     2. `summary` 开头先给一段约 50 字的总览，尽量完整交代主题、核心结论与讨论方向。
     3. 然后给出 3-6 条要点列表。
     4. 如果能从转录中定位时间，就在对应要点前标注时间；如果某条无法确定精确时间，可以不标，但整体至少尽量覆盖 2 条带时间的要点。
@@ -67,7 +70,12 @@ async def summarize_video_transcript(item: Any, transcript: str) -> VideoSummary
         return VideoSummaryResult(**data)
     except Exception as e:
         hub_log.error(f"❌ Director summary engine returned invalid structured output: {e}, raw_output={raw_output}")
+        fallback_summary = (
+            "Failed to parse the structured multimedia summary output."
+            if normalized_locale == "en"
+            else "无法解析结构化多媒体总结输出。"
+        )
         return VideoSummaryResult(
-            summary="无法解析的多媒体内容，这可能是由于大模型幻觉未能输出标准 JSON 导致的。", 
+            summary=fallback_summary,
             keyframe_timestamps=[]
         )

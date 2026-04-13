@@ -16,7 +16,7 @@ async def system_heartbeat_task():
     now = now_in_app_timezone_naive()
     next_update_at = now + timedelta(minutes=5)
     worker_log.info(
-        f"💓 系统心跳巡检开始，next update at {next_update_at.strftime('%Y-%m-%d %H:%M:%S')}"
+        f"💓 System heartbeat scan started. Next update at {next_update_at.strftime('%Y-%m-%d %H:%M:%S')}"
     )
 
     async with AsyncSessionLocal() as session:
@@ -26,7 +26,7 @@ async def system_heartbeat_task():
         plugin_ids = result.scalars().all()
 
     if not plugin_ids:
-        worker_log.info("💓 心跳巡检完成：没有启用中的插件。")
+        worker_log.info("💓 Heartbeat scan finished. No enabled plugins were found.")
         return
 
     triggered_count = 0
@@ -37,7 +37,7 @@ async def system_heartbeat_task():
 
         sync_status = await ConfigManager.get_config(plugin_id, ConfigKeys.SYNC_STATUS, "idle")
         if sync_status == "running":
-            worker_log.info(f"⏭️ [{plugin_id}] 心跳检测到任务正在运行，跳过本轮自动同步。")
+            worker_log.info(f"⏭️ [{plugin_id}] Heartbeat detected an active sync task. Skipping this auto-sync cycle.")
             continue
 
         interval_str = await ConfigManager.get_config(plugin_id, ConfigKeys.AUTO_SYNC_INTERVAL, "60")
@@ -61,16 +61,16 @@ async def system_heartbeat_task():
                 should_sync = True
 
         if should_sync:
-            worker_log.info(f"💓 [{plugin_id}] 满足自动同步条件，发送增量同步指令。")
+            worker_log.info(f"💓 [{plugin_id}] Auto-sync conditions met. Dispatching incremental sync task.")
             await run_plugin_pipeline_task.kiq(plugin_id)
             triggered_count += 1
         else:
             worker_log.info(
-                f"💓 [{plugin_id}] 自动同步未到时间，next update at {next_sync_at.strftime('%Y-%m-%d %H:%M:%S')}"
+                f"💓 [{plugin_id}] Auto-sync interval has not elapsed yet. Next update at {next_sync_at.strftime('%Y-%m-%d %H:%M:%S')}"
             )
 
     worker_log.info(
-        f"💓 心跳巡检完成：扫描 {len(plugin_ids)} 个启用插件，触发 {triggered_count} 个自动同步。"
+        f"💓 Heartbeat scan finished. Scanned {len(plugin_ids)} enabled plugins and triggered {triggered_count} auto-sync tasks."
     )
 
 async def _delete_from_vector_store(expired_ids: list[str]) -> None:
@@ -82,7 +82,7 @@ async def _delete_from_vector_store(expired_ids: list[str]) -> None:
     # the vector payload and no extra action is needed.
     if expired_ids:
         worker_log.debug(
-            f"🧠 [TTL 清理] pgvector 内嵌于 ItemORM，无需额外删除向量索引，共 {len(expired_ids)} 条。"
+            f"🧠 [TTL Cleanup] Embeddings are stored inline in ItemORM via pgvector. No separate vector deletion is required for {len(expired_ids)} items."
         )
 
 
@@ -102,7 +102,7 @@ async def cleanup_expired_items() -> int:
             )
             rows = result.all()
             worker_log.debug(
-                f"🧪 [TTL 清理] 当前应用时区={app_tz.key}，当前时间={now_local.isoformat(sep=' ', timespec='seconds')}，候选数据={len(rows)}"
+                f"🧪 [TTL Cleanup] App timezone={app_tz.key}, current_time={now_local.isoformat(sep=' ', timespec='seconds')}, candidates={len(rows)}"
             )
             expired_ids = [
                 row.id
@@ -120,20 +120,20 @@ async def cleanup_expired_items() -> int:
                 protected_ids = set(protected_result.scalars().all())
                 if protected_ids:
                     worker_log.info(
-                        f"🛡️ [TTL 清理] 检测到 {len(protected_ids)} 条已被收藏或加入稍后再看的过期数据，跳过物理销毁。"
+                        f"🛡️ [TTL Cleanup] Found {len(protected_ids)} expired items that are still favorited or marked for later. Skipping physical deletion."
                     )
                     expired_ids = [item_id for item_id in expired_ids if item_id not in protected_ids]
 
             for row in rows[:10]:
                 expires_at = row.created_at + timedelta(hours=row.retention_days)
                 worker_log.debug(
-                    f"🧪 [TTL 清理] item={row.id} created_at={row.created_at.isoformat(sep=' ', timespec='seconds')} "
+                    f"🧪 [TTL Cleanup] item={row.id} created_at={row.created_at.isoformat(sep=' ', timespec='seconds')} "
                     f"retention_hours={row.retention_days} expires_at={expires_at.isoformat(sep=' ', timespec='seconds')} "
                     f"expired={expires_at < now_local}"
                 )
 
             if not expired_ids:
-                worker_log.info("🧹 [TTL 清理] 成功销毁了 0 条过期数据。")
+                worker_log.info("🧹 [TTL Cleanup] Deleted 0 expired items.")
                 return 0
 
             await _delete_from_vector_store(expired_ids)
@@ -146,7 +146,7 @@ async def cleanup_expired_items() -> int:
             )
 
     deleted_count = delete_result.rowcount or len(expired_ids)
-    worker_log.info(f"🧹 [TTL 清理] 成功销毁了 {deleted_count} 条过期数据。")
+    worker_log.info(f"🧹 [TTL Cleanup] Deleted {deleted_count} expired items.")
     return deleted_count
 
 
@@ -159,6 +159,6 @@ async def system_ttl_cleanup_task():
     # settings once ConfigORM exposes platform-level scheduling options.
     next_cleanup_at = now_in_app_timezone_naive() + timedelta(minutes=5)
     worker_log.info(
-        f"🧹 [TTL 清理] 开始巡检，next update at {next_cleanup_at.strftime('%Y-%m-%d %H:%M:%S')}"
+        f"🧹 [TTL Cleanup] Scan started. Next update at {next_cleanup_at.strftime('%Y-%m-%d %H:%M:%S')}"
     )
     await cleanup_expired_items()

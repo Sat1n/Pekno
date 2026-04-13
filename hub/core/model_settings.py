@@ -466,16 +466,16 @@ async def _build_llm_provider(purpose: str):
     return OpenAIProvider(api_key=api_key, base_url=base_url, model=model), model
 
 
-async def generate_summary(text: str, length: str = "short") -> Tuple[str, str]:
+async def generate_summary(text: str, length: str = "short", preferred_locale: str | None = None) -> Tuple[str, str]:
     purpose = "short_summary" if length == "short" else "long_summary"
     provider, model_name = await _build_llm_provider(purpose)
-    summary = await provider.generate_summary(text, length=length)
+    summary = await provider.generate_summary(text, length=length, preferred_locale=preferred_locale)
     return summary, model_name
 
 
-async def extract_tags(text: str) -> Tuple[List[str], str]:
+async def extract_tags(text: str, preferred_locale: str | None = None) -> Tuple[List[str], str]:
     provider, model_name = await _build_llm_provider("tagging")
-    tags = await provider.extract_tags(text)
+    tags = await provider.extract_tags(text, preferred_locale=preferred_locale)
     return tags, model_name
 
 
@@ -550,11 +550,11 @@ def _normalize_image_understanding_result(payload: Dict[str, Any]) -> Dict[str, 
     if not short_caption and detailed_summary:
         short_caption = detailed_summary.splitlines()[0].strip("# ").strip()[:80]
     if not detailed_summary and short_caption:
-        details = [f"这张图片展示了：{short_caption}"]
+        details = [f"This image shows: {short_caption}"]
         if ocr_text:
-            details.append(f"## 图片文字\n\n{ocr_text}")
+            details.append(f"## OCR Text\n\n{ocr_text}")
         if objects:
-            details.append(f"## 关键元素\n\n- " + "\n- ".join(objects))
+            details.append(f"## Key Objects\n\n- " + "\n- ".join(objects))
         detailed_summary = "\n\n".join(details)
 
     return {
@@ -567,11 +567,20 @@ def _normalize_image_understanding_result(payload: Dict[str, Any]) -> Dict[str, 
     }
 
 
-async def understand_image(image_bytes: bytes, mime_type: str, ocr_text: str = "") -> Tuple[Dict[str, Any], str, str]:
+async def understand_image(
+    image_bytes: bytes,
+    mime_type: str,
+    ocr_text: str = "",
+    preferred_locale: str | None = None,
+) -> Tuple[Dict[str, Any], str, str]:
     assignment = await _resolve_assignment("image_understanding")
     provider_id = assignment["provider"]
     provider, model_name = await _build_llm_provider("image_understanding")
     image_data_url = f"data:{mime_type};base64,{base64.b64encode(image_bytes).decode('ascii')}"
-    raw_result = await provider.understand_image(image_data_url, ocr_text=ocr_text)
+    raw_result = await provider.understand_image(
+        image_data_url,
+        ocr_text=ocr_text,
+        preferred_locale=preferred_locale,
+    )
     normalized = _normalize_image_understanding_result(raw_result)
     return normalized, provider_id, model_name

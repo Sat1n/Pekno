@@ -25,6 +25,7 @@ import re
 from pathlib import Path
 from urllib.parse import quote, unquote, urlparse
 from shared.config import ConfigManager, ConfigKeys
+from shared.locale import normalize_preferred_locale
 
 
 async def _mark_item_failed_with_circuit_breaker(
@@ -370,10 +371,24 @@ def _build_plain_transcript(segments: list[dict]) -> str:
     )
 
 
-def _fallback_long_summary(item_ctx, reason: str) -> str:
+def _resolve_item_locale(metadata: dict | None, preferred_locale: str | None = None) -> str:
+    return normalize_preferred_locale(preferred_locale or (metadata or {}).get("preferred_locale"))
+
+
+def _fallback_long_summary(item_ctx, reason: str, preferred_locale: str | None = None) -> str:
     base_text = (item_ctx.summary or "").strip()
     if not base_text:
-        base_text = "The original summary is empty, so there is no fallback reference text."
+        base_text = (
+            "The original summary is empty, so there is no fallback reference text."
+            if _resolve_item_locale(item_ctx.metadata_extra, preferred_locale) == "en"
+            else "原始摘要为空，因此没有可回退的参考文本。"
+        )
+    if _resolve_item_locale(item_ctx.metadata_extra, preferred_locale) == "zh-CN":
+        return (
+            "后处理阶段失败。输入可能是纯音乐、环境音，或属于较难稳定识别的内容，因此未生成新的长篇 AI 总结。\n\n"
+            "以下保留原始简介或短摘要作为参考：\n\n"
+            f"{base_text}"
+        )
     return (
         f"Post-processing failed. The input may be pure audio, background music, or otherwise difficult "
         f"to recognize reliably, so no new long-form AI summary was produced.\n\n"
@@ -402,7 +417,12 @@ def _pick_random_keyframe_timestamps(duration_seconds: float | int | None, count
 
 
 @broker.task(task_name="process_multimedia")
-async def process_multimedia_task(item_id: str, url: str, user_id: str | None = None):
+async def process_multimedia_task(
+    item_id: str,
+    url: str,
+    user_id: str | None = None,
+    preferred_locale: str | None = None,
+):
     """
     终端多媒体 Worker 流水线：
     YTDlp 剥离音轨 -> Whisper 识别 JSON 阵列 -> AI 导演对峙转录偏差生成报告 -> 数据库双写合并
@@ -436,6 +456,7 @@ async def process_multimedia_task(item_id: str, url: str, user_id: str | None = 
     
     try:
         metadata_extra = item_ctx.metadata_extra
+        effective_locale = _resolve_item_locale(metadata_extra, preferred_locale)
         local_asset_path = item_data.local_asset_path
         duration_seconds = metadata_extra.get("duration")
 
@@ -498,7 +519,7 @@ async def process_multimedia_task(item_id: str, url: str, user_id: str | None = 
 
         if low_confidence:
             worker_log.warning(
-                "⚠️ 本次音频语言置信度过低，已跳过长总结生成，改用失败提示 + 原始简介兜底。"
+                "⚠️ Audio language confidence is too low. Falling back to the original summary instead of generating a long-form summary."
             )
 
             class FallbackSummaryResult:
@@ -510,12 +531,17 @@ async def process_multimedia_task(item_id: str, url: str, user_id: str | None = 
                 summary=_fallback_long_summary(
                     item_ctx,
                     reason=f"language_probability={language_probability:.2f}",
+                    preferred_locale=effective_locale,
                 ),
                 keyframe_timestamps=_pick_random_keyframe_timestamps(duration_seconds, count=5),
             )
         else:
             worker_log.info("🧠 Generating long-form summary with transcript correction...")
-            summary_result = await summarize_video_transcript(item_ctx, timed_transcript_text)
+            summary_result = await summarize_video_transcript(
+                item_ctx,
+                timed_transcript_text,
+                preferred_locale=effective_locale,
+            )
         
         worker_log.info(f"📝 Extracted keyframe anchors: {summary_result.keyframe_timestamps}")
         
@@ -588,6 +614,7 @@ async def process_multimedia_task(item_id: str, url: str, user_id: str | None = 
             meta["has_long_summary"] = True
             meta["long_summary"] = summary_result.summary
             meta["processing_status"] = "completed"
+            meta["preferred_locale"] = effective_locale
             if low_confidence:
                 meta["summary_fallback_reason"] = "transcription_low_confidence"
                 meta["transcription_language_probability"] = language_probability
@@ -747,15 +774,17 @@ async def _download_vault_asset_impl(item_id: str, user_id: str | None = None):
             or (item.metadata_extra or {}).get("keyframes")
         )
 
+        preferred_locale = metadata.get("preferred_locale")
+
         if item.intent in {"video", "audio"} and not already_processed:
-            await process_multimedia_task.kiq(item_id, source_url, user_id)
+            await process_multimedia_task.kiq(item_id, source_url, user_id, preferred_locale)
         elif item.intent in {"video", "audio"}:
             worker_log.info(f"⏭️ 已存在多媒体分析结果，跳过重复处理: {item_id}")
 
         if _is_pdf_item(item):
             ocr_meta = metadata.get("ocr") if isinstance(metadata.get("ocr"), dict) else {}
             if ocr_meta.get("status") not in {"processing", "completed"}:
-                await process_pdf_ocr_task.kiq(item_id, user_id)
+                await process_pdf_ocr_task.kiq(item_id, user_id, preferred_locale)
     except Exception as e:
         worker_log.error(f"❌ Vault 下载失败: {item_id} | {e}")
         metadata = dict(item.metadata_extra or {})
@@ -830,7 +859,11 @@ def _resolve_image_source_path(item: ItemORM) -> Path | None:
 
 
 @broker.task(task_name="process_image_understanding")
-async def process_image_understanding_task(item_id: str, user_id: str | None = None):
+async def process_image_understanding_task(
+    item_id: str,
+    user_id: str | None = None,
+    preferred_locale: str | None = None,
+):
     worker_log.info(f"🖼️ Starting image understanding task: {item_id}")
     cache_root = Path("data") / "cache" / "images"
     cache_root.mkdir(parents=True, exist_ok=True)
@@ -845,6 +878,7 @@ async def process_image_understanding_task(item_id: str, user_id: str | None = N
                 return
 
         metadata = dict(item.metadata_extra or {})
+        effective_locale = _resolve_item_locale(metadata, preferred_locale)
         metadata["processing_status"] = "processing"
         if metadata.get("has_long_summary") and metadata.get("image_understanding"):
             worker_log.info(f"⏭️ Skipping image understanding task because results already exist: {item_id}")
@@ -910,7 +944,12 @@ async def process_image_understanding_task(item_id: str, user_id: str | None = N
 
         ai = LLMManager()
         worker_log.info(f"🧠 Invoking image understanding model: {item_id}")
-        result, provider_id, model_name = await ai.understand_image(image_bytes, mime_type, ocr_text=ocr_text)
+        result, provider_id, model_name = await ai.understand_image(
+            image_bytes,
+            mime_type,
+            ocr_text=ocr_text,
+            preferred_locale=effective_locale,
+        )
         feature_text = _build_image_feature_text(item.title, result)
         embed_model_name = await ai.get_embedding_model_name()
         vector = await ai.get_vector(feature_text or item.title)
@@ -934,6 +973,7 @@ async def process_image_understanding_task(item_id: str, user_id: str | None = N
         metadata["long_summary"] = long_summary
         metadata["image_understanding"] = image_understanding_meta
         metadata["processing_status"] = "completed"
+        metadata["preferred_locale"] = effective_locale
         metadata.pop("image_understanding_error", None)
 
         async with AsyncSessionLocal() as session:
@@ -1000,7 +1040,11 @@ async def process_image_understanding_task(item_id: str, user_id: str | None = N
 
 
 @broker.task(task_name="process_pdf_ocr")
-async def process_pdf_ocr_task(item_id: str, user_id: str | None = None):
+async def process_pdf_ocr_task(
+    item_id: str,
+    user_id: str | None = None,
+    preferred_locale: str | None = None,
+):
     worker_log.info(f"📄 Starting PDF OCR task: {item_id}")
 
     try:
@@ -1020,6 +1064,7 @@ async def process_pdf_ocr_task(item_id: str, user_id: str | None = None):
             return
 
         metadata = dict(item.metadata_extra or {})
+        effective_locale = _resolve_item_locale(metadata, preferred_locale)
         ocr_meta = metadata.get("ocr") if isinstance(metadata.get("ocr"), dict) else {}
         if ocr_meta.get("status") == "completed" and ocr_meta.get("kind") == "pdf":
             worker_log.info(f"⏭️ Skipping PDF OCR because cached results already exist: {item_id}")
@@ -1059,6 +1104,7 @@ async def process_pdf_ocr_task(item_id: str, user_id: str | None = None):
             "error": None,
         }
         metadata["processing_status"] = "completed"
+        metadata["preferred_locale"] = effective_locale
 
         values = {
             "metadata_extra": metadata,
@@ -1167,7 +1213,11 @@ async def process_pdf_ocr_task(item_id: str, user_id: str | None = None):
 
 
 @broker.task(task_name="process_uploaded_text_document")
-async def process_uploaded_text_document_task(item_id: str, user_id: str | None = None):
+async def process_uploaded_text_document_task(
+    item_id: str,
+    user_id: str | None = None,
+    preferred_locale: str | None = None,
+):
     worker_log.info(f"📝 Starting uploaded text analysis task: {item_id}")
     mime_type = ""
 
@@ -1180,6 +1230,7 @@ async def process_uploaded_text_document_task(item_id: str, user_id: str | None 
                 return
 
         metadata = dict(item.metadata_extra or {})
+        effective_locale = _resolve_item_locale(metadata, preferred_locale)
         mime_type = str(metadata.get("mime_type") or "").lower()
         if mime_type not in {
             "text/plain",
@@ -1224,15 +1275,20 @@ async def process_uploaded_text_document_task(item_id: str, user_id: str | None 
         content_text = "\n\n".join(part for part in [user_supplied_summary, text_content] if part).strip()
 
         if not content_text:
-            raise ValueError("文档中未提取到可用文本")
+            raise ValueError("No usable text was extracted from the document.")
 
         ai = LLMManager()
-        short_summary = await ai.generate_summary(content_text or item.title, length="short")
-        tags = await ai.extract_tags(content_text or item.title)
+        short_summary = await ai.generate_summary(
+            content_text or item.title,
+            length="short",
+            preferred_locale=effective_locale,
+        )
+        tags = await ai.extract_tags(content_text or item.title, preferred_locale=effective_locale)
         feature_text = "\n".join(part for part in [item.title, content_text, " ".join(tags)] if part).strip()
         vector = await ai.get_vector(feature_text or item.title)
 
         metadata["processing_status"] = "completed"
+        metadata["preferred_locale"] = effective_locale
         metadata.pop("text_processing_error", None)
         metadata.pop("docx_extract_error", None)
         async with AsyncSessionLocal() as session:

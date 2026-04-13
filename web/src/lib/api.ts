@@ -89,6 +89,8 @@ apiClient.interceptors.request.use((config) => {
     config.headers = config.headers ?? {}
     config.headers.Authorization = `Bearer ${token}`
   }
+  config.headers = config.headers ?? {}
+  config.headers['Accept-Language'] = String(i18n.global.locale.value || 'en')
   return config
 })
 

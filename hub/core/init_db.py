@@ -7,12 +7,12 @@ from shared.logger import hub_log
 
 
 async def ensure_runtime_tables():
-    """在应用启动时补齐缺失的数据表，不破坏现有业务数据。"""
+    """Create any missing runtime tables without destroying existing data."""
     async with engine.begin() as conn:
-        hub_log.info("🧪 正在检查并开启 pgvector 扩展...")
+        hub_log.info("🧪 Checking and enabling the pgvector extension...")
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
 
-        hub_log.info("🧱 正在补齐缺失的数据表...")
+        hub_log.info("🧱 Creating missing runtime tables and indexes...")
         await conn.run_sync(Base.metadata.create_all)
         # MVP 阶段先用轻量 schema bootstrap，后续可迁移到 Alembic。
         await conn.execute(text("ALTER TABLE IF EXISTS configs ADD COLUMN IF NOT EXISTS user_id VARCHAR DEFAULT 'system'"))
@@ -109,8 +109,8 @@ END $$;
         await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_api_usage_model_name ON api_usage (model_name)"))
         await conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_system_configs_key ON system_configs (key)"))
         
-        # 确保内置插件始终存在于注册表中 (即使不运行 init_db 也能在第一次启动时载入)
-        hub_log.info("🌱 正在检查并补齐内置插件...")
+        # Ensure built-in plugins always exist in the registry, even on first boot.
+        hub_log.info("🌱 Ensuring built-in plugins exist in the registry...")
         await conn.execute(text("""
             INSERT INTO plugins (plugin_id, name, module_path, is_enabled, version, installed_at)
             VALUES ('github_stars', 'GitHub Stars', 'worker.plugins.github.plugin', true, '1.0.0', CURRENT_TIMESTAMP)
@@ -120,19 +120,19 @@ END $$;
 
 async def init_db():
     async with engine.begin() as conn:
-        hub_log.info("🧪 正在检查并开启 pgvector 扩展...")
-        # 必须先执行这个，否则 Vector(1536) 字段会报错
+        hub_log.info("🧪 Checking and enabling the pgvector extension...")
+        # This must run before table creation, otherwise Vector(1536) fields will fail.
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-        
-        hub_log.info("🗑️ 正在清空旧数据表...")
+
+        hub_log.info("🗑️ Dropping existing database tables...")
         await conn.run_sync(Base.metadata.drop_all)
-        
-        hub_log.info("🏗️ 正在创建所有数据库表...")
-        # 自动扫描所有继承自 Base 的模型（即我们的 ItemORM）
+
+        hub_log.info("🏗️ Creating all database tables...")
+        # Automatically discover all SQLAlchemy models inheriting from Base.
         await conn.run_sync(Base.metadata.create_all)
-        
-        hub_log.info("🌱 正在植入生命之种 (初始化插件)...")
-        # 插入 GitHub 插件作为第一颗种子
+
+        hub_log.info("🌱 Seeding built-in plugins...")
+        # Insert the GitHub plugin as the first seed.
         stmt = insert(PluginRegistryORM).values(
             plugin_id="github_stars",
             name="GitHub Stars",
@@ -142,7 +142,7 @@ async def init_db():
         )
         await conn.execute(stmt)
         
-    hub_log.info("✅ 数据库初始化完成！Iris 的记忆神殿已建成。")
+    hub_log.info("✅ Database initialization completed successfully.")
 
 if __name__ == "__main__":
     asyncio.run(init_db())

@@ -183,7 +183,13 @@ async def run_plugin_pipeline_task(plugin_id: str, limit: int = None, user_id: s
 
 
 @broker.task(task_name="parse_single_plugin_item")
-async def parse_single_plugin_item_task(plugin_id: str, url: str, user_id: str, retention_days: int = -1):
+async def parse_single_plugin_item_task(
+    plugin_id: str,
+    url: str,
+    user_id: str,
+    retention_days: int = -1,
+    preferred_locale: str | None = None,
+):
     plugin = plugin_manager.get_plugin(plugin_id)
     if not plugin:
         worker_log.warning(f"⚠️ Plugin {plugin_id} was not found on first lookup. Reloading registry and retrying...")
@@ -217,6 +223,8 @@ async def parse_single_plugin_item_task(plugin_id: str, url: str, user_id: str, 
         final_metadata = dict(normalized.get("metadata_extra") or {})
         final_metadata.update(raw_metadata)
         final_metadata["has_long_summary"] = False
+        if preferred_locale:
+            final_metadata["preferred_locale"] = preferred_locale
 
         retention_value = retention_days
         if retention_value == -1:
@@ -248,7 +256,12 @@ async def parse_single_plugin_item_task(plugin_id: str, url: str, user_id: str, 
 
 
 @broker.task(task_name="summarize_repo")
-async def summarize_repo_task(item_id: str, task_id: str, user_id: str | None = None):
+async def summarize_repo_task(
+    item_id: str,
+    task_id: str,
+    user_id: str | None = None,
+    preferred_locale: str | None = None,
+):
     """
     Backward-compatible AI summary task entrypoint kept for frontend compatibility.
     """
@@ -296,7 +309,8 @@ async def summarize_repo_task(item_id: str, task_id: str, user_id: str | None = 
         
         from hub.core.llm.service import LLMManager
         ai = LLMManager()
-        summary = await ai.generate_summary(text_to_summarize, length="long")
+        locale = preferred_locale or (item.metadata_extra or {}).get("preferred_locale")
+        summary = await ai.generate_summary(text_to_summarize, length="long", preferred_locale=locale)
 
         async with AsyncSessionLocal() as session:
             new_metadata_extra = dict(item.metadata_extra) if item.metadata_extra else {}

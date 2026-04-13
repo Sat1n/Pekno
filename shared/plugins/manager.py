@@ -89,12 +89,12 @@ class PluginManager:
         manifest = self._inject_global_settings(plugin.manifest)
         plugin_id = manifest.get("id")
         if not plugin_id:
-            hub_log.error("❌ 无法注册插件：未找到 plugin id")
+            hub_log.error("❌ Failed to register plugin: plugin id is missing.")
             return
         
         plugin._manifest = manifest
         self.plugins[plugin_id] = plugin
-        hub_log.info(f"🧩 插件已注册: {manifest.get('name')} ({plugin_id})")
+        hub_log.info(f"🧩 Plugin registered: {manifest.get('name')} ({plugin_id})")
 
     def get_plugin(self, plugin_id: str) -> Optional[BasePlugin]:
         return self.plugins.get(plugin_id)
@@ -104,7 +104,7 @@ class PluginManager:
     
     async def load_enabled_plugins(self, session):
         """动态加载已启用的插件"""
-        hub_log.info("🔌 开始加载已启用的插件...")
+        hub_log.info("🔌 Loading enabled plugins...")
         
         # 1. 查询已启用的插件
         result = await session.execute(
@@ -113,14 +113,14 @@ class PluginManager:
         enabled_plugins = result.scalars().all()
         
         if not enabled_plugins:
-            hub_log.info("⚠️ 没有找到已启用的插件")
+            hub_log.info("⚠️ No enabled plugins were found.")
             return
 
         for plugin_record in enabled_plugins:
             try:
                 # 2. 动态导入模块
                 module_path = plugin_record.module_path
-                hub_log.info(f"🔍 正在加载模块: {module_path}")
+                hub_log.info(f"🔍 Loading module: {module_path}")
                 module = importlib.import_module(module_path)
                 
                 # 3. 扫描并实例化 BasePlugin 子类
@@ -155,7 +155,7 @@ class PluginManager:
                                         # 合并文件配置（文件中的 schema 等更详细）
                                         manifest_data.update(file_manifest)
                                 except Exception as e:
-                                    hub_log.error(f"读取 manifest.json 失败: {e}")
+                                    hub_log.error(f"Failed to read manifest.json: {e}")
                                     
                         plugin_instance._manifest = manifest_data
                         self.register(plugin_instance)
@@ -163,10 +163,10 @@ class PluginManager:
                         break
                 
                 if not found:
-                    hub_log.warning(f"⚠️ 在模块 {module_path} 中未找到匹配的插件类")
+                    hub_log.warning(f"⚠️ No matching plugin class was found in module {module_path}")
                     
             except Exception as e:
-                hub_log.error(f"❌ 加载插件 {plugin_record.plugin_id} 失败: {e}")
+                hub_log.error(f"❌ Failed to load plugin {plugin_record.plugin_id}: {e}")
 
 # 全局单例
 plugin_manager = PluginManager()

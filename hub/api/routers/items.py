@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import and_, delete, select
@@ -17,6 +17,7 @@ from shared.config import ConfigManager
 from hub.core.security import get_current_user
 from shared.database import AsyncSessionLocal
 from shared.logger import hub_log
+from shared.locale import normalize_preferred_locale
 from shared.models import ItemORM, UserItemStateORM, VaultCategoryORM
 from shared.plugins.base import BasePlugin
 from shared.plugins.manager import plugin_manager
@@ -249,6 +250,11 @@ def _is_text_upload_mime(mime_type: str) -> bool:
     )
 
 
+def _resolve_preferred_locale(request: Request | None) -> str:
+    header_value = request.headers.get("Accept-Language") if request else None
+    return normalize_preferred_locale(header_value)
+
+
 def _is_pdf_item(item: ItemORM) -> bool:
     metadata = item.metadata_extra or {}
     mime_type = str(
@@ -423,7 +429,7 @@ async def ensure_vault_asset(item_id: str, current_user=Depends(get_current_user
     return _to_item_response(item, state)
 
 
-async def _queue_video_summary_if_needed(item: ItemORM, user_id: str | None = None):
+async def _queue_video_summary_if_needed(item: ItemORM, user_id: str | None = None, preferred_locale: str | None = None):
     if item.intent != "video":
         return
 
@@ -434,12 +440,12 @@ async def _queue_video_summary_if_needed(item: ItemORM, user_id: str | None = No
     try:
         from worker.tasks import process_multimedia_task
 
-        await process_multimedia_task.kiq(item.id, item.raw_link, user_id)
+        await process_multimedia_task.kiq(item.id, item.raw_link, user_id, preferred_locale)
     except Exception:
         hub_log.exception("Failed to dispatch video summary task")
 
 
-async def _queue_image_summary_if_needed(item: ItemORM, user_id: str | None = None):
+async def _queue_image_summary_if_needed(item: ItemORM, user_id: str | None = None, preferred_locale: str | None = None):
     if item.intent != "image":
         return
 
@@ -450,12 +456,12 @@ async def _queue_image_summary_if_needed(item: ItemORM, user_id: str | None = No
     try:
         from worker.tasks import process_image_understanding_task
 
-        await process_image_understanding_task.kiq(item.id, user_id)
+        await process_image_understanding_task.kiq(item.id, user_id, preferred_locale)
     except Exception:
         hub_log.exception("Failed to dispatch image understanding task")
 
 
-async def _queue_text_processing_if_needed(item: ItemORM, user_id: str | None = None):
+async def _queue_text_processing_if_needed(item: ItemORM, user_id: str | None = None, preferred_locale: str | None = None):
     metadata = item.metadata_extra or {}
     mime_type = str(metadata.get("mime_type") or "").lower()
     if not _is_text_upload_mime(mime_type):
@@ -467,12 +473,12 @@ async def _queue_text_processing_if_needed(item: ItemORM, user_id: str | None = 
     try:
         from worker.tasks import process_uploaded_text_document_task
 
-        await process_uploaded_text_document_task.kiq(item.id, user_id)
+        await process_uploaded_text_document_task.kiq(item.id, user_id, preferred_locale)
     except Exception:
         hub_log.exception("Failed to dispatch uploaded text analysis task")
 
 
-async def _queue_pdf_ocr_if_needed(item: ItemORM, user_id: str | None = None):
+async def _queue_pdf_ocr_if_needed(item: ItemORM, user_id: str | None = None, preferred_locale: str | None = None):
     if not _is_pdf_item(item):
         return
 
@@ -486,7 +492,7 @@ async def _queue_pdf_ocr_if_needed(item: ItemORM, user_id: str | None = None):
     try:
         from worker.tasks import process_pdf_ocr_task
 
-        await process_pdf_ocr_task.kiq(item.id, user_id)
+        await process_pdf_ocr_task.kiq(item.id, user_id, preferred_locale)
     except Exception:
         hub_log.exception("Failed to dispatch PDF OCR task")
 
@@ -552,6 +558,7 @@ async def get_parse_plugins(current_user=Depends(get_current_user)):
 
 @router.post("/upload", response_model=ItemResponse)
 async def upload_item(
+    request: Request,
     file: UploadFile = File(...),
     title: Optional[str] = Form(default=None),
     summary: Optional[str] = Form(default=None),
@@ -559,6 +566,7 @@ async def upload_item(
     auto_favorite: bool = Form(default=False),
     current_user=Depends(get_current_user),
 ):
+    preferred_locale = _resolve_preferred_locale(request)
     UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
 
     original_name = file.filename or "upload.bin"
@@ -590,13 +598,13 @@ async def upload_item(
             state = await _ensure_user_item_state(current_user["id"], existing_item.id)
 
         if existing_item.intent == "video":
-            await _queue_video_summary_if_needed(existing_item, current_user["id"])
+            await _queue_video_summary_if_needed(existing_item, current_user["id"], preferred_locale)
         elif existing_item.intent == "image":
-            await _queue_image_summary_if_needed(existing_item, current_user["id"])
+            await _queue_image_summary_if_needed(existing_item, current_user["id"], preferred_locale)
         elif _is_pdf_item(existing_item):
-            await _queue_pdf_ocr_if_needed(existing_item, current_user["id"])
+            await _queue_pdf_ocr_if_needed(existing_item, current_user["id"], preferred_locale)
         else:
-            await _queue_text_processing_if_needed(existing_item, current_user["id"])
+            await _queue_text_processing_if_needed(existing_item, current_user["id"], preferred_locale)
 
         response_item = _to_item_response(existing_item, state)
         return JSONResponse(
@@ -625,6 +633,7 @@ async def upload_item(
         "file_size": len(content),
         "has_long_summary": False,
         "processing_status": "queued",
+        "preferred_locale": preferred_locale,
     }
     if intent == "image":
         metadata_extra["cover_url"] = public_path
@@ -654,22 +663,24 @@ async def upload_item(
     item, state = await _fetch_item_for_user(item_id, current_user["id"])
 
     if intent == "video":
-        await _queue_video_summary_if_needed(item, current_user["id"])
+        await _queue_video_summary_if_needed(item, current_user["id"], preferred_locale)
     elif intent == "image":
-        await _queue_image_summary_if_needed(item, current_user["id"])
+        await _queue_image_summary_if_needed(item, current_user["id"], preferred_locale)
     elif _is_pdf_item(item):
-        await _queue_pdf_ocr_if_needed(item, current_user["id"])
+        await _queue_pdf_ocr_if_needed(item, current_user["id"], preferred_locale)
     elif _is_text_upload_mime(mime_type):
-        await _queue_text_processing_if_needed(item, current_user["id"])
+        await _queue_text_processing_if_needed(item, current_user["id"], preferred_locale)
 
     return _to_item_response(item, state)
 
 
 @router.post("/parse", status_code=202)
 async def parse_item_url(
+    request: Request,
     payload: ParseItemRequest = Body(...),
     current_user=Depends(get_current_user),
 ):
+    preferred_locale = _resolve_preferred_locale(request)
     plugin = await _resolve_plugin(payload.plugin_name)
     if not hasattr(plugin, "parse_single_item"):
         raise HTTPException(status_code=400, detail=f"Plugin {payload.plugin_name} does not support single-item parsing.")
@@ -682,6 +693,7 @@ async def parse_item_url(
             payload.url,
             current_user["id"],
             payload.retention_days,
+            preferred_locale,
         )
     except Exception as exc:
         hub_log.exception("Failed to dispatch single-item parse task")
@@ -726,7 +738,8 @@ async def toggle_item_watch_later(item_id: str, current_user=Depends(get_current
 
 
 @router.post("/{item_id}/favorite", response_model=ItemStateResponse)
-async def toggle_item_favorite(item_id: str, current_user=Depends(get_current_user)):
+async def toggle_item_favorite(item_id: str, request: Request, current_user=Depends(get_current_user)):
+    preferred_locale = _resolve_preferred_locale(request)
     should_queue_download = False
     should_queue_video_summary = False
     should_queue_image_summary = False
@@ -759,11 +772,11 @@ async def toggle_item_favorite(item_id: str, current_user=Depends(get_current_us
     if should_queue_download:
         await _queue_vault_download_if_needed(item_id, item, current_user["id"])
     if should_queue_video_summary:
-        await _queue_video_summary_if_needed(item, current_user["id"])
+        await _queue_video_summary_if_needed(item, current_user["id"], preferred_locale)
     if should_queue_image_summary:
-        await _queue_image_summary_if_needed(item, current_user["id"])
+        await _queue_image_summary_if_needed(item, current_user["id"], preferred_locale)
     if should_queue_pdf_ocr:
-        await _queue_pdf_ocr_if_needed(item, current_user["id"])
+        await _queue_pdf_ocr_if_needed(item, current_user["id"], preferred_locale)
 
     return ItemStateResponse(
         item_id=item_id,
@@ -872,7 +885,8 @@ async def assign_item_vault_category(
 
 
 @router.post("/{item_id}/summarize")
-async def summarize_item(item_id: str, current_user=Depends(get_current_user)):
+async def summarize_item(item_id: str, request: Request, current_user=Depends(get_current_user)):
+    preferred_locale = _resolve_preferred_locale(request)
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             select(ItemORM)
@@ -898,7 +912,7 @@ async def summarize_item(item_id: str, current_user=Depends(get_current_user)):
                 "message": "This video already has multimedia analysis results. No new run is needed.",
             }
         from worker.tasks import process_multimedia_task
-        await process_multimedia_task.kiq(item_id, item.raw_link, current_user["id"])
+        await process_multimedia_task.kiq(item_id, item.raw_link, current_user["id"], preferred_locale)
         msg = "The AI multimedia analysis pipeline has started. Audio extraction and keyframe generation are in progress."
     elif item.intent == "image":
         if metadata.get("has_long_summary") and metadata.get("image_understanding"):
@@ -908,11 +922,11 @@ async def summarize_item(item_id: str, current_user=Depends(get_current_user)):
                 "message": "This image already has image-understanding results. No new run is needed.",
             }
         from worker.tasks import process_image_understanding_task
-        await process_image_understanding_task.kiq(item_id, current_user["id"])
+        await process_image_understanding_task.kiq(item_id, current_user["id"], preferred_locale)
         msg = "The image understanding task has started. Visual description and OCR extraction are in progress."
     else:
         from worker.plugins.pipeline import summarize_repo_task
-        await summarize_repo_task.kiq(item_id, task_id, current_user["id"])
+        await summarize_repo_task.kiq(item_id, task_id, current_user["id"], preferred_locale)
         msg = "The AI summary task has started. Please check back shortly."
 
     return {
