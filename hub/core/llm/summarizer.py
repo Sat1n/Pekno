@@ -66,7 +66,7 @@ async def summarize_video_transcript(item: Any, transcript: str) -> VideoSummary
         data = json.loads(raw_output)
         return VideoSummaryResult(**data)
     except Exception as e:
-        hub_log.error(f"❌ 导演引擎结构化解析受损: {e}, 源文本: {raw_output}")
+        hub_log.error(f"❌ Director summary engine returned invalid structured output: {e}, raw_output={raw_output}")
         return VideoSummaryResult(
             summary="无法解析的多媒体内容，这可能是由于大模型幻觉未能输出标准 JSON 导致的。", 
             keyframe_timestamps=[]

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import MainLayout from '@/layouts/MainLayout.vue'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -15,6 +16,7 @@ import {
   type AdminMetricsResponse,
   type AdminUsageTrendResponse,
   type PluginHealthItem,
+  resolveApiErrorMessage,
 } from '@/lib/api'
 import { useToast } from '@/components/ui/toast/use-toast'
 import { Toaster } from '@/components/ui/toast'
@@ -25,6 +27,7 @@ import { LineChart } from 'echarts/charts'
 import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components'
 
 use([CanvasRenderer, LineChart, GridComponent, TooltipComponent, LegendComponent])
+const { t } = useI18n()
 
 type LogService = 'hub' | 'worker' | 'scheduler'
 type HighlightLevel = 'debug' | 'info' | 'warning' | 'error' | 'critical'
@@ -71,21 +74,21 @@ const logFilterOptions: Array<{ label: string; value: LogFilterLevel }> = [
 
 const cards = computed(() => [
   {
-    title: 'RAG 积压数',
+    title: t('dashboard.ragBacklog'),
     value: metrics.value?.rag_backlog_count ?? 0,
-    description: '等待摘要、OCR 或向量补齐的内容',
+    description: t('dashboard.ragBacklogDesc'),
     icon: Waves,
   },
   {
-    title: 'API 今日总消耗',
+    title: t('dashboard.apiTodayCost'),
     value: `${metrics.value?.billing_currency || 'USD'} ${(metrics.value?.api_today_total_cost || 0).toFixed(4)}`,
-    description: '按当前主要货币折算',
+    description: t('dashboard.apiTodayCostDesc'),
     icon: Flame,
   },
   {
-    title: '异常插件数',
+    title: t('dashboard.abnormalPlugins'),
     value: metrics.value?.abnormal_plugin_count ?? 0,
-    description: '状态为 Stale 或 Error 的插件',
+    description: t('dashboard.abnormalPluginsDesc'),
     icon: Server,
   },
 ])
@@ -99,15 +102,23 @@ const warningBanner = computed(() => {
   if (ratio >= 1) {
     return {
       variant: 'critical' as const,
-      title: 'API 熔断器已触发 / 额度耗尽',
-      description: `本月已使用 ${usedValue} / ${data.api_limit_value} ${data.api_limit_type === 'token' ? 'tokens' : data.currency}，新的模型请求会被直接拦截。`,
+      title: t('dashboard.circuitTriggered'),
+      description: t('dashboard.circuitTriggeredDesc', {
+        usedValue,
+        limitValue: data.api_limit_value,
+        unit: data.api_limit_type === 'token' ? 'tokens' : data.currency,
+      }),
     }
   }
   if (ratio >= (data.warning_threshold_ratio || 0.9)) {
     return {
       variant: 'warning' as const,
-      title: 'API 熔断预警',
-      description: `当前已使用 ${usedValue} / ${data.api_limit_value} ${data.api_limit_type === 'token' ? 'tokens' : data.currency}，请留意预算消耗。`,
+      title: t('dashboard.circuitWarning'),
+      description: t('dashboard.circuitWarningDesc', {
+        usedValue,
+        limitValue: data.api_limit_value,
+        unit: data.api_limit_type === 'token' ? 'tokens' : data.currency,
+      }),
     }
   }
   return null
@@ -157,7 +168,7 @@ const chartOption = computed(() => {
     },
     series: [
       {
-        name: isCostMode ? `API 消耗 (${data?.currency || 'USD'})` : 'API Token 消耗',
+        name: isCostMode ? `API (${data?.currency || 'USD'})` : 'API Tokens',
         type: 'line',
         smooth: true,
         symbol: 'circle',
@@ -184,7 +195,7 @@ const chartOption = computed(() => {
 })
 
 const parsedLogLines = computed(() => {
-  const raw = logContent.value[activeLogTab.value] || '暂无日志'
+  const raw = logContent.value[activeLogTab.value] || 'No logs yet'
   return raw.split('\n').map((line) => ({
     text: line,
     level: classifyLogLine(line),
@@ -207,9 +218,9 @@ function classifyLogLine(line: string): HighlightLevel {
 }
 
 function formatTime(value?: string | null) {
-  if (!value) return '从未成功同步'
+  if (!value) return 'Never synced successfully'
   const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return '未知时间'
+  if (Number.isNaN(date.getTime())) return t('common.unknownTime')
   return date.toLocaleString()
 }
 
@@ -237,10 +248,10 @@ async function loadMetrics() {
     metrics.value = metricsResponse
     usageTrend.value = usageTrendResponse
   } catch (error: any) {
-    console.error('加载监控指标失败:', error)
+    console.error('Failed to load admin metrics:', error)
     toast({
-      title: '加载监控指标失败',
-      description: error?.response?.data?.detail || '无法获取管理员监控数据。',
+      title: 'Failed to load admin metrics',
+      description: resolveApiErrorMessage(error),
       variant: 'destructive',
     })
   } finally {
@@ -253,10 +264,10 @@ async function loadLog(service: LogService) {
   loadingLog.value[service] = true
   try {
     const response = await getAdminLogTail(service)
-    logContent.value[service] = response.content || '暂无日志'
+    logContent.value[service] = response.content || 'No logs yet'
   } catch (error: any) {
-    console.error(`加载 ${service} 日志失败:`, error)
-    logContent.value[service] = error?.response?.data?.detail || '日志读取失败'
+    console.error(`Failed to load ${service} logs:`, error)
+    logContent.value[service] = resolveApiErrorMessage(error, 'errors.fallback')
   } finally {
     loadingLog.value[service] = false
     await scrollLogToBottom()
@@ -272,14 +283,14 @@ async function handleRetryPlugin(plugin: PluginHealthItem) {
   try {
     await triggerPluginSyncApi(plugin.plugin_id)
     toast({
-      title: '手动重试已触发',
-      description: `${plugin.name} 已加入同步队列。`,
+      title: t('dashboard.retryTriggered'),
+      description: t('dashboard.retryTriggeredDesc', { pluginName: plugin.name }),
     })
     await loadMetrics()
   } catch (error: any) {
     toast({
-      title: '重试失败',
-      description: error?.response?.data?.detail || '无法触发插件同步。',
+      title: t('dashboard.retryFailed'),
+      description: resolveApiErrorMessage(error),
       variant: 'destructive',
     })
   } finally {
@@ -293,15 +304,15 @@ async function handleForceProcess() {
   try {
     const response = await forceProcessQueue()
     toast({
-      title: '队列已唤醒',
+      title: t('dashboard.queueWoken'),
       description: response.message,
     })
     await Promise.all([loadMetrics(), loadLog('worker')])
     activeLogTab.value = 'worker'
   } catch (error: any) {
     toast({
-      title: '唤醒失败',
-      description: error?.response?.data?.detail || '无法重投待处理队列。',
+      title: t('dashboard.queueWakeFailed'),
+      description: resolveApiErrorMessage(error),
       variant: 'destructive',
     })
   } finally {
@@ -337,24 +348,24 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <MainLayout search-placeholder="搜索中控数据..." @search="void 0" @add-content="void 0">
+  <MainLayout :search-placeholder="t('layout.search')" @search="void 0" @add-content="void 0">
     <div class="space-y-8">
       <div class="flex items-center justify-between gap-4">
         <div>
-          <h1 class="text-3xl font-bold tracking-tight">Homelab Dashboard</h1>
+          <h1 class="text-3xl font-bold tracking-tight">{{ t('dashboard.title') }}</h1>
           <p class="mt-1 text-sm text-muted-foreground">
-            管理员统一查看预算熔断、队列积压、插件健康与多容器日志。
+            {{ t('dashboard.subtitle') }}
           </p>
         </div>
         <Button :disabled="isLoadingMetrics" @click="handleRefresh">
           <Loader2 v-if="isLoadingMetrics" class="mr-2 h-4 w-4 animate-spin" />
           <RefreshCw v-else class="mr-2 h-4 w-4" />
-          刷新看板
+          {{ t('dashboard.refresh') }}
         </Button>
       </div>
 
       <div v-if="!isAdmin" class="rounded-2xl border bg-card p-8 text-center text-muted-foreground">
-        当前账号不是管理员，无法查看系统监控看板。
+        {{ t('dashboard.notAdmin') }}
       </div>
 
       <template v-else>
@@ -386,14 +397,14 @@ onBeforeUnmount(() => {
               <div>
                 <CardTitle class="flex items-center gap-2">
                   <Flame class="h-5 w-5 text-primary" />
-                  API 燃烧雷达
+                  {{ t('dashboard.apiUsageRadar') }}
                 </CardTitle>
                 <p class="mt-1 text-sm text-muted-foreground">
-                  展示最近 7 天的 API 消耗趋势，并结合当前限额状态给出预警。
+                  {{ t('dashboard.apiUsageRadarDesc') }}
                 </p>
               </div>
               <Badge variant="outline">
-                {{ usageTrend?.api_limit_type === 'cost' ? '按金额熔断' : '按 Token 熔断' }}
+                {{ usageTrend?.api_limit_type === 'cost' ? t('dashboard.costMode') : t('dashboard.tokenMode') }}
               </Badge>
             </CardHeader>
             <CardContent>
@@ -415,7 +426,7 @@ onBeforeUnmount(() => {
                   <p class="mt-2 text-xs text-muted-foreground">{{ card.description }}</p>
                 </div>
                 <Button
-                  v-if="card.title === 'RAG 积压数'"
+                  v-if="card.title === t('dashboard.ragBacklog')"
                   variant="destructive"
                   size="sm"
                   class="shrink-0"
@@ -424,7 +435,7 @@ onBeforeUnmount(() => {
                 >
                   <Loader2 v-if="isForceProcessing" class="mr-2 h-3.5 w-3.5 animate-spin" />
                   <Rocket v-else class="mr-2 h-3.5 w-3.5" />
-                  唤醒队列
+                  {{ t('dashboard.forceProcess') }}
                 </Button>
               </div>
             </CardContent>
@@ -435,12 +446,12 @@ onBeforeUnmount(() => {
           <Card class="border-border/60">
             <CardHeader class="flex flex-row items-start justify-between gap-4">
               <div>
-                <CardTitle>插件健康墙</CardTitle>
+                <CardTitle>{{ t('dashboard.pluginsWall') }}</CardTitle>
                 <p class="mt-1 text-sm text-muted-foreground">
-                  根据最后成功同步时间、自动同步周期与最近执行结果综合判断。
+                  {{ t('dashboard.pluginsWallDesc') }}
                 </p>
               </div>
-              <Badge variant="outline">{{ metrics?.plugins.length || 0 }} 个插件</Badge>
+              <Badge variant="outline">{{ metrics?.plugins.length || 0 }} plugins</Badge>
             </CardHeader>
             <CardContent>
               <div class="space-y-3">
@@ -456,13 +467,13 @@ onBeforeUnmount(() => {
                         <Badge :variant="statusVariant(plugin.status)">{{ plugin.status }}</Badge>
                       </div>
                       <p class="mt-1 text-xs text-muted-foreground">
-                        上次成功同步：{{ formatTime(plugin.last_successful_sync_at) }}
+                        {{ t('dashboard.lastSuccessfulSync') }}: {{ formatTime(plugin.last_successful_sync_at) }}
                       </p>
                       <p class="mt-1 text-xs text-muted-foreground">
-                        最近任务状态：{{ plugin.sync_status }}<span v-if="plugin.auto_sync"> · 自动同步 {{ plugin.auto_sync_interval }} 分钟</span>
+                        {{ t('dashboard.latestTaskStatus') }}: {{ plugin.sync_status }}<span v-if="plugin.auto_sync"> · auto sync every {{ plugin.auto_sync_interval }} min</span>
                       </p>
                       <p v-if="plugin.last_error" class="mt-2 text-xs text-destructive line-clamp-2">
-                        最近错误：{{ plugin.last_error }}
+                        Latest error: {{ plugin.last_error }}
                       </p>
                     </div>
                     <Button
@@ -473,13 +484,13 @@ onBeforeUnmount(() => {
                     >
                       <Loader2 v-if="retryingPlugins[plugin.plugin_id]" class="mr-2 h-3.5 w-3.5 animate-spin" />
                       <RefreshCw v-else class="mr-2 h-3.5 w-3.5" />
-                      手动重试
+                      {{ t('dashboard.manualRetry') }}
                     </Button>
                   </div>
                 </div>
 
                 <div v-if="!(metrics?.plugins.length)" class="rounded-2xl border border-dashed p-6 text-center text-sm text-muted-foreground">
-                  当前没有可监控的启用插件。
+                  {{ t('dashboard.noPlugins') }}
                 </div>
               </div>
             </CardContent>
@@ -489,10 +500,10 @@ onBeforeUnmount(() => {
             <CardHeader>
               <CardTitle class="flex items-center gap-2">
                 <TerminalSquare class="h-5 w-5 text-primary" />
-                深渊终端
+                {{ t('dashboard.terminal') }}
               </CardTitle>
               <p class="mt-1 text-sm text-muted-foreground">
-                黑底终端视图，自动滚动到底部，并支持按日志等级筛选与高亮。
+                {{ t('dashboard.terminalDesc') }}
               </p>
             </CardHeader>
             <CardContent class="space-y-4">
@@ -511,7 +522,7 @@ onBeforeUnmount(() => {
 
                 <label class="flex items-center gap-2 rounded-md border border-border/70 bg-background/70 px-3 py-1.5 text-xs text-muted-foreground">
                   <Filter class="h-3.5 w-3.5" />
-                  <span>Filter</span>
+                  <span>{{ t('dashboard.filter') }}</span>
                   <select
                     v-model="logFilterLevel"
                     class="bg-transparent text-foreground outline-none"
@@ -529,7 +540,7 @@ onBeforeUnmount(() => {
 
               <div class="overflow-hidden rounded-2xl border border-zinc-800 bg-[#1e1e1e]">
                 <div class="flex items-center justify-between border-b border-zinc-800 px-4 py-2 text-xs text-zinc-400">
-                  <span>{{ activeLogTab.toUpperCase() }} LOG TAIL</span>
+                    <span>{{ activeLogTab.toUpperCase() }} {{ t('dashboard.logTail') }}</span>
                   <span>{{ filteredLogLines.length }} / {{ parsedLogLines.length }} lines</span>
                 </div>
                 <div
@@ -539,7 +550,7 @@ onBeforeUnmount(() => {
                 >
                   <div v-if="loadingLog[activeLogTab]" class="flex h-full min-h-[28rem] items-center justify-center text-sm text-zinc-300">
                     <Loader2 class="mr-2 h-4 w-4 animate-spin" />
-                    正在读取 {{ activeLogTab }} 日志...
+                    {{ t('dashboard.readingLogs', { service: activeLogTab.toUpperCase() }) }}
                   </div>
                   <div v-else-if="filteredLogLines.length" class="space-y-0.5">
                     <div
@@ -562,7 +573,7 @@ onBeforeUnmount(() => {
                     </div>
                   </div>
                   <div v-else class="flex h-full min-h-[28rem] items-center justify-center text-sm text-zinc-400">
-                    当前筛选等级下没有可显示的日志。
+                    {{ t('dashboard.noLogsForLevel') }}
                   </div>
                 </div>
               </div>

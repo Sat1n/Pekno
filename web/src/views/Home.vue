@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { marked } from 'marked'
 import MainLayout from '@/layouts/MainLayout.vue'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
@@ -24,7 +25,7 @@ import {
   SheetTitle
 } from '@/components/ui/sheet'
 import { Github, Tv, FileText, MoreVertical, Sparkles, Clock3, Clock4, ExternalLink, Trash2, Star, Loader2, Download, X, Upload, Link2, Heart, HeartOff } from 'lucide-vue-next'
-import { API_BASE_URL, getItems, search, summarizeItem, getItemSummaryStatus, getStoredAuthUser, toggleItemWatchLater, toggleItemFavorite, markItemsReadBatch, getActivePlugins, getParsePlugins, getHoverBlocks, uploadItem, parseItemUrl, type RawItem, type SearchResult, type ActivePlugin, type HoverResponse, type UploadDedupResponse } from '@/lib/api'
+import { API_BASE_URL, getItems, search, summarizeItem, getItemSummaryStatus, getStoredAuthUser, toggleItemWatchLater, toggleItemFavorite, markItemsReadBatch, getActivePlugins, getParsePlugins, getHoverBlocks, uploadItem, parseItemUrl, resolveApiErrorMessage, type RawItem, type SearchResult, type ActivePlugin, type HoverResponse, type UploadDedupResponse } from '@/lib/api'
 import HoverPreview from '@/components/HoverPreview.vue'
 import { useToast } from '@/components/ui/toast/use-toast'
 import { Toaster } from '@/components/ui/toast'
@@ -72,16 +73,16 @@ const parsePluginName = ref('bilibili_sync')
 const parseUrl = ref('')
 const isSubmittingContent = ref(false)
 const route = useRoute()
-const currentUsername = computed(() => getStoredAuthUser().username || '管理员')
+const currentUsername = computed(() => getStoredAuthUser().username || t('common.guest'))
 const initialAnchorItemId = ref<string | null>(null)
 const isWatchLaterPage = computed(() => route.name === 'watch-later')
-const pageTitle = computed(() => isWatchLaterPage.value ? '稍后再看' : `欢迎回来，${currentUsername.value}`)
+const pageTitle = computed(() => isWatchLaterPage.value ? t('home.watchLaterTitle') : t('home.welcomeBack', { username: currentUsername.value }))
 const pageSubtitle = computed(() => {
   if (isLoading.value) {
-    return '正在加载数据...'
+    return t('home.loadingData')
   }
   if (isWatchLaterPage.value) {
-    return `${currentUsername.value} 当前暂存了 ${searchResults.value.length} 条稍后再看`
+    return t('home.watchLaterCount', { username: currentUsername.value, count: searchResults.value.length })
   }
   
   let unreadCount = searchResults.value.length
@@ -98,11 +99,11 @@ const pageSubtitle = computed(() => {
   }
 
   if (activeSource.value === 'all') {
-    return `iris 更新并整理了 ${unreadCount} 条资料`
+    return t('home.updatesReady', { count: unreadCount })
   } else {
     const plugin = activePlugins.value.find(p => p.source_type === activeSource.value)
     const pluginName = plugin ? plugin.name : activeSource.value
-    return `${pluginName} 有 ${unreadCount} 条更新`
+    return t('home.pluginUpdates', { pluginName, count: unreadCount })
   }
 })
 
@@ -114,7 +115,7 @@ const pendingReadIds = new Set<string>()
 
 const renderedSummary = computed(() => {
   const raw = selectedItem.value?.long_summary || selectedItem.value?.summary || ''
-  if (!raw) return '<p class="text-muted-foreground">暂无 AI 总结，点击生成按钮开始总结...</p>'
+  if (!raw) return `<p class="text-muted-foreground">${t('home.aiSummaryMissing')}</p>`
   const normalized = raw.replace(/\\n/g, '\n')
   return marked.parse(normalized) as string
 })
@@ -159,6 +160,7 @@ function handleCardMouseLeave(item: LocalSearchResult) {
 }
 
 const { toast } = useToast()
+const { t } = useI18n()
 
 const SUPPORTED_STATIC_IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'webp', 'bmp'])
 const SUPPORTED_VIDEO_EXTENSIONS = new Set(['mp4', 'webm', 'mov', 'm4v', 'mkv', 'avi'])
@@ -176,7 +178,7 @@ function validateUploadFile(file: File): string | null {
   const mime = (file.type || '').toLowerCase()
 
   if (ext === 'gif' || mime === 'image/gif') {
-    return 'GIF 动图暂不支持上传，请改用 PNG、JPG、WEBP 或 BMP。'
+    return 'GIF uploads are not supported. Please use PNG, JPG, WEBP, or BMP instead.'
   }
 
   if (SUPPORTED_STATIC_IMAGE_EXTENSIONS.has(ext) || SUPPORTED_STATIC_IMAGE_MIME_TYPES.has(mime)) {
@@ -184,7 +186,7 @@ function validateUploadFile(file: File): string | null {
   }
 
   if (mime.startsWith('image/')) {
-    return '当前仅支持 PNG、JPG/JPEG、WEBP、BMP 静态图片上传。'
+    return 'Only PNG, JPG/JPEG, WEBP, and BMP static images are supported.'
   }
 
   if (SUPPORTED_VIDEO_EXTENSIONS.has(ext) || SUPPORTED_VIDEO_MIME_TYPES.has(mime)) {
@@ -192,7 +194,7 @@ function validateUploadFile(file: File): string | null {
   }
 
   if (mime.startsWith('video/')) {
-    return '当前仅支持 MP4、WEBM、MOV、M4V、MKV、AVI 等常见视频格式。'
+    return 'Only common video formats such as MP4, WEBM, MOV, M4V, MKV, and AVI are supported.'
   }
 
   if (SUPPORTED_AUDIO_EXTENSIONS.has(ext) || SUPPORTED_AUDIO_MIME_TYPES.has(mime)) {
@@ -200,7 +202,7 @@ function validateUploadFile(file: File): string | null {
   }
 
   if (mime.startsWith('audio/')) {
-    return '当前仅支持 MP3、WAV、M4A、AAC、FLAC、OGG、WEBM 等常见音频格式。'
+    return 'Only common audio formats such as MP3, WAV, M4A, AAC, FLAC, OGG, and WEBM are supported.'
   }
 
   if (SUPPORTED_TEXT_EXTENSIONS.has(ext) || SUPPORTED_TEXT_MIME_TYPES.has(mime)) {
@@ -212,33 +214,33 @@ function validateUploadFile(file: File): string | null {
   }
 
   if (['doc', 'docm', 'xls', 'xlsx', 'ppt', 'pptx'].includes(ext)) {
-    return '当前仅支持 DOCX，其他 Office 文档请先转换为 PDF、TXT 或 Markdown。'
+    return 'Only DOCX is supported right now. Please convert other Office files to PDF, TXT, or Markdown first.'
   }
 
-  return '当前仅支持静态图片、常见视频音频、PDF、TXT、Markdown 与 DOCX 上传。'
+  return 'Only static images, common video/audio formats, PDF, TXT, Markdown, and DOCX uploads are supported.'
 }
 
 function formatRelativeTime(input?: string) {
-  if (!input) return '未知时间'
+  if (!input) return t('common.unknownTime')
 
   const date = new Date(input)
-  if (Number.isNaN(date.getTime())) return '未知时间'
+  if (Number.isNaN(date.getTime())) return t('common.unknownTime')
 
   const diffMs = Date.now() - date.getTime()
   const diffMinutes = Math.max(0, Math.floor(diffMs / 60000))
 
-  if (diffMinutes < 1) return '刚刚'
-  if (diffMinutes < 60) return `${diffMinutes}分钟前`
+  if (diffMinutes < 1) return t('common.justNow')
+  if (diffMinutes < 60) return t('common.minutesAgo', { count: diffMinutes })
 
   const diffHours = Math.floor(diffMinutes / 60)
-  if (diffHours < 24) return `${diffHours}小时前`
-  if (diffHours < 48) return '昨天'
+  if (diffHours < 24) return t('common.hoursAgo', { count: diffHours })
+  if (diffHours < 48) return t('common.yesterday')
 
   const diffDays = Math.floor(diffHours / 24)
-  if (diffDays < 7) return `${diffDays}天前`
-  if (diffDays < 30) return `${Math.floor(diffDays / 7)}周前`
-  if (diffDays < 365) return `${Math.floor(diffDays / 30)}个月前`
-  return `${Math.floor(diffDays / 365)}年前`
+  if (diffDays < 7) return t('common.daysAgo', { count: diffDays })
+  if (diffDays < 30) return t('common.weeksAgo', { count: Math.floor(diffDays / 7) })
+  if (diffDays < 365) return t('common.monthsAgo', { count: Math.floor(diffDays / 30) })
+  return t('common.yearsAgo', { count: Math.floor(diffDays / 365) })
 }
 
 function mapSourceType(sourceType: string) {
@@ -269,8 +271,9 @@ function isPdfDocument(item?: LocalSearchResult | null) {
 
 const parseSupportedPlugins = computed(() => parsePlugins.value)
 
-function toPlainTextSnippet(input?: string | null, fallback: string = '暂无描述', maxLength: number = 180) {
-  if (!input) return fallback
+function toPlainTextSnippet(input?: string | null, fallback: string = '', maxLength: number = 180) {
+  const effectiveFallback = fallback || t('common.noDescription')
+  if (!input) return effectiveFallback
 
   const plainText = input
     .replace(/!\[[^\]]*\]\([^)]+\)/g, ' ')
@@ -280,7 +283,7 @@ function toPlainTextSnippet(input?: string | null, fallback: string = '暂无描
     .replace(/\s+/g, ' ')
     .trim()
 
-  if (!plainText) return fallback
+  if (!plainText) return effectiveFallback
   if (plainText.length <= maxLength) return plainText
   return `${plainText.slice(0, maxLength).trimEnd()}...`
 }
@@ -306,15 +309,15 @@ function normalizeRawItem(item: RawItem, index: number): LocalSearchResult {
   return {
     id: item.id,
     title: item.title,
-    summary: toPlainTextSnippet(item.summary || ((item as any).content_text as string | undefined) || '', '暂无描述'),
+    summary: toPlainTextSnippet(item.summary || ((item as any).content_text as string | undefined) || '', t('common.noDescription')),
     long_summary: hasLongSummary ? (typeof metadata.long_summary === 'string' ? metadata.long_summary : item.summary || undefined) : undefined,
     has_long_summary: hasLongSummary,
     cover_url: typeof metadata.cover_url === 'string' ? metadata.cover_url : undefined,
     score: Math.max(0.5, 1 - index * 0.03),
     source,
-    tags: tags.slice(0, 5).length > 0 ? tags.slice(0, 5) : ['未分类'],
+    tags: tags.slice(0, 5).length > 0 ? tags.slice(0, 5) : [t('common.uncategorized')],
     authorName,
-    displayTags: tags.slice(0, 5).length > 0 ? tags.slice(0, 5) : ['未分类'],
+    displayTags: tags.slice(0, 5).length > 0 ? tags.slice(0, 5) : [t('common.uncategorized')],
     time,
     raw_link: item.raw_link || '#',
     isRead: Boolean(item.is_read),
@@ -332,7 +335,7 @@ function normalizeSearchResult(item: SearchResult): LocalSearchResult {
   const authorName = item.source === 'bilibili' ? item.author : undefined
   const metadataExtra = (item as any).metadata_extra || {}
   const hasLongSummary = Boolean(item.has_long_summary)
-  const displaySummary = toPlainTextSnippet(item.summary || ((item as any).content_text as string | undefined), '暂无描述')
+  const displaySummary = toPlainTextSnippet(item.summary || ((item as any).content_text as string | undefined), t('common.noDescription'))
 
   return {
     ...item,
@@ -340,7 +343,7 @@ function normalizeSearchResult(item: SearchResult): LocalSearchResult {
     long_summary: hasLongSummary && typeof item.long_summary === 'string' ? item.long_summary : undefined,
     has_long_summary: hasLongSummary,
     authorName,
-    displayTags: item.tags.length > 0 ? item.tags : ['未分类'],
+      displayTags: item.tags.length > 0 ? item.tags : [t('common.uncategorized')],
     raw_link: item.raw_link || (item.source === 'github' ? `https://github.com/${item.title}` : '#'),
     isRead: Boolean(item.is_read),
     isWatchLater: Boolean(item.is_watch_later),
@@ -404,7 +407,7 @@ async function loadData(query: string = '') {
     searchResults.value = normalized
     syncSelectedItemFromRoute()
   } catch (error) {
-    console.error('搜索失败:', error)
+    console.error('Search failed:', error)
     initialAnchorItemId.value = null
     searchResults.value = []
   } finally {
@@ -428,7 +431,7 @@ onMounted(async () => {
     activePlugins.value = await getActivePlugins()
     parsePlugins.value = await getParsePlugins()
   } catch (e) {
-    console.error('获取插件列表失败:', e)
+    console.error('Failed to load plugin list:', e)
   }
   void loadData()
   flushReadsInterval = window.setInterval(() => {
@@ -506,14 +509,14 @@ async function handleAddToWatchLater(item: LocalSearchResult) {
       isFavorited: response.is_favorited,
     })
     toast({
-      title: response.is_watch_later ? '已加入稍后再看' : '已移出稍后再看',
+      title: response.is_watch_later ? t('home.addedToWatchLater') : t('home.removedFromWatchLater'),
       description: item.title,
     })
   } catch (error) {
-    console.error('切换稍后再看失败:', error)
+    console.error('Failed to toggle watch later state:', error)
     toast({
-      title: '操作失败',
-      description: '无法更新稍后再看状态，请稍后重试',
+      title: t('home.actionFailed'),
+      description: resolveApiErrorMessage(error),
       variant: 'destructive',
     })
   }
@@ -528,21 +531,21 @@ async function handleToggleFavorite(item: LocalSearchResult) {
       isFavorited: response.is_favorited,
     })
     toast({
-      title: response.is_favorited ? '已收藏' : '已取消收藏',
+      title: response.is_favorited ? t('home.favoritedSuccess') : t('home.unfavoritedSuccess'),
       description: item.title,
     })
   } catch (error) {
-    console.error('切换收藏失败:', error)
+    console.error('Failed to toggle favorite state:', error)
     toast({
-      title: '操作失败',
-      description: '无法更新收藏状态，请稍后重试',
+      title: t('home.actionFailed'),
+      description: resolveApiErrorMessage(error),
       variant: 'destructive',
     })
   }
 }
 
 function handleClearRecord() {
-  console.log('清空记录:', selectedItem.value?.title)
+  console.log('Clearing preview item:', selectedItem.value?.title)
   isSheetOpen.value = false
   selectedItem.value = null
 }
@@ -553,7 +556,7 @@ function getKeyframeAbsoluteUrl(frameUrl: string) {
 
 function openKeyframePreview(frameUrl: string, index: number) {
   keyframePreviewUrl.value = getKeyframeAbsoluteUrl(frameUrl)
-  keyframePreviewLabel.value = `高光截图 ${index + 1}`
+  keyframePreviewLabel.value = `${t('home.keyframes')} ${index + 1}`
   keyframePreviewIndex.value = index
 }
 
@@ -577,10 +580,10 @@ async function downloadKeyframe(frameUrl: string, index: number) {
     link.remove()
     URL.revokeObjectURL(objectUrl)
   } catch (error) {
-    console.error('保存关键帧失败:', error)
+    console.error('Failed to save keyframe image:', error)
     toast({
-      title: '保存失败',
-      description: '无法保存这张高光截图，请稍后重试',
+      title: t('home.saveFailed'),
+      description: t('home.saveKeyframeFailed'),
       variant: 'destructive',
     })
   }
@@ -602,7 +605,7 @@ async function handleGenerateSummary() {
     if (response.status === 'skipped') {
       isSummarizing.value = false
       toast({
-        title: '已跳过',
+        title: t('home.skipped'),
         description: response.message,
       })
       return
@@ -610,18 +613,18 @@ async function handleGenerateSummary() {
     currentTaskId.value = response.task_id
     pendingSummaryItemId.value = itemId
 
-      toast({
-        title: '🔄 AI 总结生成中',
-        description: '请稍候，正在分析内容并生成 AI 总结...',
-      })
+    toast({
+      title: t('home.aiSummaryRunningTitle'),
+      description: t('home.aiSummaryRunningDesc'),
+    })
 
     startPollingSummaryStatus(itemId)
   } catch (error) {
-    console.error('生成 AI 总结失败:', error)
+    console.error('Failed to start AI summary generation:', error)
     isSummarizing.value = false
     toast({
-      title: '❌ 生成失败',
-      description: '无法启动 AI 总结，请检查网络连接',
+      title: t('home.aiSummaryFailedTitle'),
+      description: resolveApiErrorMessage(error),
       variant: 'destructive',
     })
   }
@@ -653,8 +656,8 @@ function startPollingSummaryStatus(itemId: string) {
         }
 
         toast({
-          title: '✨ AI 总结完成',
-          description: '已为仓库生成 AI 总结',
+          title: t('home.aiSummaryCompletedTitle'),
+          description: t('home.aiSummaryCompletedDesc'),
         })
       } else if (status.status === 'not_found') {
         if (pollInterval.value !== undefined) {
@@ -665,7 +668,7 @@ function startPollingSummaryStatus(itemId: string) {
         isSummarizing.value = false
       }
     } catch (error) {
-      console.error('查询总结状态失败:', error)
+      console.error('Failed to query summary status:', error)
     }
   }, 3000)
 }
@@ -702,7 +705,7 @@ function handleUploadFileChange(event: Event) {
     uploadFile.value = null
     target.value = ''
     toast({
-      title: '暂不支持该文件类型',
+      title: t('errors.ERR_UPLOAD_UNSUPPORTED_TYPE'),
       description: validationError,
       variant: 'destructive',
     })
@@ -728,7 +731,7 @@ async function handleSubmitUpload(autoFavorite: boolean = false) {
   const validationError = validateUploadFile(uploadFile.value)
   if (validationError) {
     toast({
-      title: '暂不支持该文件类型',
+      title: t('errors.ERR_UPLOAD_UNSUPPORTED_TYPE'),
       description: validationError,
       variant: 'destructive',
     })
@@ -749,8 +752,8 @@ async function handleSubmitUpload(autoFavorite: boolean = false) {
     selectedItem.value = normalized
     isSheetOpen.value = true
     toast({
-      title: autoFavorite ? '已上传并收藏' : '已上传',
-      description: `${normalized.title}，AI 正在后台分析。`,
+      title: autoFavorite ? t('home.uploadAndFavorited') : t('home.uploaded'),
+      description: t('home.uploadQueuedDesc', { title: normalized.title }),
     })
   } catch (error: any) {
     if (error?.response?.status === 409 && error?.response?.data?.deduplicated) {
@@ -762,14 +765,14 @@ async function handleSubmitUpload(autoFavorite: boolean = false) {
       selectedItem.value = normalized
       isSheetOpen.value = true
       toast({
-        title: autoFavorite ? '已关联并收藏现有内容' : '该文件已存在',
+        title: autoFavorite ? t('home.linkedExistingAndFavorited') : t('home.fileAlreadyExists'),
         description: dedup.message,
       })
       return
     }
     toast({
-      title: '上传失败',
-      description: error?.response?.data?.detail || '无法上传该文件，请稍后重试',
+      title: t('home.uploadFailed'),
+      description: resolveApiErrorMessage(error),
       variant: 'destructive',
     })
   } finally {
@@ -785,7 +788,7 @@ async function handleSubmitParse() {
     isAddDialogOpen.value = false
     resetAddContentDialog()
     toast({
-      title: '解析任务已提交',
+      title: t('home.parseSubmitted'),
       description: response.message,
     })
     void loadData(searchQuery.value)
@@ -797,8 +800,8 @@ async function handleSubmitParse() {
     }, 7000)
   } catch (error: any) {
     toast({
-      title: '解析失败',
-      description: error?.response?.data?.detail || '无法解析这个链接',
+      title: t('home.parseFailed'),
+      description: resolveApiErrorMessage(error),
       variant: 'destructive',
     })
   } finally {
@@ -845,7 +848,7 @@ async function flushPendingReads() {
       updateLocalItemState(itemId, { isRead: true })
     }
   } catch (error) {
-    console.error('批量已读同步失败:', error)
+    console.error('Failed to sync batch read state:', error)
   }
 }
 
@@ -988,7 +991,7 @@ watch(isAddDialogOpen, (isOpen) => {
             : 'bg-muted/50 text-muted-foreground hover:bg-muted/80 hover:text-foreground'
         ]"
       >
-        全部 (All)
+        {{ t('home.allSources') }}
       </button>
       <button 
         v-for="plugin in activePlugins" 
@@ -1035,7 +1038,7 @@ watch(isAddDialogOpen, (isOpen) => {
           class="col-span-full flex items-center gap-3 rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 text-sm text-primary"
         >
           <span class="text-base">👇</span>
-          <span class="font-medium">上次阅读到这</span>
+          <span class="font-medium">{{ t('home.resumeHere') }}</span>
         </div>
 
         <Card
@@ -1064,21 +1067,21 @@ watch(isAddDialogOpen, (isOpen) => {
           <div
             v-if="item.has_long_summary"
             class="flex h-7 w-7 items-center justify-center rounded-full bg-background/90 shadow-sm backdrop-blur-sm"
-            title="已有 AI 总结"
+            :title="t('home.alreadySummarized')"
           >
             <Star class="h-4 w-4 text-yellow-500 fill-yellow-500 animate-pulse" />
           </div>
           <div
             v-if="item.isFavorited"
             class="flex h-7 w-7 items-center justify-center rounded-full bg-background/90 shadow-sm backdrop-blur-sm"
-            title="已收藏"
+            :title="t('home.alreadyFavorited')"
           >
             <Heart class="h-4 w-4 text-red-500 fill-red-500" />
           </div>
           <div
             v-if="item.isWatchLater"
             class="flex h-7 w-7 items-center justify-center rounded-full bg-background/90 shadow-sm backdrop-blur-sm"
-            title="稍后再看"
+            :title="t('home.alreadyWatchLater')"
           >
               <Clock3 class="h-4 w-4 text-amber-600" />
           </div>
@@ -1098,15 +1101,15 @@ watch(isAddDialogOpen, (isOpen) => {
             <DropdownMenuContent align="end" class="w-48">
               <DropdownMenuItem @click.stop="handleAISummary(item)">
                 <Sparkles class="mr-2 h-4 w-4 text-primary" />
-                <span>✨ AI 总结</span>
+                <span>{{ t('home.aiSummary') }}</span>
               </DropdownMenuItem>
               <DropdownMenuItem @click.stop="handleAddToWatchLater(item)">
                   <component :is="item.isWatchLater ? Clock4 : Clock3" class="mr-2 h-4 w-4" />
-                <span>{{ item.isWatchLater ? '移出稍后再看' : '加入稍后再看' }}</span>
+                <span>{{ item.isWatchLater ? t('home.removeWatchLater') : t('home.addWatchLater') }}</span>
               </DropdownMenuItem>
               <DropdownMenuItem @click.stop="handleToggleFavorite(item)">
                 <component :is="item.isFavorited ? HeartOff : Heart" class="mr-2 h-4 w-4" />
-                <span>{{ item.isFavorited ? '取消收藏' : '收藏' }}</span>
+                <span>{{ item.isFavorited ? t('home.cancelFavorite') : t('home.favorite') }}</span>
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -1178,7 +1181,7 @@ watch(isAddDialogOpen, (isOpen) => {
               <Badge variant="outline" class="font-mono px-1.5 py-0 text-[10px] h-5 border-primary/20 bg-primary/5 text-primary">
                 {{ Math.floor(item.score * 100) }}%
               </Badge>
-              <component :is="getSourceIcon(item.source)" class="w-4 h-4" title="来源" />
+              <component :is="getSourceIcon(item.source)" class="w-4 h-4" :title="t('home.source')" />
               <span class="text-xs font-medium whitespace-nowrap">{{ item.time }}</span>
             </div>
           </div>
@@ -1188,8 +1191,8 @@ watch(isAddDialogOpen, (isOpen) => {
     </div>
 
     <div v-if="!isLoading && searchResults.length === 0" class="text-center py-20">
-      <div class="text-muted-foreground text-lg">暂无数据</div>
-      <p class="text-muted-foreground/60 text-sm mt-2">尝试搜索其他关键词或检查后端服务是否运行</p>
+      <div class="text-muted-foreground text-lg">{{ t('home.emptyTitle') }}</div>
+      <p class="text-muted-foreground/60 text-sm mt-2">{{ t('home.emptyDescription') }}</p>
     </div>
   </MainLayout>
 
@@ -1220,7 +1223,7 @@ watch(isAddDialogOpen, (isOpen) => {
             @click="openExternalLink(selectedItem.raw_link)"
           >
             <ExternalLink class="w-4 h-4 mr-1" />
-            访问
+            {{ t('home.visit') }}
           </Button>
         </div>
       </SheetHeader>
@@ -1230,7 +1233,7 @@ watch(isAddDialogOpen, (isOpen) => {
           <div v-if="selectedItem?.isLocalUpload">
             <div class="flex items-center gap-2 mb-3">
               <Upload class="w-5 h-5 text-primary" />
-              <h3 class="font-semibold text-lg">内容预览</h3>
+              <h3 class="font-semibold text-lg">{{ t('home.contentPreview') }}</h3>
             </div>
             <div class="rounded-lg border bg-muted/30 p-3">
               <img
@@ -1252,23 +1255,23 @@ watch(isAddDialogOpen, (isOpen) => {
                 class="w-full"
               />
               <div v-else-if="isPdfDocument(selectedItem)" class="flex flex-col gap-3">
-                <p class="text-sm text-muted-foreground">该 PDF 已上传完成，可直接在新标签页打开或下载查看。</p>
+                <p class="text-sm text-muted-foreground">{{ t('home.pdfUploaded') }}</p>
                 <div class="flex gap-2">
                   <Button variant="outline" @click="openExternalLink(selectedItem.raw_link)">
                     <ExternalLink class="w-4 h-4 mr-2" />
-                    打开 PDF
+                    {{ t('home.openPdf') }}
                   </Button>
                   <Button variant="outline" @click="openExternalLink(selectedItem.raw_link)">
                     <Download class="w-4 h-4 mr-2" />
-                    下载文件
+                    {{ t('home.downloadFile') }}
                   </Button>
                 </div>
               </div>
               <div v-else class="flex flex-col gap-3">
-                <p class="text-sm text-muted-foreground">此文档类型暂不支持内嵌预览，你仍然可以在新标签页打开它。</p>
+                <p class="text-sm text-muted-foreground">{{ t('home.docPreviewUnsupported') }}</p>
                 <Button variant="outline" class="w-fit" @click="openExternalLink(selectedItem.raw_link)">
                   <ExternalLink class="w-4 h-4 mr-2" />
-                  打开文件
+                  {{ t('home.openFile') }}
                 </Button>
               </div>
             </div>
@@ -1277,7 +1280,7 @@ watch(isAddDialogOpen, (isOpen) => {
           <div>
             <div class="flex items-center gap-2 mb-3">
               <Sparkles class="w-5 h-5 text-primary" />
-              <h3 class="font-semibold text-lg">AI 智能总结</h3>
+              <h3 class="font-semibold text-lg">{{ t('home.aiSummaryPanel') }}</h3>
             </div>
             <div class="bg-muted/50 rounded-lg p-4 max-h-[50vh] overflow-y-auto markdown-body">
               <div v-html="renderedSummary"></div>
@@ -1285,7 +1288,7 @@ watch(isAddDialogOpen, (isOpen) => {
           </div>
 
           <div v-if="selectedItem?.keyframes?.length" class="mt-4">
-            <h4 class="font-medium mb-3">高光胶卷快照</h4>
+            <h4 class="font-medium mb-3">{{ t('home.keyframes') }}</h4>
             <div class="overflow-x-auto pb-4">
               <div class="inline-flex min-w-max gap-3 pr-2">
                 <div
@@ -1315,7 +1318,7 @@ watch(isAddDialogOpen, (isOpen) => {
           <Separator />
 
           <div>
-            <h4 class="font-medium mb-2">标签</h4>
+            <h4 class="font-medium mb-2">{{ t('home.tags') }}</h4>
             <div class="flex flex-wrap gap-2">
               <Badge v-for="tag in selectedItem?.tags" :key="tag" variant="secondary">
                 {{ tag }}
@@ -1334,7 +1337,7 @@ watch(isAddDialogOpen, (isOpen) => {
         >
           <Loader2 v-if="isSummarizing" class="w-4 h-4 mr-2 animate-spin" />
           <Sparkles v-else class="w-4 h-4 mr-2" />
-          {{ isSummarizing ? 'AI 总结生成中...' : '生成 AI 总结' }}
+          {{ isSummarizing ? t('home.generatingAiSummary') : t('home.generateAiSummary') }}
         </Button>
         <Button
           class="w-full"
@@ -1342,7 +1345,7 @@ watch(isAddDialogOpen, (isOpen) => {
           @click="handleClearRecord"
         >
           <Trash2 class="w-4 h-4 mr-2" />
-          清空此记录
+          {{ t('home.clearRecord') }}
         </Button>
       </div>
     </SheetContent>
@@ -1352,54 +1355,54 @@ watch(isAddDialogOpen, (isOpen) => {
     <DialogContent class="sm:max-w-2xl">
       <div class="space-y-6">
         <div>
-          <h3 class="text-xl font-bold">添加内容</h3>
-          <p class="text-sm text-muted-foreground mt-1">主动把本地文件或外部链接注入到 Iris Hub 信息流。</p>
+          <h3 class="text-xl font-bold">{{ t('home.addContentTitle') }}</h3>
+          <p class="text-sm text-muted-foreground mt-1">{{ t('home.addContentDesc') }}</p>
         </div>
 
         <div class="flex gap-2 rounded-lg bg-muted/50 p-1">
           <Button :variant="addContentTab === 'upload' ? 'default' : 'ghost'" class="flex-1" @click="addContentTab = 'upload'">
             <Upload class="w-4 h-4 mr-2" />
-            本地上传
+            {{ t('home.localUpload') }}
           </Button>
           <Button :variant="addContentTab === 'parse' ? 'default' : 'ghost'" class="flex-1" @click="addContentTab = 'parse'">
             <Link2 class="w-4 h-4 mr-2" />
-            链接解析
+            {{ t('home.linkParse') }}
           </Button>
         </div>
 
         <div v-if="addContentTab === 'upload'" class="space-y-4">
           <label class="flex cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-border bg-muted/20 px-6 py-10 text-center hover:bg-muted/40 transition-colors">
             <Upload class="w-8 h-8 mb-3 text-primary" />
-            <div class="font-medium">{{ uploadFile ? uploadFile.name : '点击选择文件或拖入此处' }}</div>
-            <div class="text-sm text-muted-foreground mt-1">支持 PNG/JPG/WEBP/BMP、常见视频音频、PDF、TXT、Markdown 与 DOCX，不支持 GIF 和其他 Office 文档。</div>
+            <div class="font-medium">{{ uploadFile ? uploadFile.name : t('home.selectOrDropFile') }}</div>
+            <div class="text-sm text-muted-foreground mt-1">{{ t('home.uploadSupportDesc') }}</div>
             <input type="file" class="hidden" :accept="UPLOAD_ACCEPT" @change="handleUploadFileChange" />
           </label>
 
           <div class="space-y-2">
-            <label class="text-sm font-medium">标题（可选）</label>
-            <input v-model="uploadTitle" type="text" class="w-full rounded-md border bg-background px-3 py-2 text-sm" placeholder="默认使用文件名" />
+            <label class="text-sm font-medium">{{ t('home.optionalTitle') }}</label>
+            <input v-model="uploadTitle" type="text" class="w-full rounded-md border bg-background px-3 py-2 text-sm" :placeholder="t('home.defaultUseFilename')" />
           </div>
 
           <div class="space-y-2">
-            <label class="text-sm font-medium">描述（可选）</label>
-            <textarea v-model="uploadSummary" class="min-h-24 w-full rounded-md border bg-background px-3 py-2 text-sm" placeholder="补充一点上下文，方便以后搜索和回忆"></textarea>
+            <label class="text-sm font-medium">{{ t('home.optionalDescription') }}</label>
+            <textarea v-model="uploadSummary" class="min-h-24 w-full rounded-md border bg-background px-3 py-2 text-sm" :placeholder="t('home.uploadSummaryPlaceholder')"></textarea>
           </div>
 
           <div class="space-y-2">
-            <label class="text-sm font-medium">内容有效期</label>
+            <label class="text-sm font-medium">{{ t('home.retentionDays') }}</label>
             <select v-model="retentionDays" class="w-full rounded-md border bg-background px-3 py-2 text-sm">
-              <option :value="-1">永久保留</option>
-              <option :value="7">7 天</option>
-              <option :value="30">30 天</option>
-              <option :value="90">90 天</option>
+              <option :value="-1">{{ t('home.keepForever') }}</option>
+              <option :value="7">{{ t('settings.daysOption', { count: 7 }) }}</option>
+              <option :value="30">{{ t('settings.daysOption', { count: 30 }) }}</option>
+              <option :value="90">{{ t('settings.daysOption', { count: 90 }) }}</option>
             </select>
           </div>
 
           <div class="flex justify-end gap-2">
-            <Button variant="outline" @click="isAddDialogOpen = false">取消</Button>
+            <Button variant="outline" @click="isAddDialogOpen = false">{{ t('common.cancel') }}</Button>
             <Button :disabled="!uploadFile || isSubmittingContent" @click="handleSubmitUpload(false)">
               <Loader2 v-if="isSubmittingContent" class="w-4 h-4 mr-2 animate-spin" />
-              上传
+              {{ t('home.upload') }}
             </Button>
             <Button
               :disabled="!uploadFile || isSubmittingContent"
@@ -1408,14 +1411,14 @@ watch(isAddDialogOpen, (isOpen) => {
             >
               <Loader2 v-if="isSubmittingContent" class="w-4 h-4 mr-2 animate-spin" />
               <Heart v-else class="w-4 h-4 mr-2" />
-              上传并收藏
+              {{ t('home.uploadAndFavorite') }}
             </Button>
           </div>
         </div>
 
         <div v-else class="space-y-4">
           <div class="space-y-2">
-            <label class="text-sm font-medium">解析插件</label>
+            <label class="text-sm font-medium">{{ t('home.parsePlugin') }}</label>
             <select v-model="parsePluginName" class="w-full rounded-md border bg-background px-3 py-2 text-sm">
               <option v-for="plugin in parseSupportedPlugins" :key="plugin.id" :value="plugin.id">
                 {{ plugin.name }}
@@ -1424,26 +1427,26 @@ watch(isAddDialogOpen, (isOpen) => {
           </div>
 
           <div class="space-y-2">
-            <label class="text-sm font-medium">链接地址</label>
-            <input v-model="parseUrl" type="url" class="w-full rounded-md border bg-background px-3 py-2 text-sm" placeholder="https://www.bilibili.com/video/... 或 https://github.com/owner/repo" />
-            <p class="text-xs text-muted-foreground">如果链接特征明显，系统会自动帮你切换到对应插件。</p>
+            <label class="text-sm font-medium">{{ t('home.linkAddress') }}</label>
+            <input v-model="parseUrl" type="url" class="w-full rounded-md border bg-background px-3 py-2 text-sm" placeholder="https://www.bilibili.com/video/... or https://github.com/owner/repo" />
+            <p class="text-xs text-muted-foreground">{{ t('home.autoPluginHint') }}</p>
           </div>
 
           <div class="space-y-2">
-            <label class="text-sm font-medium">内容有效期</label>
+            <label class="text-sm font-medium">{{ t('home.retentionDays') }}</label>
             <select v-model="retentionDays" class="w-full rounded-md border bg-background px-3 py-2 text-sm">
-              <option :value="-1">永久保留</option>
-              <option :value="7">7 天</option>
-              <option :value="30">30 天</option>
-              <option :value="90">90 天</option>
+              <option :value="-1">{{ t('home.keepForever') }}</option>
+              <option :value="7">{{ t('settings.daysOption', { count: 7 }) }}</option>
+              <option :value="30">{{ t('settings.daysOption', { count: 30 }) }}</option>
+              <option :value="90">{{ t('settings.daysOption', { count: 90 }) }}</option>
             </select>
           </div>
 
           <div class="flex justify-end gap-2">
-            <Button variant="outline" @click="isAddDialogOpen = false">取消</Button>
+            <Button variant="outline" @click="isAddDialogOpen = false">{{ t('common.cancel') }}</Button>
             <Button :disabled="!parseUrl.trim() || isSubmittingContent || parseSupportedPlugins.length === 0" @click="handleSubmitParse">
               <Loader2 v-if="isSubmittingContent" class="w-4 h-4 mr-2 animate-spin" />
-              解析并加入信息流
+              {{ t('home.parseAndAdd') }}
             </Button>
           </div>
         </div>
@@ -1466,7 +1469,7 @@ watch(isAddDialogOpen, (isOpen) => {
           @click="downloadKeyframe(keyframePreviewUrl, keyframePreviewIndex)"
         >
           <Download class="w-4 h-4 mr-2" />
-          保存截图
+          {{ t('home.saveScreenshot') }}
         </Button>
         <Button
           size="icon"

@@ -102,7 +102,7 @@ def _extract_docx_text(file_path: Path) -> str:
     try:
         from docx import Document  # type: ignore
     except Exception as exc:
-        raise RuntimeError("未安装 DOCX 解析依赖 python-docx") from exc
+        raise RuntimeError("DOCX parsing dependency python-docx is not installed") from exc
 
     document = Document(str(file_path))
     parts: list[str] = []
@@ -132,7 +132,7 @@ async def _download_github_readme(
 ) -> tuple[str, str, str]:
     repo_ref = _parse_github_repo_ref(item)
     if not repo_ref:
-        raise ValueError("无法从条目中解析 GitHub 仓库信息")
+        raise ValueError("Unable to resolve GitHub repository information from the item")
 
     owner, repo = repo_ref
     github_token = await _get_github_access_token(user_id)
@@ -301,7 +301,7 @@ async def _localize_github_readme_assets(
             if not downloaded:
                 failed_assets.append(asset_url)
                 worker_log.warning(
-                    f"⚠️ README 图片下载失败: {asset_url} | tried={repo_relative_paths}"
+                    f"⚠️ README asset download failed: {asset_url} | tried={repo_relative_paths}"
                 )
 
     for original, rewritten in replacement_map.items():
@@ -373,10 +373,11 @@ def _build_plain_transcript(segments: list[dict]) -> str:
 def _fallback_long_summary(item_ctx, reason: str) -> str:
     base_text = (item_ctx.summary or "").strip()
     if not base_text:
-        base_text = "原始简介为空，暂无可回退的文本说明。"
+        base_text = "The original summary is empty, so there is no fallback reference text."
     return (
-        f"转译失败，可能为纯音频、背景音乐或难以稳定识别的内容，因此未生成新的 AI 长总结。\n\n"
-        f"作为兜底，下面保留原始简介或短摘要供参考：\n\n"
+        f"Post-processing failed. The input may be pure audio, background music, or otherwise difficult "
+        f"to recognize reliably, so no new long-form AI summary was produced.\n\n"
+        f"As a fallback, the original description or short summary is preserved below for reference:\n\n"
         f"{base_text}"
     )
 
@@ -406,14 +407,14 @@ async def process_multimedia_task(item_id: str, url: str, user_id: str | None = 
     终端多媒体 Worker 流水线：
     YTDlp 剥离音轨 -> Whisper 识别 JSON 阵列 -> AI 导演对峙转录偏差生成报告 -> 数据库双写合并
     """
-    worker_log.info(f"🎬 多媒体主引擎介入执行: {item_id} | 路径: {url}")
+    worker_log.info(f"🎬 Starting multimedia processing task: {item_id} | source={url}")
     
     # 获取 ItemORM 记录供参考
     async with AsyncSessionLocal() as session:
         result = await session.execute(ItemORM.__table__.select().where(ItemORM.id == item_id))
         item_data = result.fetchone()
         if not item_data:
-            worker_log.error(f"❌ 查无此入库任务: {item_id}")
+            worker_log.error(f"❌ Item not found for multimedia task: {item_id}")
             return
             
         class TranscribeContext:
@@ -445,10 +446,10 @@ async def process_multimedia_task(item_id: str, url: str, user_id: str | None = 
 
             if item_data.intent == "audio":
                 audio_path = str(local_source)
-                worker_log.info(f"🎧 使用 Vault 本地音频: {audio_path}")
+                worker_log.info(f"🎧 Using Vault local audio source: {audio_path}")
             else:
                 video_path = str(local_source)
-                worker_log.info(f"📹 使用 Vault 本地视频: {video_path}")
+                worker_log.info(f"📹 Using Vault local video source: {video_path}")
                 cmd = [
                     "ffmpeg", "-y",
                     "-i", video_path,
@@ -466,14 +467,14 @@ async def process_multimedia_task(item_id: str, url: str, user_id: str | None = 
                     err_text = stderr.decode("utf-8", errors="ignore").strip()
                     raise RuntimeError(f"FFmpeg 提取本地视频音轨失败: {err_text[:500]}")
                 audio_path = str(requested_audio_path)
-                worker_log.info(f"🎧 已从本地视频提取音轨: {audio_path}")
+                worker_log.info(f"🎧 Extracted audio track from local video: {audio_path}")
         else:
             stream_info = await asyncio.to_thread(YTDlpService.extract_info, url, {})
             duration_seconds = stream_info.get("duration")
 
-            worker_log.info(f"📥 核心层: YTDlp 剥离最高音质流媒体并实施本地化... 缓存目录={task_cache_dir}")
+            worker_log.info(f"📥 Downloading and localizing best-quality media stream with YTDlp... cache_dir={task_cache_dir}")
             audio_path = await asyncio.to_thread(YTDlpService.download_audio, url, str(requested_audio_path))
-            worker_log.info(f"🎧 音轨已落盘: {audio_path}")
+            worker_log.info(f"🎧 Audio track stored locally: {audio_path}")
             
         # 定位底层 Whisper 挂载型号
         assignments = await get_model_assignments()
@@ -481,14 +482,14 @@ async def process_multimedia_task(item_id: str, url: str, user_id: str | None = 
         provider = speech_cfg["provider"] if speech_cfg else "local_whisper"
         model_name = speech_cfg["model"] if speech_cfg else "small"
         
-        worker_log.info(f"🎙️ 推理层: 注入 {provider}/{model_name}...")
+        worker_log.info(f"🎙️ Inference layer engaged with {provider}/{model_name}...")
         transcript_result = await TranscriberFactory.transcribe_audio(audio_path, provider, model_name)
         segments = transcript_result.get("segments", [])
         low_confidence = bool(transcript_result.get("low_confidence"))
         language_probability = float(transcript_result.get("language_probability", 0.0) or 0.0)
         
         if not segments and not low_confidence:
-            worker_log.warning("⚠️ 沉默的流媒体: 未能捕捉有效语义切片。")
+            worker_log.warning("⚠️ Silent media detected: no meaningful transcript segments were captured.")
             return
 
         raw_transcript_json = json.dumps(segments, ensure_ascii=False)
@@ -513,28 +514,28 @@ async def process_multimedia_task(item_id: str, url: str, user_id: str | None = 
                 keyframe_timestamps=_pick_random_keyframe_timestamps(duration_seconds, count=5),
             )
         else:
-            worker_log.info("🧠 导演层: 大语言模型接入交叉融合语义纠偏...")
+            worker_log.info("🧠 Generating long-form summary with transcript correction...")
             summary_result = await summarize_video_transcript(item_ctx, timed_transcript_text)
         
-        worker_log.info(f"📝 提炼的关键帧锚点: {summary_result.keyframe_timestamps}")
+        worker_log.info(f"📝 Extracted keyframe anchors: {summary_result.keyframe_timestamps}")
         
         # 4. FFmpeg 截帧落地
         keyframes_urls = []
         if summary_result.keyframe_timestamps:
-            worker_log.info("📸 开始通过 FFmpeg 切取高光关键帧快照...")
+            worker_log.info("📸 Starting keyframe extraction with FFmpeg...")
             os.makedirs(os.path.join("data", "static", "keyframes"), exist_ok=True)
             try:
                 if local_asset_path and Path(local_asset_path).exists() and item_data.intent == "video":
                     video_path = local_asset_path
-                    worker_log.info(f"🎞️ 使用 Vault 本地视频抽取关键帧: {video_path}")
+                    worker_log.info(f"🎞️ Using Vault local video for keyframe extraction: {video_path}")
                 else:
-                    worker_log.info("📹 正在下载本地视频缓存用于关键帧抽取...")
+                    worker_log.info("📹 Downloading local video cache for keyframe extraction...")
                     video_path = await asyncio.to_thread(
                         YTDlpService.download_video_1080p,
                         url,
                         str(requested_video_path),
                     )
-                    worker_log.info(f"🎞️ 视频已落盘: {video_path}")
+                    worker_log.info(f"🎞️ Video cached locally: {video_path}")
 
                 for idx, ts in enumerate(summary_result.keyframe_timestamps):
                     filename = f"{item_id}_{idx}_{ts}.jpg"
@@ -564,11 +565,11 @@ async def process_multimedia_task(item_id: str, url: str, user_id: str | None = 
                             f"⚠️ 关键帧抽取失败 [timestamp={ts}] returncode={proc.returncode}: {err_text[:500]}"
                         )
 
-                worker_log.info(f"✅ 成功生成 {len(keyframes_urls)} 张关键帧图片")
+                worker_log.info(f"✅ Successfully generated {len(keyframes_urls)} keyframe images")
             except Exception as e:
-                worker_log.warning(f"⚠️ 关键帧流抽取中断: {e}")
+                worker_log.warning(f"⚠️ Keyframe stream extraction interrupted: {e}")
         
-        worker_log.info("💾 落地层: 将源数据与总结写入 Postgre 内核...")
+        worker_log.info("💾 Persisting source data and summary into PostgreSQL...")
         ai = LLMManager()
         feature_text = "\n\n".join(
             part for part in [
@@ -601,7 +602,7 @@ async def process_multimedia_task(item_id: str, url: str, user_id: str | None = 
                 )
             )
             await session.commit()
-            worker_log.info("🎯 多媒体终极流水线完美收官！")
+            worker_log.info("🎯 Multimedia processing pipeline completed successfully.")
         await create_notification_for_item_users(
             item_id,
             type="success",
@@ -619,7 +620,7 @@ async def process_multimedia_task(item_id: str, url: str, user_id: str | None = 
             user_id=user_id,
         )
     except Exception as e:
-        worker_log.error(f"❌ 多媒体任务核心链崩塌: {e}")
+        worker_log.error(f"❌ Multimedia processing pipeline failed: {e}")
         async with AsyncSessionLocal() as session:
             result = await session.execute(select(ItemORM).where(ItemORM.id == item_id))
             failed_item = result.scalar_one_or_none()
@@ -643,7 +644,7 @@ async def process_multimedia_task(item_id: str, url: str, user_id: str | None = 
     finally:
         if task_cache_dir.exists():
             shutil.rmtree(task_cache_dir, ignore_errors=True)
-            worker_log.info(f"🧹 已清理本次多媒体缓存目录: {task_cache_dir}")
+            worker_log.info(f"🧹 Cleaned up multimedia cache directory: {task_cache_dir}")
 
 
 async def _download_vault_asset_impl(item_id: str, user_id: str | None = None):
@@ -655,7 +656,7 @@ async def _download_vault_asset_impl(item_id: str, user_id: str | None = None):
         item = result.scalar_one_or_none()
 
     if not item:
-        worker_log.error(f"❌ Vault 下载失败，条目不存在: {item_id}")
+        worker_log.error(f"❌ Vault download failed because the item does not exist: {item_id}")
         return
 
     existing_local_path = item.local_asset_path
@@ -667,11 +668,11 @@ async def _download_vault_asset_impl(item_id: str, user_id: str | None = None):
         )
     )
     if existing_local_path and Path(existing_local_path).exists() and not needs_github_readme_backfill:
-        worker_log.info(f"⏭️ Vault 已存在本地文件，跳过重复下载: {item_id}")
+        worker_log.info(f"⏭️ Vault local asset already exists, skipping re-download: {item_id}")
         return
 
     if item.source_type == "upload":
-        worker_log.info(f"⏭️ 本地上传内容无需再次下载: {item_id}")
+        worker_log.info(f"⏭️ Local upload does not require another download: {item_id}")
         return
 
     metadata = dict(item.metadata_extra or {})
@@ -738,7 +739,7 @@ async def _download_vault_asset_impl(item_id: str, user_id: str | None = None):
                     )
                 )
 
-        worker_log.info(f"📦 Vault 资源下载完成: {item_id} -> {local_path}")
+        worker_log.info(f"📦 Vault asset download completed: {item_id} -> {local_path}")
 
         already_processed = bool(
             (item.metadata_extra or {}).get("raw_transcript")
@@ -830,7 +831,7 @@ def _resolve_image_source_path(item: ItemORM) -> Path | None:
 
 @broker.task(task_name="process_image_understanding")
 async def process_image_understanding_task(item_id: str, user_id: str | None = None):
-    worker_log.info(f"🖼️ 开始图片理解任务: {item_id}")
+    worker_log.info(f"🖼️ Starting image understanding task: {item_id}")
     cache_root = Path("data") / "cache" / "images"
     cache_root.mkdir(parents=True, exist_ok=True)
     task_cache_dir = Path(tempfile.mkdtemp(prefix=f"image_{item_id}_", dir=str(cache_root)))
@@ -840,13 +841,13 @@ async def process_image_understanding_task(item_id: str, user_id: str | None = N
             result = await session.execute(select(ItemORM).where(ItemORM.id == item_id))
             item = result.scalar_one_or_none()
             if not item:
-                worker_log.warning(f"⚠️ 图片理解任务跳过：条目不存在 {item_id}")
+                worker_log.warning(f"⚠️ Skipping image understanding task because item does not exist: {item_id}")
                 return
 
         metadata = dict(item.metadata_extra or {})
         metadata["processing_status"] = "processing"
         if metadata.get("has_long_summary") and metadata.get("image_understanding"):
-            worker_log.info(f"⏭️ 图片理解任务跳过：已有结果 {item_id}")
+            worker_log.info(f"⏭️ Skipping image understanding task because results already exist: {item_id}")
             return
 
         ocr_meta = metadata.get("ocr") if isinstance(metadata.get("ocr"), dict) else {}
@@ -895,7 +896,7 @@ async def process_image_understanding_task(item_id: str, user_id: str | None = N
                     "error": str(exc),
                 }
             except (OCRConfigError, Exception) as exc:
-                worker_log.warning(f"⚠️ 图片 OCR 失败，降级为纯视觉理解: {item_id} | {exc}")
+                worker_log.warning(f"⚠️ Image OCR failed, falling back to pure vision understanding: {item_id} | {exc}")
                 metadata["ocr"] = {
                     "kind": "image",
                     "status": "failed",
@@ -908,7 +909,7 @@ async def process_image_understanding_task(item_id: str, user_id: str | None = N
                 }
 
         ai = LLMManager()
-        worker_log.info(f"🧠 正在调用图片理解模型处理: {item_id}")
+        worker_log.info(f"🧠 Invoking image understanding model: {item_id}")
         result, provider_id, model_name = await ai.understand_image(image_bytes, mime_type, ocr_text=ocr_text)
         feature_text = _build_image_feature_text(item.title, result)
         embed_model_name = await ai.get_embedding_model_name()
@@ -949,7 +950,7 @@ async def process_image_understanding_task(item_id: str, user_id: str | None = N
                 )
             )
             await session.commit()
-        worker_log.info(f"✅ 图片理解完成: {item_id}")
+        worker_log.info(f"✅ Image understanding completed: {item_id}")
         await create_notification_for_item_users(
             item_id,
             type="success",
@@ -968,7 +969,7 @@ async def process_image_understanding_task(item_id: str, user_id: str | None = N
             extra_metadata={"image_understanding_error": exc.detail},
         )
     except Exception as e:
-        worker_log.error(f"❌ 图片理解任务失败: {item_id} | {e}")
+        worker_log.error(f"❌ Image understanding task failed: {item_id} | {e}")
         async with AsyncSessionLocal() as session:
             result = await session.execute(select(ItemORM).where(ItemORM.id == item_id))
             item = result.scalar_one_or_none()
@@ -1000,28 +1001,28 @@ async def process_image_understanding_task(item_id: str, user_id: str | None = N
 
 @broker.task(task_name="process_pdf_ocr")
 async def process_pdf_ocr_task(item_id: str, user_id: str | None = None):
-    worker_log.info(f"📄 开始 PDF OCR 任务: {item_id}")
+    worker_log.info(f"📄 Starting PDF OCR task: {item_id}")
 
     try:
         async with AsyncSessionLocal() as session:
             result = await session.execute(select(ItemORM).where(ItemORM.id == item_id))
             item = result.scalar_one_or_none()
             if not item:
-                worker_log.warning(f"⚠️ PDF OCR 任务跳过：条目不存在 {item_id}")
+                worker_log.warning(f"⚠️ Skipping PDF OCR because item does not exist: {item_id}")
                 return
 
         if not _is_pdf_item(item):
-            worker_log.info(f"⏭️ PDF OCR 任务跳过：不是 PDF {item_id}")
+            worker_log.info(f"⏭️ Skipping PDF OCR because the item is not a PDF: {item_id}")
             return
 
         if not item.local_asset_path or not Path(item.local_asset_path).exists():
-            worker_log.warning(f"⚠️ PDF OCR 任务跳过：本地文件不存在 {item_id}")
+            worker_log.warning(f"⚠️ Skipping PDF OCR because the local file is missing: {item_id}")
             return
 
         metadata = dict(item.metadata_extra or {})
         ocr_meta = metadata.get("ocr") if isinstance(metadata.get("ocr"), dict) else {}
         if ocr_meta.get("status") == "completed" and ocr_meta.get("kind") == "pdf":
-            worker_log.info(f"⏭️ PDF OCR 任务跳过：已有结果 {item_id}")
+            worker_log.info(f"⏭️ Skipping PDF OCR because cached results already exist: {item_id}")
             return
 
         metadata["ocr"] = {
@@ -1079,7 +1080,7 @@ async def process_pdf_ocr_task(item_id: str, user_id: str | None = None):
                     .values(**values)
                 )
 
-        worker_log.info(f"✅ PDF OCR 完成: {item_id}")
+        worker_log.info(f"✅ PDF OCR completed: {item_id}")
         await create_notification_for_item_users(
             item_id,
             type="success",
@@ -1089,7 +1090,7 @@ async def process_pdf_ocr_task(item_id: str, user_id: str | None = None):
             preferred_user_id=user_id,
         )
     except OCRDisabledError as exc:
-        worker_log.warning(f"⚠️ PDF OCR 已禁用: {item_id}")
+        worker_log.warning(f"⚠️ PDF OCR is disabled: {item_id}")
         async with AsyncSessionLocal() as session:
             result = await session.execute(select(ItemORM).where(ItemORM.id == item_id))
             item = result.scalar_one_or_none()
@@ -1132,7 +1133,7 @@ async def process_pdf_ocr_task(item_id: str, user_id: str | None = None):
             },
         )
     except Exception as exc:
-        worker_log.error(f"❌ PDF OCR 任务失败: {item_id} | {exc}")
+        worker_log.error(f"❌ PDF OCR task failed: {item_id} | {exc}")
         async with AsyncSessionLocal() as session:
             result = await session.execute(select(ItemORM).where(ItemORM.id == item_id))
             item = result.scalar_one_or_none()
@@ -1167,7 +1168,7 @@ async def process_pdf_ocr_task(item_id: str, user_id: str | None = None):
 
 @broker.task(task_name="process_uploaded_text_document")
 async def process_uploaded_text_document_task(item_id: str, user_id: str | None = None):
-    worker_log.info(f"📝 开始文本上传分析任务: {item_id}")
+    worker_log.info(f"📝 Starting uploaded text analysis task: {item_id}")
     mime_type = ""
 
     try:
@@ -1175,7 +1176,7 @@ async def process_uploaded_text_document_task(item_id: str, user_id: str | None 
             result = await session.execute(select(ItemORM).where(ItemORM.id == item_id))
             item = result.scalar_one_or_none()
             if not item:
-                worker_log.warning(f"⚠️ 文本上传分析任务跳过：条目不存在 {item_id}")
+                worker_log.warning(f"⚠️ Skipping uploaded text analysis because item does not exist: {item_id}")
                 return
 
         metadata = dict(item.metadata_extra or {})
@@ -1186,13 +1187,13 @@ async def process_uploaded_text_document_task(item_id: str, user_id: str | None 
             "text/x-markdown",
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         }:
-            worker_log.info(f"⏭️ 文本上传分析任务跳过：不是文本/Markdown/DOCX {item_id}")
+            worker_log.info(f"⏭️ Skipping uploaded text analysis because the item is not TXT/Markdown/DOCX: {item_id}")
             return
         if item.embedding is not None and item.tags:
-            worker_log.info(f"⏭️ 文本上传分析任务跳过：已有向量和标签 {item_id}")
+            worker_log.info(f"⏭️ Skipping uploaded text analysis because vectors and tags already exist: {item_id}")
             return
         if not item.local_asset_path or not Path(item.local_asset_path).exists():
-            worker_log.warning(f"⚠️ 文本上传分析任务跳过：本地文件不存在 {item_id}")
+            worker_log.warning(f"⚠️ Skipping uploaded text analysis because the local file is missing: {item_id}")
             return
 
         metadata["processing_status"] = "processing"
@@ -1249,7 +1250,7 @@ async def process_uploaded_text_document_task(item_id: str, user_id: str | None 
             )
             await session.commit()
 
-        worker_log.info(f"✅ 文本上传分析完成: {item_id}")
+        worker_log.info(f"✅ Uploaded text analysis completed: {item_id}")
         await create_notification_for_item_users(
             item_id,
             type="success",
@@ -1274,7 +1275,7 @@ async def process_uploaded_text_document_task(item_id: str, user_id: str | None 
             },
         )
     except Exception as exc:
-        worker_log.error(f"❌ 文本上传分析任务失败: {item_id} | {exc}")
+        worker_log.error(f"❌ Uploaded text analysis task failed: {item_id} | {exc}")
         async with AsyncSessionLocal() as session:
             result = await session.execute(select(ItemORM).where(ItemORM.id == item_id))
             item = result.scalar_one_or_none()

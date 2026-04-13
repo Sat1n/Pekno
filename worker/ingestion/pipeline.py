@@ -14,10 +14,9 @@ class IngestionPipeline:
         
 
     async def process_item(self, item: UniversalItem):
-        self.logger.info(f">>> 接收到新任务: {item.title} (ID: {item.id})")
+        self.logger.info(f">>> Received new ingestion task: {item.title} (ID: {item.id})")
 
-        # DEBUG 记录插件私有数据，防止 metadata_extra 丢失字段
-        self.logger.debug(f"DEBUG - [Entry] 插件私有元数据: {item.metadata_extra}")
+        self.logger.debug(f"DEBUG - [Entry] Plugin metadata payload: {item.metadata_extra}")
 
         try:
             core_text = self._build_core_text(item)
@@ -26,17 +25,20 @@ class IngestionPipeline:
                 item.summary = await self._generate_summary(core_text)
             else:
                 item.summary = item.content_text or item.title
-                self.logger.info(f"⏭️ 跳过 AI 短总结: {item.title} (source={item.source_type}, auto_short_summary={item.auto_short_summary})")
+                self.logger.info(
+                    f"⏭️ Skipping AI short summary: {item.title} "
+                    f"(source={item.source_type}, auto_short_summary={item.auto_short_summary})"
+                )
 
             item.tags = await self._auto_tagging(core_text)
 
             # 3. 核心：执行数据库持久化
             await self._store_to_vector_db(item, core_text)
             
-            self.logger.info(f"✅ 成功同步至 Postgres: {item.id}")
+            self.logger.info(f"✅ Successfully persisted item to Postgres: {item.id}")
             return item
         except Exception as e:
-            self.logger.error(f"❌ 入库失败 {item.id}: {str(e)}", exc_info=True)
+            self.logger.error(f"❌ Failed to ingest item {item.id}: {str(e)}", exc_info=True)
             raise e
     
     def _build_core_text(self, item: UniversalItem) -> str:
@@ -47,7 +49,7 @@ class IngestionPipeline:
         
         # 2. 调用 Embedding 服务
         embed_model_name = await self.ai.get_embedding_model_name()
-        self.logger.info(f"🧠 [Embed] 正在使用 [{embed_model_name}] 计算向量...")
+        self.logger.info(f"🧠 [Embed] Computing vector with model [{embed_model_name}]...")
         vector = await self.ai.get_vector(feature_text)
 
         # 3. 写入数据库
@@ -85,16 +87,16 @@ class IngestionPipeline:
                         index_elements=['user_id', 'item_id']
                     )
                     await session.execute(link_stmt)
-        self.logger.info(f"✨ 向量数据已成功持久化: {item.id} (Vector Dim: {len(vector)})")
+        self.logger.info(f"✨ Vector data persisted successfully: {item.id} (Vector Dim: {len(vector)})")
 
     async def _generate_summary(self, core_text: str):
         model = await self.ai.get_summary_model_name("short")
-        self.logger.info(f"🤖 [LLM] 正在请求模型 [{model}] 生成摘要...")
+        self.logger.info(f"🤖 [LLM] Requesting summary generation from model [{model}]...")
         return await self.ai.generate_summary(core_text, length="short")
 
     async def _auto_tagging(self, core_text: str):
         model = await self.ai.get_tagging_model_name()
-        self.logger.debug(f"DEBUG - [LLM] 正在使用 [{model}] 提取标签...")
+        self.logger.debug(f"DEBUG - [LLM] Extracting tags with model [{model}]...")
         return await self.ai.extract_tags(core_text)
 
 @broker.task(task_name="process_new_item")
@@ -104,7 +106,7 @@ async def process_new_item_task(item_dict: dict):
     try:
         return await pipeline.process_item(item)
     except QuotaExceededException as exc:
-        worker_log.error(f"❌ [CIRCUIT BREAKER] 入库分析已熔断: {item.id} | {exc.detail}")
+        worker_log.error(f"❌ [CIRCUIT BREAKER] Ingestion analysis blocked: {item.id} | {exc.detail}")
         async with AsyncSessionLocal() as session:
             async with session.begin():
                 existing_item = await session.get(ItemORM, item.id)

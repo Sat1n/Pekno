@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import MainLayout from '@/layouts/MainLayout.vue'
 import MarkdownContent from '@/components/MarkdownContent.vue'
 import PdfViewer from '@/components/PdfViewer.vue'
@@ -53,6 +54,7 @@ import {
   type SearchResult,
   type VaultCategory,
 } from '@/lib/api'
+const { t } = useI18n()
 
 type InspectorTab = 'summary' | 'notes'
 
@@ -121,13 +123,13 @@ const activePdfHighlight = ref<{
   rects: PdfHighlightRect[]
   kind?: 'text' | 'screenshot'
 } | null>(null)
-const pdfZoomOptions = [
-  { value: 'fit-page' as const, label: '整页' },
-  { value: 'fit-width' as const, label: '适宽' },
+const pdfZoomOptions = computed(() => [
+  { value: 'fit-page' as const, label: t('vault.fitPage') },
+  { value: 'fit-width' as const, label: t('vault.fitWidth') },
   { value: '100' as const, label: '100%' },
   { value: '125' as const, label: '125%' },
   { value: '150' as const, label: '150%' },
-]
+])
 const pendingAnnotationAnchor = ref<Record<string, any>>({})
 const videoAspect = ref<{ width: number; height: number }>({ width: 16, height: 9 })
 const videoCurrentTime = ref(0)
@@ -157,8 +159,9 @@ function toAbsoluteUrl(url?: string | null) {
   return `${API_BASE_URL}${normalizedPath}`
 }
 
-function toPlainTextSnippet(input?: string | null, fallback: string = '暂无描述', maxLength: number = 180) {
-  if (!input) return fallback
+function toPlainTextSnippet(input?: string | null, fallback: string = '', maxLength: number = 180) {
+  const effectiveFallback = fallback || t('common.noDescription')
+  if (!input) return effectiveFallback
 
   const plainText = input
     .replace(/!\[[^\]]*\]\([^)]+\)/g, ' ')
@@ -168,7 +171,7 @@ function toPlainTextSnippet(input?: string | null, fallback: string = '暂无描
     .replace(/\s+/g, ' ')
     .trim()
 
-  if (!plainText) return fallback
+  if (!plainText) return effectiveFallback
   if (plainText.length <= maxLength) return plainText
   return `${plainText.slice(0, maxLength).trimEnd()}...`
 }
@@ -176,17 +179,17 @@ function toPlainTextSnippet(input?: string | null, fallback: string = '暂无描
 function intentMeta(intent?: string | null) {
   switch (intent) {
     case 'video':
-      return { label: '视频', icon: Film }
+      return { label: t('vault.intentVideo'), icon: Film }
     case 'article':
-      return { label: '文章', icon: FileText }
+      return { label: t('vault.intentArticle'), icon: FileText }
     case 'document':
-      return { label: '文档', icon: FolderOpen }
+      return { label: t('vault.intentDocument'), icon: FolderOpen }
     case 'image':
-      return { label: '图片', icon: FileImage }
+      return { label: t('vault.intentImage'), icon: FileImage }
     case 'audio':
-      return { label: '音频', icon: FileAudio }
+      return { label: t('vault.intentAudio'), icon: FileAudio }
     default:
-      return { label: '其他', icon: Archive }
+      return { label: t('vault.intentOther'), icon: Archive }
   }
 }
 
@@ -288,7 +291,7 @@ const favoritedItemMap = computed(() => new Map(favoritedItems.value.map((item) 
 
 const uncategorizedSection = computed<VaultSection>(() => ({
   id: UNCATEGORIZED_CATEGORY_ID,
-  name: '未分类',
+  name: t('common.uncategorized'),
   color: DEFAULT_UNCATEGORIZED_COLOR,
   isSystem: true,
   items: sortItemsByDate(favoritedItems.value.filter((item) => !item.vault_category_id)),
@@ -312,7 +315,7 @@ const categorySections = computed<VaultSection[]>(() => {
 const searchResultItems = computed(() => {
   return searchResults.value.map((item) => ({
     ...item,
-    cardSummary: toPlainTextSnippet(item.content_text || item.summary || item.source_type || '', '暂无描述'),
+    cardSummary: toPlainTextSnippet(item.content_text || item.summary || item.source_type || '', t('common.noDescription')),
     intentLabel: intentMeta(item.intent).label,
   }))
 })
@@ -329,7 +332,7 @@ const summaryContent = computed(() => {
 
 const articleContent = computed(() => {
   const metadata = activeItem.value?.metadata_extra || {}
-  return metadata.vault_readme_text || activeItem.value?.content_text || activeItem.value?.summary || '暂无可阅读内容。'
+  return metadata.vault_readme_text || activeItem.value?.content_text || activeItem.value?.summary || t('common.noReadableContent')
 })
 
 const openableDocumentUrl = computed(() => toAbsoluteUrl(activeItem.value?.local_asset_url || activeItem.value?.raw_link || ''))
@@ -519,7 +522,7 @@ function mergeSearchResultIntoItem(result: SearchResult): RawItem {
     source_type: result.source_type || result.source,
     raw_link: result.raw_link || '',
     local_asset_url: result.local_asset_url,
-    summary: toPlainTextSnippet(result.summary, '暂无描述'),
+    summary: toPlainTextSnippet(result.summary, t('common.noDescription')),
     content_text: '',
     tags: result.tags || [],
     intent: result.intent || 'article',
@@ -559,7 +562,7 @@ async function performVaultSearch(rawQuery: string) {
     syncActiveItemFromRoute(mappedResults)
   } catch (error) {
     if (requestId !== activeSearchRequestId) return
-    console.error('Vault 搜索失败:', error)
+    console.error('Vault search failed:', error)
     searchResults.value = []
     activeItem.value = null
   } finally {
@@ -692,8 +695,8 @@ function captureVideoTimestamp() {
       : {}),
   }
 
-  const transcriptLine = transcript ? `> 转录：${transcript.text}\n` : ''
-  void fillAnnotationDraft(`> [${formatTimestamp(currentSeconds)}] 视频时间点\n${transcriptLine}\n我的思考：`)
+  const transcriptLine = transcript ? `> ${t('vault.transcriptLabel')}: ${transcript.text}\n` : ''
+  void fillAnnotationDraft(`> [${formatTimestamp(currentSeconds)}] ${t('vault.videoTimestampQuote')}\n${transcriptLine}\n${t('vault.myThoughtsLabel')}:`)
 }
 
 function jumpToPdfAnnotation(anchor: { page: number; selection_rects?: Array<{ x: number; y: number; width: number; height: number }> }) {
@@ -802,7 +805,7 @@ async function handleQuote(payload: {
     rects: payload.rects,
     kind: 'text',
   }
-  await fillAnnotationDraft(`> [Page ${payload.page}] ${payload.text}\n\n我的思考：`)
+  await fillAnnotationDraft(`> [Page ${payload.page}] ${payload.text}\n\n${t('vault.myThoughtsLabel')}:`)
 }
 
 async function handleMarkdownQuote(payload: {
@@ -811,7 +814,7 @@ async function handleMarkdownQuote(payload: {
   heading: string
   excerpt: string
 }) {
-  const sourceLabel = payload.mode === 'summary' ? 'AI 总结' : 'Markdown'
+  const sourceLabel = payload.mode === 'summary' ? t('vault.aiSummary') : 'Markdown'
   pendingAnnotationAnchor.value = {
     media_type: 'markdown',
     quote_type: 'text-selection',
@@ -821,7 +824,7 @@ async function handleMarkdownQuote(payload: {
     source_mode: payload.mode,
   }
   const headingLine = payload.heading ? ` · ${payload.heading}` : ''
-  await fillAnnotationDraft(`> [${sourceLabel}${headingLine}] ${payload.text}\n\n我的思考：`)
+  await fillAnnotationDraft(`> [${sourceLabel}${headingLine}] ${payload.text}\n\n${t('vault.myThoughtsLabel')}:`)
 }
 
 async function handlePdfScreenshotCapture(payload: {
@@ -855,9 +858,9 @@ async function handlePdfScreenshotCapture(payload: {
       kind: 'screenshot',
     }
 
-    await fillAnnotationDraft(`> [Page ${payload.page}] PDF 截图引用\n\n我的思考：`)
+    await fillAnnotationDraft(`> [Page ${payload.page}] ${t('vault.pdfScreenshotQuote')}\n\n${t('vault.myThoughtsLabel')}:`)
   } catch (error) {
-    console.error('上传 PDF 截图引用失败:', error)
+    console.error('Failed to upload PDF screenshot quote:', error)
   }
 }
 
@@ -922,7 +925,7 @@ async function ensureActiveVaultAsset() {
       void loadFavoritedItems()
     }, 3200)
   } catch (error) {
-    console.error('补齐 Vault README 资源失败:', error)
+    console.error('Failed to backfill Vault README assets:', error)
   } finally {
     ensuringVaultAssetIds.delete(item.id)
   }
@@ -937,7 +940,7 @@ async function assignActiveItemCategory(nextCategoryId: string) {
     )
     updateLocalItemCategory(activeItem.value.id, response.vault_category_id ?? null)
   } catch (error) {
-    console.error('更新 Vault 分类失败:', error)
+    console.error('Failed to update Vault category:', error)
   }
 }
 
@@ -953,7 +956,7 @@ async function handleCreateCategory() {
     categoryDraft.value = ''
     creatingCategory.value = false
   } catch (error) {
-    console.error('创建分类失败:', error)
+    console.error('Failed to create Vault category:', error)
   } finally {
     categoryMutationLoading.value = false
   }
@@ -987,7 +990,7 @@ async function saveCategoryRename(categoryId: string) {
     ))
     cancelRenameCategory()
   } catch (error) {
-    console.error('重命名分类失败:', error)
+    console.error('Failed to rename Vault category:', error)
   } finally {
     categoryMutationLoading.value = false
   }
@@ -997,7 +1000,7 @@ async function removeCategory(categoryId: string) {
   if (categoryMutationLoading.value) return
   const category = vaultCategories.value.find((entry) => entry.id === categoryId)
   if (!category) return
-  if (!window.confirm(`删除分类“${category.name}”后，其中的收藏会回到“未分类”。确定继续吗？`)) {
+  if (!window.confirm(t('vault.deleteCategoryConfirm', { categoryName: category.name, fallbackCategory: t('common.uncategorized') }))) {
     return
   }
 
@@ -1018,7 +1021,7 @@ async function removeCategory(categoryId: string) {
       cancelRenameCategory()
     }
   } catch (error) {
-    console.error('删除分类失败:', error)
+    console.error('Failed to delete Vault category:', error)
   } finally {
     categoryMutationLoading.value = false
   }
@@ -1118,7 +1121,7 @@ onBeforeUnmount(() => {
 <template>
   <MainLayout
     v-model:search-query="searchQuery"
-    search-placeholder="搜索收藏内容..."
+    :search-placeholder="t('layout.searchVaultContent')"
     @search="handleSearch"
   >
     <div class="flex h-[calc(100vh-5.75rem)] min-h-[640px] flex-col overflow-hidden">
@@ -1128,7 +1131,7 @@ onBeforeUnmount(() => {
             <div>
               <h2 class="text-sm font-semibold">Vault</h2>
               <p class="text-xs text-muted-foreground">
-                {{ isSearchMode ? '搜索结果按相关性直接展示。' : '按你的自定义分类组织高价值收藏。' }}
+                {{ isSearchMode ? t('vault.searchResultDirect') : t('vault.organizedByCategory') }}
               </p>
             </div>
             <div class="flex items-center gap-2">
@@ -1138,7 +1141,7 @@ onBeforeUnmount(() => {
                 size="icon"
                 variant="outline"
                 class="h-8 w-8"
-                title="新建分类"
+                :title="t('vault.newCategory')"
                 @click="creatingCategory = !creatingCategory"
               >
                 <Plus class="h-4 w-4" />
@@ -1155,13 +1158,13 @@ onBeforeUnmount(() => {
                 </template>
                 <template v-else-if="creatingCategory && !isSearchMode">
                   <div class="rounded-xl border bg-background/90 p-3">
-                    <div class="mb-2 text-xs text-muted-foreground">创建一个新的 Vault 分类</div>
+                    <div class="mb-2 text-xs text-muted-foreground">{{ t('vault.createCategoryDesc') }}</div>
                     <div class="flex items-center gap-2">
                       <input
                         v-model="categoryDraft"
                         type="text"
                         maxlength="40"
-                        placeholder="例如：研究灵感 / 论文 / 产品案例"
+                        :placeholder="t('vault.categoryPlaceholder')"
                         class="flex-1 rounded-lg border bg-background px-3 py-2 text-sm outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                         @keydown.enter.prevent="handleCreateCategory"
                       >
@@ -1177,13 +1180,13 @@ onBeforeUnmount(() => {
 
                 <template v-if="hasNoSearchResults">
                   <div class="rounded-xl border border-dashed bg-background/80 p-4 text-sm text-muted-foreground">
-                    没有找到与你的搜索匹配的收藏内容，试试换个关键词。
+                    {{ t('vault.noSearchResults') }}
                   </div>
                 </template>
                 <template v-else-if="isSearchMode">
                   <div class="space-y-1 rounded-xl border bg-background/90 p-2">
                     <div class="px-2 pb-2 text-xs text-muted-foreground">
-                      搜索结果按相关性排序展示
+                      {{ t('vault.searchSorted') }}
                     </div>
                     <button
                       v-for="item in searchResultItems"
@@ -1206,13 +1209,13 @@ onBeforeUnmount(() => {
                 </template>
                 <template v-else-if="favoritedItems.length === 0">
                   <div class="rounded-xl border border-dashed bg-background/80 p-4 text-sm text-muted-foreground">
-                    你还没有收藏任何内容，先去信息流里收藏几条，再回来搭建自己的 Vault。
+                    {{ t('vault.noFavoritesYet') }}
                   </div>
                 </template>
                 <template v-else>
                   <div v-for="section in categorySections" :key="section.id" class="rounded-xl border bg-background/90">
                     <div v-if="editingCategoryId === section.id && !section.isSystem" class="space-y-2 px-3 py-3">
-                      <div class="text-xs text-muted-foreground">重命名分类</div>
+                      <div class="text-xs text-muted-foreground">{{ t('vault.renameCategory') }}</div>
                       <div class="flex items-center gap-2">
                         <input
                           v-model="editingCategoryName"
@@ -1248,10 +1251,10 @@ onBeforeUnmount(() => {
                           </span>
                         </button>
                         <div v-if="!section.isSystem" class="flex items-center gap-1">
-                          <Button size="icon" variant="ghost" class="h-7 w-7" title="重命名分类" @click="beginRenameCategoryById(section.id)">
+                          <Button size="icon" variant="ghost" class="h-7 w-7" :title="t('vault.renameCategory')" @click="beginRenameCategoryById(section.id)">
                             <Pencil class="h-3.5 w-3.5" />
                           </Button>
-                          <Button size="icon" variant="ghost" class="h-7 w-7 text-destructive hover:text-destructive" title="删除分类" @click="removeCategory(section.id)">
+                          <Button size="icon" variant="ghost" class="h-7 w-7 text-destructive hover:text-destructive" :title="t('vault.deleteCategory')" @click="removeCategory(section.id)">
                             <Trash2 class="h-3.5 w-3.5" />
                           </Button>
                         </div>
@@ -1259,7 +1262,7 @@ onBeforeUnmount(() => {
                       <div v-if="sectionOpenState[section.id]" class="space-y-1 px-2 pb-2">
                         <template v-if="section.items.length === 0">
                           <div class="rounded-lg border border-dashed px-3 py-3 text-xs text-muted-foreground">
-                            这个分类里还没有收藏内容。
+                            {{ t('vault.emptyCategory') }}
                           </div>
                         </template>
                         <button
@@ -1273,7 +1276,7 @@ onBeforeUnmount(() => {
                             <div class="min-w-0">
                               <div class="truncate text-sm font-medium text-foreground">{{ item.title }}</div>
                               <div class="line-clamp-2 text-xs text-muted-foreground">
-                                {{ toPlainTextSnippet(item.summary || item.content_text || item.source_type, '暂无描述', 90) }}
+                                {{ toPlainTextSnippet(item.summary || item.content_text || item.source_type, t('common.noDescription'), 90) }}
                               </div>
                             </div>
                             <span :class="intentPillClass">
@@ -1296,13 +1299,13 @@ onBeforeUnmount(() => {
               <h2 class="truncate text-base font-semibold">{{ activeItem?.title || 'Reader Pane' }}</h2>
               <div v-if="activeItem" class="flex shrink-0 flex-wrap items-center justify-end gap-2">
                 <div class="flex items-center gap-2 rounded-full border bg-muted/30 px-3 py-1.5 text-sm">
-                  <span class="text-muted-foreground">归类</span>
+                  <span class="text-muted-foreground">{{ t('vault.classify') }}</span>
                   <select
                     :value="currentCategoryValue"
                     class="rounded-md border bg-background px-2 py-1 text-sm text-foreground outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                     @change="assignActiveItemCategory(($event.target as HTMLSelectElement).value)"
                   >
-                    <option :value="UNCATEGORIZED_CATEGORY_ID">未分类</option>
+                    <option :value="UNCATEGORIZED_CATEGORY_ID">{{ t('common.uncategorized') }}</option>
                     <option
                       v-for="category in vaultCategories"
                       :key="category.id"
@@ -1317,18 +1320,18 @@ onBeforeUnmount(() => {
                   <Button
                     size="sm"
                     :variant="pdfCaptureMode ? 'default' : 'outline'"
-                    title="框选当前 PDF 页面区域并创建截图引用"
+                    :title="t('vault.screenshotQuoteTooltip')"
                     @click="togglePdfCaptureMode"
                   >
                     <Camera class="mr-2 h-4 w-4" />
-                    截图引用
+                    {{ t('vault.screenshotQuote') }}
                   </Button>
                   <div
                     class="flex items-center gap-2 rounded-full border bg-muted/30 px-3 py-1.5 text-sm text-muted-foreground"
-                    title="在这里滚动鼠标滚轮可快速翻页"
+                    :title="t('vault.pageInputTooltip')"
                     @wheel.prevent="handlePdfPagerWheel"
                   >
-                    <span>第</span>
+                    <span>{{ t('vault.pagePrefix') }}</span>
                     <input
                       v-model="pdfPageInput"
                       inputmode="numeric"
@@ -1336,7 +1339,7 @@ onBeforeUnmount(() => {
                       @blur="commitPdfPageInput"
                       @keydown.enter.prevent="commitPdfPageInput"
                     >
-                    <span>/ {{ pdfViewerState.totalPages || 0 }} 页</span>
+                    <span>/ {{ pdfViewerState.totalPages || 0 }} {{ t('vault.pageSuffix') }}</span>
                   </div>
                   <div class="flex items-center gap-1 rounded-full border bg-muted/40 p-1">
                     <Button
@@ -1355,19 +1358,19 @@ onBeforeUnmount(() => {
                       size="sm"
                       variant="outline"
                       :disabled="!pdfViewerState.canGoPrev"
-                      title="上一页，支持 PageUp 或左方向键"
+                      :title="t('vault.previousPageTooltip')"
                       @click="pdfViewerRef?.goPrev()"
                     >
-                      上一页
+                      {{ t('vault.previousPage') }}
                     </Button>
                     <Button
                       size="sm"
                       variant="outline"
                       :disabled="!pdfViewerState.canGoNext"
-                      title="下一页，支持 PageDown 或右方向键"
+                      :title="t('vault.nextPageTooltip')"
                       @click="pdfViewerRef?.goNext()"
                     >
-                      下一页
+                      {{ t('vault.nextPage') }}
                     </Button>
                   </div>
                 </template>
@@ -1382,7 +1385,7 @@ onBeforeUnmount(() => {
               >
                 <template v-if="!activeItem">
                   <div class="rounded-2xl border border-dashed p-8 text-center text-muted-foreground">
-                    {{ hasNoSearchResults ? '没有匹配的收藏内容可供阅读。' : '从左侧选择一条收藏内容。' }}
+                    {{ hasNoSearchResults ? t('vault.noReadableSearchSelection') : t('vault.noReadableSelection') }}
                   </div>
                 </template>
                 <template v-else-if="activeItem.intent === 'video'">
@@ -1406,11 +1409,11 @@ onBeforeUnmount(() => {
                       >
                         <span class="flex items-center gap-2 text-sm font-medium">
                           <FileText class="h-4 w-4 text-muted-foreground" />
-                          视频转录
+                          {{ t('vault.videoTranscript') }}
                         </span>
                         <span class="flex items-center gap-2 text-xs text-muted-foreground">
-                          <span v-if="transcriptAvailable">{{ transcriptSegments.length }} 段</span>
-                          <span v-else>暂无转录</span>
+                          <span v-if="transcriptAvailable">{{ transcriptSegments.length }} {{ t('vault.segmentUnit') }}</span>
+                          <span v-else>{{ t('vault.noTranscript') }}</span>
                           <ChevronDown
                             class="h-4 w-4 transition-transform duration-200"
                             :class="transcriptCollapsed ? '-rotate-90' : 'rotate-0'"
@@ -1443,7 +1446,7 @@ onBeforeUnmount(() => {
                           </ScrollArea>
                         </div>
                         <div v-else class="px-4 py-6 text-sm text-muted-foreground">
-                          这个视频还没有可用的转录文本。只要它完成 AI 总结，多媒体转录就会自动出现在这里。
+                          {{ t('vault.transcriptUnavailable') }}
                         </div>
                       </div>
                     </div>
@@ -1493,7 +1496,7 @@ onBeforeUnmount(() => {
                     <Button as-child>
                       <a :href="openableDocumentUrl" target="_blank" rel="noopener noreferrer">
                         <ExternalLink class="mr-2 h-4 w-4" />
-                        在新标签页打开
+                        {{ t('common.openInNewTab') }}
                       </a>
                     </Button>
                   </div>
@@ -1523,7 +1526,7 @@ onBeforeUnmount(() => {
                 @click="activeInspectorTab = 'summary'"
               >
                 <Sparkles class="mr-2 h-4 w-4" />
-                AI 总结
+                {{ t('vault.aiSummary') }}
               </Button>
               <Button
                 size="sm"
@@ -1531,7 +1534,7 @@ onBeforeUnmount(() => {
                 @click="activeInspectorTab = 'notes'"
               >
                 <MessageSquareText class="mr-2 h-4 w-4" />
-                内化日志
+                {{ t('vault.notes') }}
               </Button>
             </div>
           </div>
@@ -1539,7 +1542,7 @@ onBeforeUnmount(() => {
             <ScrollArea class="h-full">
               <div class="space-y-4 p-4">
                 <template v-if="activeInspectorTab === 'summary'">
-                  <div v-if="!activeItem" class="text-sm text-muted-foreground">选择内容后查看总结。</div>
+                  <div v-if="!activeItem" class="text-sm text-muted-foreground">{{ t('vault.viewSummaryAfterSelect') }}</div>
                   <template v-else>
                     <MarkdownContent
                       :content="summaryContent"
@@ -1550,13 +1553,13 @@ onBeforeUnmount(() => {
                     <template v-if="activeKeyframes.length > 0">
                       <Separator />
                       <div class="space-y-3">
-                        <div class="text-sm font-medium">关键帧</div>
+                        <div class="text-sm font-medium">{{ t('home.keyframes') }}</div>
                         <div class="grid grid-cols-1 gap-3">
                           <img
                             v-for="(frame, index) in activeKeyframes"
                             :key="`${frame}-${index}`"
                             :src="toAbsoluteUrl(frame)"
-                            :alt="`关键帧 ${index + 1}`"
+                            :alt="`${t('home.keyframes')} ${index + 1}`"
                             class="w-full rounded-xl border object-cover"
                           />
                         </div>
@@ -1565,13 +1568,13 @@ onBeforeUnmount(() => {
                   </template>
                 </template>
                 <template v-else>
-                  <div v-if="!activeItem" class="text-sm text-muted-foreground">选择内容后记录你的思考。</div>
+                  <div v-if="!activeItem" class="text-sm text-muted-foreground">{{ t('vault.recordThoughtAfterSelect') }}</div>
                   <template v-else>
                     <div class="space-y-3">
                       <textarea
                         ref="annotationTextarea"
                         v-model="annotationDraft"
-                        placeholder="写下一条你的想法、摘要或行动项..."
+                        :placeholder="t('vault.writeThoughtPlaceholder')"
                         class="min-h-28 w-full rounded-xl border bg-background px-3 py-2 text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                       />
                       <div class="flex flex-wrap items-center gap-2">
@@ -1581,30 +1584,30 @@ onBeforeUnmount(() => {
                           :disabled="!videoPlayerRef"
                           @click="captureVideoTimestamp"
                         >
-                          引用当前时间
+                          {{ t('vault.quoteCurrentTimestamp') }}
                         </Button>
                         <div
                           v-if="pendingAnnotationAnchor.quote_type === 'screenshot' && pendingAnnotationAnchor.image_url"
                           class="inline-flex items-center gap-2 rounded-full border bg-muted/30 px-3 py-1.5 text-xs text-muted-foreground"
                         >
                           <Camera class="h-3.5 w-3.5" />
-                          已附加截图引用
+                          {{ t('vault.screenshotQuoteAttached') }}
                         </div>
                         <Button :disabled="savingAnnotation || !annotationDraft.trim()" @click="saveAnnotation">
-                          保存思考
+                          {{ t('vault.saveThought') }}
                         </Button>
                       </div>
                     </div>
                     <Separator />
                     <div class="space-y-3">
-                      <div class="text-sm font-medium">历史思考</div>
+                      <div class="text-sm font-medium">{{ t('vault.historyThoughts') }}</div>
                       <template v-if="annotationsLoading">
                         <Skeleton class="h-16 w-full" />
                         <Skeleton class="h-16 w-full" />
                       </template>
                       <template v-else-if="annotations.length === 0">
                         <div class="rounded-xl border border-dashed p-3 text-sm text-muted-foreground">
-                          还没有任何思考记录，写下第一条吧。
+                          {{ t('vault.noThoughtsYet') }}
                         </div>
                       </template>
                       <div
@@ -1626,7 +1629,7 @@ onBeforeUnmount(() => {
                           class="mb-2 inline-flex rounded-full border bg-background px-2.5 py-1 text-xs font-medium text-foreground"
                         >
                           <Pin class="mr-1 h-3.5 w-3.5" />
-                          {{ annotation.anchor_data?.source_mode === 'summary' ? 'AI 总结引用' : 'Markdown 引用' }}
+                          {{ annotation.anchor_data?.source_mode === 'summary' ? t('vault.aiSummaryQuote') : t('vault.markdownQuote') }}
                         </div>
                         <div
                           v-if="annotation.anchor_data?.media_type === 'video' && typeof annotation.anchor_data?.timestamp_seconds === 'number'"
@@ -1666,7 +1669,7 @@ onBeforeUnmount(() => {
                           >
                             <img
                               :src="toAbsoluteUrl(annotation.anchor_data.image_url)"
-                              alt="PDF 截图引用"
+                              :alt="t('vault.pdfScreenshotQuote')"
                               class="max-h-40 rounded-lg border object-contain"
                             >
                           </a>
@@ -1689,20 +1692,20 @@ onBeforeUnmount(() => {
     <AlertDialog :open="isUnsavedAnnotationDialogOpen" @update:open="(open) => { if (!open) cancelPendingItemSelection() }">
       <AlertDialogContent class="max-w-[420px]">
         <AlertDialogHeader>
-          <AlertDialogTitle>切换前保存这条草稿？</AlertDialogTitle>
+          <AlertDialogTitle>{{ t('vault.saveDraftBeforeSwitch') }}</AlertDialogTitle>
           <AlertDialogDescription>
-            你当前的内化日志还没有保存。可以先保存后再切换，也可以放弃这次草稿。
+            {{ t('vault.saveDraftBeforeSwitchDesc') }}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <div class="mt-4 flex flex-wrap justify-end gap-2">
           <Button variant="outline" @click="cancelPendingItemSelection">
-            取消
+            {{ t('common.cancel') }}
           </Button>
           <Button variant="outline" @click="discardDraftAndSwitchItem">
-            放弃并切换
+            {{ t('vault.discardAndSwitch') }}
           </Button>
           <Button :disabled="savingAnnotation || !annotationDraft.trim()" @click="saveDraftAndSwitchItem">
-            保存并切换
+            {{ t('vault.saveAndSwitch') }}
           </Button>
         </div>
       </AlertDialogContent>

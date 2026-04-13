@@ -31,7 +31,7 @@ async def _build_plugin_context_for_user(plugin_id: str, plugin, user_id: str | 
         from worker.plugins.github.client import GitHubClient
         token = config_dict.get("token")
         if not token:
-            raise ValueError(f"[{plugin_id}] 未配置 Token，无法解析链接")
+            raise ValueError(f"[{plugin_id}] Token is not configured and link parsing cannot continue")
         http_client = GitHubClient(token)
     else:
         http_client = httpx.AsyncClient(timeout=15.0)
@@ -45,24 +45,22 @@ async def _build_plugin_context_for_user(plugin_id: str, plugin, user_id: str | 
 @broker.task(task_name="run_plugin_pipeline")
 async def run_plugin_pipeline_task(plugin_id: str, limit: int = None, user_id: str | None = None):
     """
-    通用化：运行指定插件的同步流水线
+    Run the generic sync pipeline for a specific plugin.
     """
-    # 先尝试获取，如果不存在可能因为 Worker 刚启动或热重载延迟，尝试重新加载一次
     plugin = plugin_manager.get_plugin(plugin_id)
     if not plugin:
-        worker_log.warning(f"⚠️ 初次未找到插件 {plugin_id}，尝试重新加载注册表...")
+        worker_log.warning(f"⚠️ Plugin {plugin_id} was not found on first lookup. Reloading registry and retrying...")
         async with AsyncSessionLocal() as session:
             await plugin_manager.load_enabled_plugins(session)
         plugin = plugin_manager.get_plugin(plugin_id)
         
     if not plugin:
-        worker_log.error(f"❌ 找不到插件: {plugin_id} (即使重载后)")
+        worker_log.error(f"❌ Plugin not found after reload: {plugin_id}")
         return
 
-    # 状态锁检查
     status = await ConfigManager.get_config(plugin_id, ConfigKeys.SYNC_STATUS, user_id=user_id)
     if status == "running":
-        worker_log.warning(f"⚠️ [{plugin_id}] 同步任务已经在运行中，跳过本次执行")
+        worker_log.warning(f"⚠️ [{plugin_id}] Sync task is already running. Skipping this execution.")
         return
 
     await ConfigManager.set_config(plugin_id, ConfigKeys.SYNC_STATUS, "running", user_id=user_id)
@@ -70,15 +68,12 @@ async def run_plugin_pipeline_task(plugin_id: str, limit: int = None, user_id: s
     await ConfigManager.set_config(plugin_id, ConfigKeys.LAST_SYNC_ERROR, "", user_id=user_id)
 
     try:
-        # 获取基础配置字典
         ctx = await _build_plugin_context_for_user(plugin_id, plugin, user_id)
         config_dict = dict(ctx.config)
 
-        # 覆写 limit
         if limit is not None:
             config_dict["sync_limit"] = limit
 
-        # 1. 抓取原始数据
         raw_items = await plugin.fetch_data(ctx)
         if not raw_items:
             now_iso = datetime.datetime.now().isoformat()
@@ -97,7 +92,6 @@ async def run_plugin_pipeline_task(plugin_id: str, limit: int = None, user_id: s
 
         cache_hit_count = 0
         async with AsyncSessionLocal() as session:
-            # 2. 遍历处理入库流水线
             for raw_item in raw_items:
                 normalized = plugin.normalize_item(raw_item)
                 item_id = normalized["id"]
@@ -119,17 +113,19 @@ async def run_plugin_pipeline_task(plugin_id: str, limit: int = None, user_id: s
                             ).on_conflict_do_nothing(
                                 index_elements=["user_id", "item_id"]
                             )
-                        )
+                    )
                     cache_hit_count += 1
-                    worker_log.info(f"⏭️ [{plugin_id}] 命中历史数据，跳过: {normalized['title']} (连续命中 {cache_hit_count})")
+                    worker_log.info(
+                        f"⏭️ [{plugin_id}] Existing item hit, skipping: {normalized['title']} "
+                        f"(consecutive hits: {cache_hit_count})"
+                    )
                     if cache_hit_count >= 3:
-                        worker_log.info(f"🛑 [{plugin_id}] 连续命中历史数据，触发增量熔断，提前结束同步。")
+                        worker_log.info(f"🛑 [{plugin_id}] Incremental circuit triggered after consecutive cache hits. Ending sync early.")
                         break
                     continue
 
                 cache_hit_count = 0
 
-                # 3. 为新数据补充附加文本与元数据
                 ai_text = await plugin.extract_text_for_ai(ctx, raw_item)
                 metadata_extra = raw_item.get('metadata_extra', {})
                 final_metadata = normalized.get("metadata_extra", {})
@@ -150,10 +146,10 @@ async def run_plugin_pipeline_task(plugin_id: str, limit: int = None, user_id: s
                     source_user_id=user_id,
                 )
 
-                worker_log.info(f"📤 [{plugin_id}] 发送至 Pipeline 处理: {item.title}")
+                worker_log.info(f"📤 [{plugin_id}] Dispatching item to ingestion pipeline: {item.title}")
                 await process_new_item_task.kiq(item.model_dump())
 
-        worker_log.info(f"✅ [{plugin_id}] 同步指令下发完毕，共处理 {len(raw_items)} 条记录。")
+        worker_log.info(f"✅ [{plugin_id}] Sync dispatch completed. Processed {len(raw_items)} records.")
         now_iso = datetime.datetime.now().isoformat()
         await ConfigManager.set_config(plugin_id, ConfigKeys.LAST_SUCCESSFUL_SYNC_TIME, now_iso, user_id=user_id)
         await ConfigManager.set_config(plugin_id, ConfigKeys.LAST_SYNC_RESULT, "success", user_id=user_id)
@@ -168,7 +164,7 @@ async def run_plugin_pipeline_task(plugin_id: str, limit: int = None, user_id: s
             )
 
     except Exception as e:
-        worker_log.error(f"❌ [{plugin_id}] 任务执行出错: {e}")
+        worker_log.error(f"❌ [{plugin_id}] Sync task failed: {e}")
         await ConfigManager.set_config(plugin_id, ConfigKeys.LAST_SYNC_RESULT, "error", user_id=user_id)
         await ConfigManager.set_config(plugin_id, ConfigKeys.LAST_SYNC_ERROR, str(e)[:500], user_id=user_id)
         if user_id:
@@ -190,13 +186,13 @@ async def run_plugin_pipeline_task(plugin_id: str, limit: int = None, user_id: s
 async def parse_single_plugin_item_task(plugin_id: str, url: str, user_id: str, retention_days: int = -1):
     plugin = plugin_manager.get_plugin(plugin_id)
     if not plugin:
-        worker_log.warning(f"⚠️ 初次未找到插件 {plugin_id}，尝试重新加载注册表...")
+        worker_log.warning(f"⚠️ Plugin {plugin_id} was not found on first lookup. Reloading registry and retrying...")
         async with AsyncSessionLocal() as session:
             await plugin_manager.load_enabled_plugins(session)
         plugin = plugin_manager.get_plugin(plugin_id)
 
     if not plugin:
-        worker_log.error(f"❌ 找不到插件: {plugin_id} (单条解析失败)")
+        worker_log.error(f"❌ Plugin not found for single-item parsing: {plugin_id}")
         return
 
     ctx = await _build_plugin_context_for_user(plugin_id, plugin, user_id)
@@ -240,10 +236,10 @@ async def parse_single_plugin_item_task(plugin_id: str, url: str, user_id: str, 
             source_user_id=user_id,
         )
 
-        worker_log.info(f"📤 [{plugin_id}] 单条解析结果发送至 Pipeline: {item.title}")
+        worker_log.info(f"📤 [{plugin_id}] Dispatching single parsed item to ingestion pipeline: {item.title}")
         await process_new_item_task.kiq(item.model_dump())
     except Exception as e:
-        worker_log.error(f"❌ [{plugin_id}] 单条解析任务失败: {e}")
+        worker_log.error(f"❌ [{plugin_id}] Single-item parsing task failed: {e}")
         raise
     finally:
         close_method = getattr(ctx.http, "aclose", None)
@@ -254,10 +250,10 @@ async def parse_single_plugin_item_task(plugin_id: str, url: str, user_id: str, 
 @broker.task(task_name="summarize_repo")
 async def summarize_repo_task(item_id: str, task_id: str, user_id: str | None = None):
     """
-    临时预留：AI 补总结调度任务（依然由前端原样调用，所以暂时保留名字，内部改用 plugin manager 取）
+    Backward-compatible AI summary task entrypoint kept for frontend compatibility.
     """
     plugin_id = "github_stars"
-    worker_log.info(f"🚀 开始 AI 总结任务: {task_id} for item {item_id}")
+    worker_log.info(f"🚀 Starting AI summary task: {task_id} for item {item_id}")
     
     try:
         async with AsyncSessionLocal() as session:
@@ -295,7 +291,7 @@ async def summarize_repo_task(item_id: str, task_id: str, user_id: str | None = 
                 if part
             )
             if not text_to_summarize.strip():
-                worker_log.info(f"⏭️ 跳过 AI 总结：条目缺少可总结文本 {item_id}")
+                worker_log.info(f"⏭️ Skipping AI summary because the item has no summarizable text: {item_id}")
                 return
         
         from hub.core.llm.service import LLMManager
@@ -327,7 +323,7 @@ async def summarize_repo_task(item_id: str, task_id: str, user_id: str | None = 
         )
             
     except QuotaExceededException as e:
-        worker_log.error(f"❌ [CIRCUIT BREAKER] AI 总结任务已熔断: {e.detail}")
+        worker_log.error(f"❌ [CIRCUIT BREAKER] AI summary task blocked: {e.detail}")
         await create_notification_for_user(
             user_id,
             type="error",
@@ -338,7 +334,7 @@ async def summarize_repo_task(item_id: str, task_id: str, user_id: str | None = 
         )
         raise
     except Exception as e:
-        worker_log.error(f"❌ AI 总结任务失败: {e}")
+        worker_log.error(f"❌ AI summary task failed: {e}")
         await create_notification_for_user(
             user_id,
             type="error",
@@ -355,7 +351,7 @@ async def reload_system_plugins_task():
     from shared.plugins.manager import plugin_manager
     from shared.logger import worker_log
 
-    worker_log.info("🔄 收到热重载指令，正在刷新 Worker 插件内存...")
+    worker_log.info("🔄 Hot reload command received. Refreshing Worker plugin registry...")
     async with AsyncSessionLocal() as session:
         plugin_manager.plugins.clear() # 物理清空旧实例
         await plugin_manager.load_enabled_plugins(session)

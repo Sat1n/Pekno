@@ -1,4 +1,5 @@
 import axios from 'axios'
+import i18n from '@/i18n'
 
 const TOKEN_KEY = 'pekno-access-token'
 
@@ -312,6 +313,36 @@ export interface ForceProcessResponse {
   status: 'accepted'
   requeued_count: number
   message: string
+}
+
+export interface ApiErrorPayload {
+  error_code?: string
+  detail?: string
+}
+
+export function getApiErrorPayload(error: any): ApiErrorPayload {
+  const payload = error?.response?.data
+  if (payload && typeof payload === 'object') {
+    return {
+      error_code: typeof payload.error_code === 'string' ? payload.error_code : undefined,
+      detail: typeof payload.detail === 'string' ? payload.detail : undefined,
+    }
+  }
+  return {}
+}
+
+export function resolveApiErrorMessage(error: any, fallbackKey: string = 'errors.fallback'): string {
+  const payload = getApiErrorPayload(error)
+  if (payload.error_code) {
+    const key = `errors.${payload.error_code}`
+    if (i18n.global.te(key)) {
+      return String(i18n.global.t(key))
+    }
+  }
+  if (payload.detail) {
+    return payload.detail
+  }
+  return String(i18n.global.t(fallbackKey))
 }
 
 // 搜索参数接口

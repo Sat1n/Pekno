@@ -1,11 +1,14 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Query, HTTPException, Depends
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Optional
 from datetime import datetime
 from pathlib import Path
 import os
 from shared.logger import configure_logging
+import logging
+from fastapi.responses import JSONResponse
 
 os.environ.setdefault("IRIS_SERVICE", "hub")
 configure_logging()
@@ -19,8 +22,11 @@ from sqlalchemy import select, delete
 from shared.plugins.manager import plugin_manager
 from hub.core.security import get_current_user
 from hub.core.init_db import ensure_runtime_tables
+from shared.api_errors import ApiError
+from shared.error_codes import ERR_INTERNAL_SERVER_ERROR, ERR_VALIDATION_FAILED, resolve_error_code_and_detail
 
 from hub.core.media.checker import check_media_dependencies
+logger = logging.getLogger("Iris-Hub")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -109,6 +115,54 @@ app.include_router(admin.router)
 app.include_router(monitor.router)
 protected_mcp_app = MCPAuthMiddleware(mcp_app)
 app.mount("/api/mcp", protected_mcp_app)
+
+
+@app.exception_handler(ApiError)
+async def handle_api_error(_, exc: ApiError):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "error_code": exc.error_code,
+            "detail": exc.detail,
+        },
+    )
+
+
+@app.exception_handler(HTTPException)
+async def handle_http_exception(_, exc: HTTPException):
+    error_code, detail = resolve_error_code_and_detail(exc.status_code, exc.detail)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "error_code": error_code,
+            "detail": detail,
+        },
+        headers=exc.headers,
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def handle_validation_exception(_, exc: RequestValidationError):
+    return JSONResponse(
+        status_code=422,
+        content={
+            "error_code": ERR_VALIDATION_FAILED,
+            "detail": "Request validation failed.",
+            "errors": exc.errors(),
+        },
+    )
+
+
+@app.exception_handler(Exception)
+async def handle_unexpected_exception(_, exc: Exception):
+    logger.exception("Unhandled application exception.")
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error_code": ERR_INTERNAL_SERVER_ERROR,
+            "detail": "An internal server error occurred.",
+        },
+    )
 
 
 @app.get("/api/search", response_model=List[FrontendSearchItem])

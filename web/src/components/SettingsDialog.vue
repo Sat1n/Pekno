@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -8,7 +9,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Blocks, User, ChevronRight, Database, Trash2, Loader2, HardDrive, Puzzle, Plus, MailPlus, LogOut, KeyRound, Copy, BrainCircuit, SlidersHorizontal, Cpu, Save, Search, Sparkles, GalleryVerticalEnd, Shield, Server } from 'lucide-vue-next'
 import { usePluginStore } from '@/store/usePluginStore'
-import { changePassword, clearStoredToken, createInvitationCode, getDataSources, getInvitationCodes, getModelProviders, getStoredAuthUser, clearDataSource, saveModelAssignments, saveModelProvider, getPATs, createPAT, deletePAT, getSystemBillingSettings, saveSystemBillingSettings, type DataSourceStat, type InvitationCodeInfo, type ModelAssignmentInfo, type ModelProviderInfo, type PATItem, type SystemBillingSettings } from '@/lib/api'
+import { changePassword, clearStoredToken, createInvitationCode, getDataSources, getInvitationCodes, getModelProviders, getStoredAuthUser, clearDataSource, saveModelAssignments, saveModelProvider, getPATs, createPAT, deletePAT, getSystemBillingSettings, saveSystemBillingSettings, resolveApiErrorMessage, type DataSourceStat, type InvitationCodeInfo, type ModelAssignmentInfo, type ModelProviderInfo, type PATItem, type SystemBillingSettings } from '@/lib/api'
 import { useToast } from '@/components/ui/toast/use-toast'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import PluginInstallDialog from './PluginInstallDialog.vue'
@@ -17,6 +18,7 @@ const props = defineProps<{ open: boolean; initialTab?: string }>()
 defineEmits(['close', 'open-plugin-settings'])
 
 const router = useRouter()
+const { t, locale } = useI18n()
 const { toast } = useToast()
 const { pluginsManifests, loadAllPlugins } = usePluginStore()
 const currentUser = computed(() => getStoredAuthUser())
@@ -65,52 +67,52 @@ const justCreatedToken = ref<string | null>(null)
 const selectedMcpToken = ref('')
 const isChangingPassword = ref(false)
 
-const availablePatScopes = [
+const availablePatScopes = computed(() => [
   {
     value: 'read:knowledge',
-    label: '知识读取',
-    description: '允许 Agent 搜索知识库与读取内容详情',
+    label: t('settings.patScopeReadKnowledge'),
+    description: t('settings.patScopeReadKnowledgeDesc'),
   },
   {
     value: 'write:star',
-    label: '收藏写入',
-    description: '允许将条目标记为收藏/稍后再看',
+    label: t('settings.patScopeWriteStar'),
+    description: t('settings.patScopeWriteStarDesc'),
   },
   {
     value: 'write:system_config',
-    label: '系统配置写入',
-    description: '允许修改插件底层配置。仅建议与管理员令牌一起使用。',
+    label: t('settings.patScopeWriteSystemConfig'),
+    description: t('settings.patScopeWriteSystemConfigDesc'),
   },
-]
+])
 
 const isClearDialogOpen = ref(false)
 const sourceToClear = ref('')
 
-const sourceNames: Record<string, string> = {
-  github_star: 'GitHub 收藏',
-  bilibili: 'Bilibili 视频',
-  article: '本地文章',
-}
+const sourceNames = computed<Record<string, string>>(() => ({
+  github_star: t('settings.dataSourceGithubStars'),
+  bilibili: t('settings.dataSourceBilibili'),
+  article: t('settings.dataSourceLocalArticle'),
+}))
 
 const menuItems = computed(() => {
   if (isAdmin.value) {
     return [
-      { id: 'plugins', label: '插件管理', icon: Blocks },
-      { id: 'models', label: '模型设置', icon: BrainCircuit },
-      { id: 'billing', label: '系统与计费控制', icon: Server },
-      { id: 'data', label: '数据管理', icon: Database },
-      { id: 'invites', label: '邀请管理', icon: MailPlus },
-      { id: 'tokens', label: '访问令牌', icon: Shield },
-      { id: 'mcp', label: 'MCP 服务', icon: Server },
-      { id: 'account', label: '账户信息', icon: User },
+      { id: 'plugins', label: t('settings.plugins'), icon: Blocks },
+      { id: 'models', label: t('settings.models'), icon: BrainCircuit },
+      { id: 'billing', label: t('settings.billing'), icon: Server },
+      { id: 'data', label: t('settings.data'), icon: Database },
+      { id: 'invites', label: t('settings.invites'), icon: MailPlus },
+      { id: 'tokens', label: t('settings.tokens'), icon: Shield },
+      { id: 'mcp', label: t('settings.mcp'), icon: Server },
+      { id: 'account', label: t('settings.account'), icon: User },
     ]
   }
 
   return [
-    { id: 'plugins', label: '插件管理', icon: Blocks },
-    { id: 'tokens', label: '访问令牌', icon: Shield },
-    { id: 'mcp', label: 'MCP 服务', icon: Server },
-    { id: 'account', label: '账户信息', icon: User },
+    { id: 'plugins', label: t('settings.plugins'), icon: Blocks },
+    { id: 'tokens', label: t('settings.tokens'), icon: Shield },
+    { id: 'mcp', label: t('settings.mcp'), icon: Server },
+    { id: 'account', label: t('settings.account'), icon: User },
   ]
 })
 
@@ -119,7 +121,7 @@ async function loadDataSources() {
   try {
     dataSources.value = await getDataSources()
   } catch (error) {
-    console.error('加载数据源失败:', error)
+    console.error('Failed to load data sources:', error)
   } finally {
     isLoadingData.value = false
   }
@@ -131,10 +133,10 @@ async function loadInvitations() {
   try {
     invitations.value = await getInvitationCodes()
   } catch (error) {
-    console.error('加载邀请码失败:', error)
+    console.error('Failed to load invitations:', error)
     toast({
-      title: '加载失败',
-      description: '无法获取邀请码列表',
+      title: t('settings.loadFailedTitle'),
+      description: t('settings.invitesLoadFailed'),
       variant: 'destructive',
     })
   } finally {
@@ -200,10 +202,10 @@ async function loadModelSettings() {
     }
     providerDraft.value = { ...(selectedProvider.value?.config || {}) }
   } catch (error) {
-    console.error('加载模型设置失败:', error)
+    console.error('Failed to load model settings:', error)
     toast({
-      title: '加载失败',
-      description: '无法获取模型设置',
+      title: t('settings.loadFailedTitle'),
+      description: t('settings.modelsLoadFailed'),
       variant: 'destructive',
     })
   } finally {
@@ -218,13 +220,13 @@ async function handleCreateInvitation() {
     invitations.value.unshift(invitation)
     await navigator.clipboard.writeText(invitation.code)
     toast({
-      title: '邀请码已生成',
-      description: `${invitation.code} 已复制到剪贴板`,
+      title: t('settings.inviteGeneratedTitle'),
+      description: t('settings.inviteGeneratedDesc', { code: invitation.code }),
     })
   } catch (error) {
     toast({
-      title: '生成失败',
-      description: '请稍后重试',
+      title: t('settings.createFailedTitle'),
+      description: t('settings.tryAgainLater'),
       variant: 'destructive',
     })
   } finally {
@@ -236,13 +238,13 @@ async function copyInviteCode(code: string) {
   try {
     await navigator.clipboard.writeText(code)
     toast({
-      title: '已复制邀请码',
+      title: t('settings.inviteCopiedTitle'),
       description: code,
     })
   } catch {
     toast({
-      title: '复制失败',
-      description: '请手动复制邀请码',
+      title: t('settings.copyFailedTitle'),
+      description: t('settings.copyInviteManuallyDesc'),
       variant: 'destructive',
     })
   }
@@ -269,13 +271,13 @@ async function handleSaveModelProvider() {
     modelProviders.value = state.providers
     modelAssignments.value = state.assignments
     toast({
-      title: '提供商配置已保存',
+      title: t('settings.providerSavedTitle'),
       description: selectedProvider.value.name,
     })
   } catch (error: any) {
     toast({
-      title: '保存失败',
-      description: error?.response?.data?.detail || '无法保存模型提供商配置',
+      title: t('settings.saveFailedTitle'),
+      description: resolveApiErrorMessage(error, 'settings.providerSaveFailed'),
       variant: 'destructive',
     })
   } finally {
@@ -289,13 +291,13 @@ async function handleSaveAssignments() {
     const response = await saveModelAssignments(modelAssignments.value)
     modelAssignments.value = response.assignments
     toast({
-      title: '系统模型设置已保存',
-      description: '新的模型用途配置已生效',
+      title: t('settings.assignmentsSavedTitle'),
+      description: t('settings.assignmentsSavedDesc'),
     })
   } catch (error: any) {
     toast({
-      title: '保存失败',
-      description: error?.response?.data?.detail || '无法保存系统模型设置',
+      title: t('settings.saveFailedTitle'),
+      description: resolveApiErrorMessage(error, 'settings.assignmentsSaveFailed'),
       variant: 'destructive',
     })
   } finally {
@@ -315,10 +317,10 @@ async function loadBillingSettings() {
       currency: settings.currency,
     }
   } catch (error) {
-    console.error('加载计费设置失败:', error)
+    console.error('Failed to load billing settings:', error)
     toast({
-      title: '加载失败',
-      description: '无法获取系统计费设置',
+      title: t('settings.loadFailedTitle'),
+      description: t('settings.billingLoadFailed'),
       variant: 'destructive',
     })
   } finally {
@@ -340,13 +342,13 @@ async function handleSaveBillingSettings() {
       currency: settings.currency,
     }
     toast({
-      title: '计费控制已保存',
-      description: settings.api_limit_value > 0 ? '新的 API 限额配置已生效' : 'API 限额已关闭',
+      title: t('settings.billingSavedTitle'),
+      description: settings.api_limit_value > 0 ? t('settings.billingSavedEnabled') : t('settings.billingSavedDisabled'),
     })
   } catch (error: any) {
     toast({
-      title: '保存失败',
-      description: error?.response?.data?.detail || '无法保存计费控制设置',
+      title: t('settings.saveFailedTitle'),
+      description: resolveApiErrorMessage(error, 'settings.billingSaveFailed'),
       variant: 'destructive',
     })
   } finally {
@@ -367,14 +369,14 @@ const confirmClearData = async () => {
   try {
     const res = await clearDataSource(sourceType)
     toast({
-      title: '清理成功',
-      description: res.message || `已成功清理 ${res.deleted_count} 条记录`,
+      title: t('settings.dataClearedTitle'),
+      description: res.message || t('settings.dataClearedDesc', { count: res.deleted_count }),
     })
     await loadDataSources()
   } catch (error) {
     toast({
-      title: '清理失败',
-      description: '请稍后重试',
+      title: t('settings.clearFailedTitle'),
+      description: t('settings.tryAgainLater'),
       variant: 'destructive',
     })
   } finally {
@@ -385,8 +387,8 @@ const confirmClearData = async () => {
 async function handleChangePassword() {
   if (!currentPassword.value || !newPassword.value) {
     toast({
-      title: '表单不完整',
-      description: '请填写当前密码和新密码',
+      title: t('settings.formIncompleteTitle'),
+      description: t('settings.passwordFormIncompleteDesc'),
       variant: 'destructive',
     })
     return
@@ -401,13 +403,13 @@ async function handleChangePassword() {
     currentPassword.value = ''
     newPassword.value = ''
     toast({
-      title: '密码已更新',
+      title: t('settings.passwordUpdatedTitle'),
       description: response.message,
     })
   } catch (error: any) {
     toast({
-      title: '修改失败',
-      description: error?.response?.data?.detail || '请稍后重试',
+      title: t('settings.updateFailedTitle'),
+      description: resolveApiErrorMessage(error, 'settings.tryAgainLater'),
       variant: 'destructive',
     })
   } finally {
@@ -456,7 +458,7 @@ async function loadPats() {
   try {
     pats.value = await getPATs()
   } catch (error) {
-    console.error('加载令牌失败:', error)
+    console.error('Failed to load access tokens:', error)
   } finally {
     isLoadingPats.value = false
   }
@@ -464,11 +466,11 @@ async function loadPats() {
 
 async function handleCreatePat() {
   if (!newPatAlias.value.trim()) {
-    toast({ title: '请输入令牌别名', variant: 'destructive' })
+    toast({ title: t('settings.enterTokenAliasTitle'), variant: 'destructive' })
     return
   }
   if (newPatScopes.value.length === 0) {
-    toast({ title: '请至少选择一个权限', variant: 'destructive' })
+    toast({ title: t('settings.selectAtLeastOneScopeTitle'), variant: 'destructive' })
     return
   }
   isCreatingPat.value = true
@@ -483,9 +485,9 @@ async function handleCreatePat() {
     newPatExpiry.value = null
     newPatScopes.value = ['read:knowledge', 'write:star']
     newPatIsAdmin.value = false
-    toast({ title: '令牌已创建', description: '请立即复制并妥善保管，关闭后将无法再次查看完整令牌。' })
+    toast({ title: t('settings.tokenCreatedTitle'), description: t('settings.tokenCreatedDesc') })
   } catch (error: any) {
-    toast({ title: '创建失败', description: error?.response?.data?.detail || '请稍后重试', variant: 'destructive' })
+    toast({ title: t('settings.createFailedTitle'), description: resolveApiErrorMessage(error, 'settings.tryAgainLater'), variant: 'destructive' })
   } finally {
     isCreatingPat.value = false
   }
@@ -495,18 +497,18 @@ async function handleDeletePat(id: string) {
   try {
     await deletePAT(id)
     pats.value = pats.value.filter(p => p.id !== id)
-    toast({ title: '令牌已删除' })
+    toast({ title: t('settings.tokenDeletedTitle') })
   } catch {
-    toast({ title: '删除失败', variant: 'destructive' })
+    toast({ title: t('settings.deleteFailedTitle'), variant: 'destructive' })
   }
 }
 
-async function copyText(text: string, label: string = '内容') {
+async function copyText(text: string, label: string = '') {
   try {
     await navigator.clipboard.writeText(text)
-    toast({ title: `${label}已复制到剪贴板` })
+    toast({ title: t('settings.copiedToClipboardTitle', { label: label || t('settings.contentLabel') }) })
   } catch {
-    toast({ title: '复制失败', variant: 'destructive' })
+    toast({ title: t('settings.copyFailedTitle'), variant: 'destructive' })
   }
 }
 
@@ -533,15 +535,15 @@ const mcpStreamableEndpoint = computed(() => `${mcpBaseUrl.value}/api/mcp/v2/str
 const mcpLegacySseEndpoint = computed(() => `${mcpBaseUrl.value}/api/mcp/sse`)
 
 function formatPatExpiry(expiresAt: string | null): string {
-  if (!expiresAt) return '永久有效'
+  if (!expiresAt) return t('settings.neverExpires')
   const d = new Date(expiresAt)
-  return d.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' }) + ' 过期'
+  return `${d.toLocaleDateString(locale.value, { year: 'numeric', month: '2-digit', day: '2-digit' })} ${t('settings.expiresSuffix')}`
 }
 
 function formatPatLastUsed(lastUsedAt: string | null): string {
-  if (!lastUsedAt) return '从未使用'
+  if (!lastUsedAt) return t('settings.neverUsed')
   const d = new Date(lastUsedAt)
-  return d.toLocaleString('zh-CN', {
+  return d.toLocaleString(locale.value, {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -551,11 +553,11 @@ function formatPatLastUsed(lastUsedAt: string | null): string {
 }
 
 function formatPatScopes(scopes: string[]): string {
-  if (!scopes || scopes.length === 0) return '无权限'
+  if (!scopes || scopes.length === 0) return t('settings.noScopes')
   const labels: Record<string, string> = {
-    'read:knowledge': '知识读取',
-    'write:star': '收藏写入',
-    'write:system_config': '系统配置写入',
+    'read:knowledge': t('settings.patScopeReadKnowledge'),
+    'write:star': t('settings.patScopeWriteStar'),
+    'write:system_config': t('settings.patScopeWriteSystemConfig'),
   }
   return scopes.map((scope) => labels[scope] || scope).join(' / ')
 }
@@ -572,7 +574,7 @@ function formatBillingCost(value: number | undefined, currency: string | undefin
         <div class="w-60 border-r bg-muted/20 p-4 flex flex-col gap-1 shrink-0">
           <div class="px-2 py-6 flex items-center gap-2 mb-2">
             <div class="w-8 h-8 rounded-lg bg-primary flex items-center justify-center text-primary-foreground font-bold italic">I</div>
-            <span class="font-bold tracking-tight text-lg">Iris Settings</span>
+            <span class="font-bold tracking-tight text-lg">{{ t('settings.title') }}</span>
           </div>
 
           <Button
@@ -593,12 +595,12 @@ function formatBillingCost(value: number | undefined, currency: string | undefin
               <div v-if="activeTab === 'plugins'" class="space-y-8 animate-in fade-in slide-in-from-right-4 duration-300">
                 <div class="flex items-center justify-between">
                   <div>
-                    <h3 class="text-2xl font-bold tracking-tight">插件管理</h3>
-                    <p class="text-muted-foreground text-sm mt-1 text-balance">连接并配置第三方服务，让 Iris 自动同步并分析你的数字内容。</p>
+                    <h3 class="text-2xl font-bold tracking-tight">{{ t('settings.pluginsHeading') }}</h3>
+                    <p class="text-muted-foreground text-sm mt-1 text-balance">{{ t('settings.pluginsDesc') }}</p>
                   </div>
                   <Button v-if="isAdmin" size="sm" variant="outline" @click="isInstallDialogOpen = true">
                     <Plus class="w-4 h-4 mr-2" />
-                    安装插件
+                    {{ t('settings.installPlugin') }}
                   </Button>
                 </div>
 
@@ -629,8 +631,8 @@ function formatBillingCost(value: number | undefined, currency: string | undefin
               <div v-else-if="activeTab === 'models'" class="space-y-8 animate-in fade-in slide-in-from-right-4 duration-300">
                 <div class="flex items-center justify-between">
                   <div>
-                    <h3 class="text-2xl font-bold tracking-tight">模型设置</h3>
-                    <p class="text-muted-foreground text-sm mt-1 text-balance">统一管理服务器的模型提供商，以及标签、总结、向量检索等用途所使用的模型。</p>
+                    <h3 class="text-2xl font-bold tracking-tight">{{ t('settings.modelsHeading') }}</h3>
+                    <p class="text-muted-foreground text-sm mt-1 text-balance">{{ t('settings.modelsDesc') }}</p>
                   </div>
                 </div>
 
@@ -638,11 +640,11 @@ function formatBillingCost(value: number | undefined, currency: string | undefin
                   <div class="flex flex-wrap items-center gap-2">
                     <Button :variant="modelSettingsTab === 'providers' ? 'default' : 'outline'" @click="modelSettingsTab = 'providers'">
                       <Cpu class="w-4 h-4 mr-2" />
-                      模型提供商
+                      {{ t('settings.modelProviders') }}
                     </Button>
                     <Button :variant="modelSettingsTab === 'assignments' ? 'default' : 'outline'" @click="modelSettingsTab = 'assignments'">
                       <SlidersHorizontal class="w-4 h-4 mr-2" />
-                      系统模型设置
+                      {{ t('settings.systemModelSettings') }}
                     </Button>
                   </div>
 
@@ -653,7 +655,7 @@ function formatBillingCost(value: number | undefined, currency: string | undefin
                   >
                     <Loader2 v-if="isSavingModelAssignments" class="w-4 h-4 mr-2 animate-spin" />
                     <Save v-else class="w-4 h-4 mr-2" />
-                    保存系统模型设置
+                    {{ t('settings.saveSystemModelSettings') }}
                   </Button>
                 </div>
 
@@ -667,22 +669,22 @@ function formatBillingCost(value: number | undefined, currency: string | undefin
                       <div class="flex flex-col gap-4 pb-4 border-b">
                         <div class="flex items-center justify-between gap-3">
                           <div>
-                            <h4 class="text-lg font-semibold">提供商列表</h4>
-                            <p class="text-sm text-muted-foreground mt-1">后续继续增加模型供应商时，依旧可以通过搜索与能力筛选快速定位。</p>
+                            <h4 class="text-lg font-semibold">{{ t('settings.providerList') }}</h4>
+                            <p class="text-sm text-muted-foreground mt-1">{{ t('settings.providerListDesc') }}</p>
                           </div>
                           <div class="text-xs text-muted-foreground whitespace-nowrap">
-                            共 {{ filteredProviders.length }} / {{ modelProviders.length }} 家
+                            {{ t('settings.providerCount', { filtered: filteredProviders.length, total: modelProviders.length }) }}
                           </div>
                         </div>
 
                         <div class="grid gap-3 md:grid-cols-[1fr_auto]">
                           <div class="relative">
                             <Search class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                            <Input v-model="providerSearch" class="pl-9" placeholder="搜索提供商、描述或标签" />
+                            <Input v-model="providerSearch" class="pl-9" :placeholder="t('settings.searchProvidersPlaceholder')" />
                           </div>
                           <select v-model="providerCapabilityFilter" class="rounded-md border bg-background px-3 py-2 text-sm">
                             <option v-for="capability in providerCapabilities" :key="capability" :value="capability">
-                              {{ capability === 'all' ? '全部能力' : capability }}
+                              {{ capability === 'all' ? t('settings.allCapabilities') : capability }}
                             </option>
                           </select>
                         </div>
@@ -714,7 +716,7 @@ function formatBillingCost(value: number | undefined, currency: string | undefin
                         </div>
 
                         <div v-if="filteredProviders.length === 0" class="rounded-2xl border border-dashed py-14 text-center text-sm text-muted-foreground">
-                          当前筛选条件下没有匹配的模型提供商
+                          {{ t('settings.noMatchingProviders') }}
                         </div>
                       </ScrollArea>
                     </div>
@@ -736,7 +738,7 @@ function formatBillingCost(value: number | undefined, currency: string | undefin
                       </div>
 
                       <div class="rounded-xl border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
-                        推荐先完成供应商接入，再到“系统模型设置”里为不同任务分配模型。
+                        {{ t('settings.providerConfigHint') }}
                       </div>
 
                       <div v-for="field in selectedProvider.config_fields" :key="field.key" class="space-y-2">
@@ -747,14 +749,14 @@ function formatBillingCost(value: number | undefined, currency: string | undefin
                           :placeholder="field.default || ''"
                         />
                         <p v-if="field.secret && selectedProvider.secret_preview" class="text-xs text-muted-foreground">
-                          当前已保存: <code class="bg-muted px-1.5 py-0.5 rounded text-[10px]">{{ selectedProvider.secret_preview }}</code>
+                          {{ t('settings.currentlySaved') }}: <code class="bg-muted px-1.5 py-0.5 rounded text-[10px]">{{ selectedProvider.secret_preview }}</code>
                         </p>
                       </div>
 
                       <Button class="w-full" @click="handleSaveModelProvider" :disabled="isSavingModelProvider">
                         <Loader2 v-if="isSavingModelProvider" class="w-4 h-4 mr-2 animate-spin" />
                         <Save v-else class="w-4 h-4 mr-2" />
-                        保存提供商配置
+                        {{ t('settings.saveProviderConfig') }}
                       </Button>
                     </div>
                   </div>
@@ -768,8 +770,8 @@ function formatBillingCost(value: number | undefined, currency: string | undefin
                           <Sparkles class="w-5 h-5" />
                         </div>
                         <div>
-                          <h4 class="font-semibold">当前工作流</h4>
-                          <p class="text-sm text-muted-foreground mt-1">这些设置已经接入后端，修改后会直接影响标签提取、摘要生成与向量检索。</p>
+                          <h4 class="font-semibold">{{ t('settings.currentWorkflows') }}</h4>
+                          <p class="text-sm text-muted-foreground mt-1">{{ t('settings.currentWorkflowsDesc') }}</p>
                         </div>
                       </div>
                     </div>
@@ -780,8 +782,8 @@ function formatBillingCost(value: number | undefined, currency: string | undefin
                           <GalleryVerticalEnd class="w-5 h-5" />
                         </div>
                         <div>
-                          <h4 class="font-semibold">多模态占位</h4>
-                          <p class="text-sm text-muted-foreground mt-1">先把未来的视频工作流入口预留好，后续接语音转文字、视觉理解和视频理解时不需要重做设置结构。</p>
+                          <h4 class="font-semibold">{{ t('settings.multimodalPlaceholder') }}</h4>
+                          <p class="text-sm text-muted-foreground mt-1">{{ t('settings.multimodalPlaceholderDesc') }}</p>
                         </div>
                       </div>
                     </div>
@@ -798,11 +800,11 @@ function formatBillingCost(value: number | undefined, currency: string | undefin
                           <div>
                             <h4 class="text-lg font-semibold">{{ section.group }}</h4>
                               <p class="text-sm text-muted-foreground mt-1">
-                                {{ section.items.some((item) => item.status === 'active') ? '已落地并正在使用的模型用途。' : '未来多模态链路的预留模型用途。' }}
+                                {{ section.items.some((item) => item.status === 'active') ? t('settings.activeAssignmentGroupDesc') : t('settings.placeholderAssignmentGroupDesc') }}
                               </p>
                           </div>
                           <span class="rounded-full bg-muted px-2.5 py-1 text-[11px] font-medium">
-                            {{ section.items.length }} 项
+                            {{ t('settings.assignmentCount', { count: section.items.length }) }}
                           </span>
                         </div>
 
@@ -820,13 +822,13 @@ function formatBillingCost(value: number | undefined, currency: string | undefin
                               class="rounded-full px-2.5 py-1 text-[11px] font-medium"
                               :class="assignment.status === 'active' ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'"
                             >
-                              {{ assignment.status === 'active' ? '已接入' : '占位中' }}
+                              {{ assignment.status === 'active' ? t('settings.assignmentActive') : t('settings.assignmentPlaceholder') }}
                             </span>
                           </div>
 
                           <div class="grid md:grid-cols-2 gap-4">
                             <div class="space-y-2">
-                              <Label>模型提供商</Label>
+                              <Label>{{ t('settings.modelProviderLabel') }}</Label>
                               <select v-model="assignment.provider" class="w-full rounded-md border bg-background px-3 py-2 text-sm">
                                 <option v-for="provider in modelProviders" :key="provider.id" :value="provider.id">
                                   {{ provider.name }}
@@ -835,13 +837,13 @@ function formatBillingCost(value: number | undefined, currency: string | undefin
                             </div>
 
                             <div class="space-y-2">
-                              <Label>模型名称</Label>
+                              <Label>{{ t('settings.modelNameLabel') }}</Label>
                               <Input v-model="assignment.model" :placeholder="assignment.default_model" />
                             </div>
                           </div>
 
                           <p v-if="assignment.status === 'planned'" class="text-xs text-muted-foreground">
-                            这个设置当前主要用于预留 UI 和配置结构，后续接入对应能力时会直接复用这里的值。
+                            {{ t('settings.assignmentHint') }}
                           </p>
                         </div>
                       </div>
@@ -853,13 +855,13 @@ function formatBillingCost(value: number | undefined, currency: string | undefin
               <div v-else-if="activeTab === 'billing'" class="space-y-8 animate-in fade-in slide-in-from-right-4 duration-300">
                 <div class="flex items-center justify-between">
                   <div>
-                    <h3 class="text-2xl font-bold tracking-tight">系统与计费控制</h3>
-                    <p class="text-muted-foreground text-sm mt-1 text-balance">管理本自然月 API 使用上限，并查看当前大模型调用账本汇总。</p>
+                    <h3 class="text-2xl font-bold tracking-tight">{{ t('settings.billingHeading') }}</h3>
+                    <p class="text-muted-foreground text-sm mt-1 text-balance">{{ t('settings.billingDesc') }}</p>
                   </div>
                   <Button @click="handleSaveBillingSettings" :disabled="isSavingBilling || isLoadingBilling">
                     <Loader2 v-if="isSavingBilling" class="w-4 h-4 mr-2 animate-spin" />
                     <Save v-else class="w-4 h-4 mr-2" />
-                    保存设置
+                    {{ t('settings.saveSettings') }}
                   </Button>
                 </div>
 
@@ -870,31 +872,31 @@ function formatBillingCost(value: number | undefined, currency: string | undefin
                 <div v-else class="space-y-6">
                   <div class="grid gap-4 md:grid-cols-3">
                     <div class="rounded-2xl border bg-card p-5">
-                      <div class="text-xs text-muted-foreground">本月 Token</div>
+                      <div class="text-xs text-muted-foreground">{{ t('settings.monthlyTokens') }}</div>
                       <div class="text-2xl font-bold mt-2">{{ billingSettings?.used_tokens?.toLocaleString() || '0' }}</div>
                     </div>
                     <div class="rounded-2xl border bg-card p-5">
-                      <div class="text-xs text-muted-foreground">本月预估消耗</div>
+                      <div class="text-xs text-muted-foreground">{{ t('settings.monthlyEstimatedCost') }}</div>
                       <div class="text-2xl font-bold mt-2">{{ formatBillingCost(billingSettings?.used_cost, billingSettings?.currency) }}</div>
                     </div>
                     <div class="rounded-2xl border bg-card p-5">
-                      <div class="text-xs text-muted-foreground">限额状态</div>
+                      <div class="text-xs text-muted-foreground">{{ t('settings.limitStatus') }}</div>
                       <div class="text-2xl font-bold mt-2" :class="billingSettings?.limit_exceeded ? 'text-destructive' : 'text-green-600'">
-                        {{ billingSettings?.limit_exceeded ? '已触顶' : '正常' }}
+                        {{ billingSettings?.limit_exceeded ? t('settings.limitExceeded') : t('settings.limitNormal') }}
                       </div>
                     </div>
                   </div>
 
                   <div class="rounded-2xl border bg-card p-6 space-y-6 max-w-2xl">
                     <div class="space-y-2">
-                      <Label>限制方式</Label>
+                      <Label>{{ t('settings.limitType') }}</Label>
                       <div class="grid gap-3 sm:grid-cols-2">
                         <label class="rounded-xl border p-4 cursor-pointer hover:bg-muted/30 transition-colors" :class="billingDraft.api_limit_type === 'token' ? 'border-primary bg-primary/5' : ''">
                           <div class="flex items-center gap-3">
                             <input v-model="billingDraft.api_limit_type" type="radio" value="token" />
                             <div>
-                              <div class="font-semibold text-sm">按 Token 数</div>
-                              <p class="text-xs text-muted-foreground mt-1">限制本月所有 LLM / Embedding 的 token 总量。</p>
+                              <div class="font-semibold text-sm">{{ t('settings.limitByTokens') }}</div>
+                              <p class="text-xs text-muted-foreground mt-1">{{ t('settings.limitByTokensDesc') }}</p>
                             </div>
                           </div>
                         </label>
@@ -902,8 +904,8 @@ function formatBillingCost(value: number | undefined, currency: string | undefin
                           <div class="flex items-center gap-3">
                             <input v-model="billingDraft.api_limit_type" type="radio" value="cost" />
                             <div>
-                              <div class="font-semibold text-sm">按消耗金额</div>
-                              <p class="text-xs text-muted-foreground mt-1">限制本月预估 API 成本。未配置价格的模型按 0 记录。</p>
+                              <div class="font-semibold text-sm">{{ t('settings.limitByCost') }}</div>
+                              <p class="text-xs text-muted-foreground mt-1">{{ t('settings.limitByCostDesc') }}</p>
                             </div>
                           </div>
                         </label>
@@ -912,12 +914,12 @@ function formatBillingCost(value: number | undefined, currency: string | undefin
 
                     <div class="grid gap-4 sm:grid-cols-2">
                       <div class="space-y-2">
-                        <Label>上限值</Label>
+                        <Label>{{ t('settings.limitValue') }}</Label>
                         <Input v-model.number="billingDraft.api_limit_value" type="number" min="0" step="1" />
-                        <p class="text-xs text-muted-foreground">填 0 表示不启用限额拦截。</p>
+                        <p class="text-xs text-muted-foreground">{{ t('settings.zeroDisablesLimit') }}</p>
                       </div>
                       <div class="space-y-2">
-                        <Label>主要货币</Label>
+                        <Label>{{ t('settings.primaryCurrency') }}</Label>
                         <select v-model="billingDraft.currency" class="w-full rounded-md border bg-background px-3 py-2 text-sm">
                           <option value="USD">USD</option>
                           <option value="CNY">CNY</option>
@@ -927,7 +929,7 @@ function formatBillingCost(value: number | undefined, currency: string | undefin
                     </div>
 
                     <div class="rounded-xl border border-dashed bg-muted/20 p-4 text-xs text-muted-foreground leading-6">
-                      限额按自然月统计。Ollama、本地 OCR 和本地 Whisper 会记录调用量，但预估费用为 0；云端模型会按后端内置的临时价格表估算费用。
+                      {{ t('settings.billingHint') }}
                     </div>
                   </div>
                 </div>
@@ -935,8 +937,8 @@ function formatBillingCost(value: number | undefined, currency: string | undefin
 
               <div v-else-if="activeTab === 'data'" class="space-y-8 animate-in fade-in slide-in-from-right-4 duration-300">
                 <div>
-                  <h3 class="text-2xl font-bold tracking-tight">数据管理</h3>
-                  <p class="text-muted-foreground text-sm mt-1 text-balance">统一管理系统各插件从外部同步收集的数据。</p>
+                  <h3 class="text-2xl font-bold tracking-tight">{{ t('settings.dataHeading') }}</h3>
+                  <p class="text-muted-foreground text-sm mt-1 text-balance">{{ t('settings.dataDesc') }}</p>
                 </div>
 
                 <div v-if="isLoadingData" class="flex justify-center items-center py-12">
@@ -945,7 +947,7 @@ function formatBillingCost(value: number | undefined, currency: string | undefin
 
                 <div v-else-if="dataSources.length === 0" class="flex flex-col items-center justify-center py-20 text-muted-foreground border rounded-xl border-dashed">
                   <HardDrive class="w-12 h-12 opacity-20 mb-4" />
-                  <p class="text-sm">暂无任何缓存数据</p>
+                  <p class="text-sm">{{ t('settings.noCachedData') }}</p>
                 </div>
 
                 <div v-else class="grid gap-4">
@@ -961,7 +963,7 @@ function formatBillingCost(value: number | undefined, currency: string | undefin
                       <div>
                         <div class="font-bold text-base">{{ sourceNames[source.source_type] || source.source_type }}</div>
                         <p class="text-sm text-muted-foreground mt-1">
-                          共缓存了 <span class="text-primary font-medium">{{ source.count }}</span> 项数据记录
+                          {{ t('settings.cachedRecordsCount', { count: source.count }) }}
                         </p>
                       </div>
                     </div>
@@ -975,7 +977,7 @@ function formatBillingCost(value: number | undefined, currency: string | undefin
                     >
                       <Loader2 v-if="isClearingData[source.source_type]" class="w-4 h-4 animate-spin" />
                       <Trash2 v-else class="w-4 h-4" />
-                      <span>清空数据</span>
+                      <span>{{ t('settings.clearData') }}</span>
                     </Button>
                   </div>
                 </div>
@@ -984,13 +986,13 @@ function formatBillingCost(value: number | undefined, currency: string | undefin
               <div v-else-if="activeTab === 'invites'" class="space-y-8 animate-in fade-in slide-in-from-right-4 duration-300">
                 <div class="flex items-center justify-between">
                   <div>
-                    <h3 class="text-2xl font-bold tracking-tight">邀请管理</h3>
-                    <p class="text-muted-foreground text-sm mt-1 text-balance">生成并追踪邀请码，用于安全邀请新用户注册。</p>
+                    <h3 class="text-2xl font-bold tracking-tight">{{ t('settings.invitesHeading') }}</h3>
+                    <p class="text-muted-foreground text-sm mt-1 text-balance">{{ t('settings.invitesDesc') }}</p>
                   </div>
                   <Button @click="handleCreateInvitation" :disabled="isCreatingInvitation">
                     <Loader2 v-if="isCreatingInvitation" class="w-4 h-4 mr-2 animate-spin" />
                     <MailPlus v-else class="w-4 h-4 mr-2" />
-                    生成邀请码
+                    {{ t('settings.generateInvite') }}
                   </Button>
                 </div>
 
@@ -998,34 +1000,34 @@ function formatBillingCost(value: number | undefined, currency: string | undefin
                   <table class="w-full text-sm">
                     <thead class="bg-muted/40">
                       <tr class="text-left">
-                        <th class="px-4 py-3 font-medium">邀请码</th>
-                        <th class="px-4 py-3 font-medium">状态</th>
-                        <th class="px-4 py-3 font-medium">使用者</th>
-                        <th class="px-4 py-3 font-medium">操作</th>
+                        <th class="px-4 py-3 font-medium">{{ t('settings.inviteCodeColumn') }}</th>
+                        <th class="px-4 py-3 font-medium">{{ t('settings.statusColumn') }}</th>
+                        <th class="px-4 py-3 font-medium">{{ t('settings.usedByColumn') }}</th>
+                        <th class="px-4 py-3 font-medium">{{ t('settings.actionsColumn') }}</th>
                       </tr>
                     </thead>
                     <tbody>
                       <tr v-if="isLoadingInvitations">
                         <td colspan="4" class="px-4 py-8 text-center text-muted-foreground">
                           <Loader2 class="w-5 h-5 animate-spin inline mr-2" />
-                          正在加载邀请码...
+                          {{ t('settings.loadingInvites') }}
                         </td>
                       </tr>
                       <tr v-else-if="invitations.length === 0">
-                        <td colspan="4" class="px-4 py-8 text-center text-muted-foreground">暂未生成任何邀请码</td>
+                        <td colspan="4" class="px-4 py-8 text-center text-muted-foreground">{{ t('settings.noInvitesYet') }}</td>
                       </tr>
                       <tr v-for="invitation in invitations" :key="invitation.id" class="border-t">
                         <td class="px-4 py-3 font-mono">{{ invitation.code }}</td>
                         <td class="px-4 py-3">
                           <span :class="invitation.is_used ? 'text-muted-foreground' : 'text-green-600'" class="font-medium">
-                            {{ invitation.is_used ? '已使用' : '未使用' }}
+                            {{ invitation.is_used ? t('settings.usedStatus') : t('settings.unusedStatus') }}
                           </span>
                         </td>
                         <td class="px-4 py-3">{{ invitation.used_by_username || '-' }}</td>
                         <td class="px-4 py-3">
                           <Button variant="ghost" size="sm" @click="copyInviteCode(invitation.code)">
                             <Copy class="w-4 h-4 mr-1" />
-                            复制
+                            {{ t('common.copy') }}
                           </Button>
                         </td>
                       </tr>
@@ -1037,29 +1039,29 @@ function formatBillingCost(value: number | undefined, currency: string | undefin
               <div v-else-if="activeTab === 'tokens'" class="space-y-8 animate-in fade-in slide-in-from-right-4 duration-300">
                 <div class="flex items-center justify-between">
                   <div>
-                    <h3 class="text-2xl font-bold tracking-tight">访问令牌</h3>
-                    <p class="text-muted-foreground text-sm mt-1 text-balance">创建个人访问令牌 (PAT) 用于 MCP 服务等外部 AI Agent 接入。删除令牌将立即使其失效。</p>
+                    <h3 class="text-2xl font-bold tracking-tight">{{ t('settings.tokensHeading') }}</h3>
+                    <p class="text-muted-foreground text-sm mt-1 text-balance">{{ t('settings.tokensDesc') }}</p>
                   </div>
                 </div>
 
                 <div class="rounded-xl border bg-card p-5 space-y-4">
                   <div class="flex items-center gap-2 mb-2">
                     <Shield class="w-4 h-4 text-primary" />
-                    <h4 class="font-semibold">创建新令牌</h4>
+                    <h4 class="font-semibold">{{ t('settings.createNewToken') }}</h4>
                   </div>
                   <div class="grid gap-4 md:grid-cols-[1fr_auto_auto]">
-                    <Input v-model="newPatAlias" placeholder="令牌别名，如 Claude Desktop" />
+                    <Input v-model="newPatAlias" :placeholder="t('settings.tokenAliasPlaceholder')" />
                     <select v-model="newPatExpiry" class="rounded-md border bg-background px-3 py-2 text-sm min-w-[140px]">
-                      <option :value="null">永久有效</option>
-                      <option :value="30">30 天</option>
-                      <option :value="90">90 天</option>
-                      <option :value="180">180 天</option>
-                      <option :value="365">365 天</option>
+                      <option :value="null">{{ t('settings.neverExpires') }}</option>
+                      <option :value="30">{{ t('settings.daysOption', { count: 30 }) }}</option>
+                      <option :value="90">{{ t('settings.daysOption', { count: 90 }) }}</option>
+                      <option :value="180">{{ t('settings.daysOption', { count: 180 }) }}</option>
+                      <option :value="365">{{ t('settings.daysOption', { count: 365 }) }}</option>
                     </select>
                     <Button @click="handleCreatePat" :disabled="isCreatingPat">
                       <Loader2 v-if="isCreatingPat" class="w-4 h-4 mr-2 animate-spin" />
                       <Plus v-else class="w-4 h-4 mr-2" />
-                      创建令牌
+                      {{ t('settings.createToken') }}
                     </Button>
                   </div>
                   <div class="grid gap-3 md:grid-cols-2">
@@ -1086,8 +1088,8 @@ function formatBillingCost(value: number | undefined, currency: string | undefin
                   >
                     <input v-model="newPatIsAdmin" type="checkbox" class="mt-1" />
                     <div>
-                      <div class="font-medium text-sm">管理员令牌</div>
-                      <p class="text-xs text-muted-foreground mt-1">令牌将以管理员身份访问系统，请仅用于受信任的本地 Agent 或服务。</p>
+                      <div class="font-medium text-sm">{{ t('settings.adminToken') }}</div>
+                      <p class="text-xs text-muted-foreground mt-1">{{ t('settings.adminTokenDesc') }}</p>
                     </div>
                   </label>
                 </div>
@@ -1095,13 +1097,13 @@ function formatBillingCost(value: number | undefined, currency: string | undefin
                 <div v-if="justCreatedToken" class="rounded-xl border-2 border-green-500/40 bg-green-500/5 p-5 space-y-3">
                   <div class="flex items-center gap-2">
                     <Shield class="w-4 h-4 text-green-500" />
-                    <span class="font-semibold text-green-600 dark:text-green-400">令牌已生成 — 请立即复制！</span>
+                    <span class="font-semibold text-green-600 dark:text-green-400">{{ t('settings.tokenGeneratedNowCopy') }}</span>
                   </div>
                   <div class="flex items-center gap-2">
                     <code class="flex-1 bg-background rounded-lg px-3 py-2 text-xs font-mono break-all border">{{ justCreatedToken }}</code>
-                    <Button size="sm" variant="outline" @click="copyText(justCreatedToken!, '令牌'); justCreatedToken = null">
+                    <Button size="sm" variant="outline" @click="copyText(justCreatedToken!, t('settings.tokenLabel')); justCreatedToken = null">
                       <Copy class="w-4 h-4 mr-1" />
-                      复制并关闭
+                      {{ t('settings.copyAndClose') }}
                     </Button>
                   </div>
                 </div>
@@ -1112,40 +1114,40 @@ function formatBillingCost(value: number | undefined, currency: string | undefin
 
                 <div v-else-if="pats.length === 0" class="flex flex-col items-center justify-center py-16 text-muted-foreground border rounded-xl border-dashed">
                   <Shield class="w-12 h-12 opacity-20 mb-4" />
-                  <p class="text-sm">暂未创建任何访问令牌</p>
+                  <p class="text-sm">{{ t('settings.noTokensYet') }}</p>
                 </div>
 
                 <div v-else class="border rounded-xl overflow-hidden">
                   <table class="w-full text-sm">
                     <thead class="bg-muted/40">
                       <tr class="text-left">
-                        <th class="px-4 py-3 font-medium">别名</th>
-                        <th class="px-4 py-3 font-medium">权限</th>
-                        <th class="px-4 py-3 font-medium">最近使用</th>
-                        <th class="px-4 py-3 font-medium">有效期</th>
-                        <th class="px-4 py-3 font-medium">创建时间</th>
-                        <th class="px-4 py-3 font-medium">操作</th>
+                        <th class="px-4 py-3 font-medium">{{ t('settings.aliasColumn') }}</th>
+                        <th class="px-4 py-3 font-medium">{{ t('settings.permissionsColumn') }}</th>
+                        <th class="px-4 py-3 font-medium">{{ t('settings.lastUsedColumn') }}</th>
+                        <th class="px-4 py-3 font-medium">{{ t('settings.expiryColumn') }}</th>
+                        <th class="px-4 py-3 font-medium">{{ t('settings.createdAtColumn') }}</th>
+                        <th class="px-4 py-3 font-medium">{{ t('settings.actionsColumn') }}</th>
                       </tr>
                     </thead>
                     <tbody>
                       <tr v-for="pat in pats" :key="pat.id" class="border-t">
                         <td class="px-4 py-3">
                           <div class="font-medium">{{ pat.alias }}</div>
-                          <div v-if="pat.is_admin" class="text-xs text-amber-600 mt-1">管理员</div>
+                          <div v-if="pat.is_admin" class="text-xs text-amber-600 mt-1">{{ t('settings.adminRoleLabel') }}</div>
                         </td>
                         <td class="px-4 py-3 text-muted-foreground">{{ formatPatScopes(pat.scopes) }}</td>
                         <td class="px-4 py-3 text-muted-foreground">{{ formatPatLastUsed(pat.last_used_at) }}</td>
                         <td class="px-4 py-3 text-muted-foreground">{{ formatPatExpiry(pat.expires_at) }}</td>
-                        <td class="px-4 py-3 text-muted-foreground">{{ new Date(pat.created_at).toLocaleDateString('zh-CN') }}</td>
+                        <td class="px-4 py-3 text-muted-foreground">{{ new Date(pat.created_at).toLocaleDateString(locale) }}</td>
                         <td class="px-4 py-3">
                           <div class="flex items-center gap-1">
-                            <Button variant="ghost" size="sm" @click="copyText(pat.token, '令牌')">
+                            <Button variant="ghost" size="sm" @click="copyText(pat.token, t('settings.tokenLabel'))">
                               <Copy class="w-4 h-4 mr-1" />
-                              复制
+                              {{ t('common.copy') }}
                             </Button>
                             <Button variant="ghost" size="sm" class="text-destructive hover:text-destructive" @click="handleDeletePat(pat.id)">
                               <Trash2 class="w-4 h-4 mr-1" />
-                              删除
+                              {{ t('common.delete') }}
                             </Button>
                           </div>
                         </td>
@@ -1159,43 +1161,42 @@ function formatBillingCost(value: number | undefined, currency: string | undefin
                 <ScrollArea class="max-h-[calc(90vh-10rem)] pr-4">
                   <div class="space-y-8">
                     <div>
-                      <h3 class="text-2xl font-bold tracking-tight">MCP 服务</h3>
-                      <p class="text-muted-foreground text-sm mt-1 text-balance">启用 MCP (Model Context Protocol) 后，外部 AI Client（如 Claude Desktop）可直接搜索和操作你的 Iris Hub 数据。</p>
+                      <h3 class="text-2xl font-bold tracking-tight">{{ t('settings.mcpHeading') }}</h3>
+                      <p class="text-muted-foreground text-sm mt-1 text-balance">{{ t('settings.mcpDesc') }}</p>
                     </div>
 
                     <div class="rounded-xl border bg-card p-5 space-y-4">
                       <div class="flex items-center gap-2">
                         <Server class="w-4 h-4 text-primary" />
-                        <h4 class="font-semibold">连接方式</h4>
+                        <h4 class="font-semibold">{{ t('settings.connectionMethods') }}</h4>
                       </div>
                       <div class="grid gap-4 md:grid-cols-2">
                         <div class="rounded-lg border p-4 space-y-3">
                           <div>
-                            <div class="text-sm font-semibold">推荐：Streamable HTTP</div>
-                            <p class="text-xs text-muted-foreground mt-1">适合新一代 Agent 平台、云端网关与支持新版 MCP 单端点协议的客户端。</p>
+                            <div class="text-sm font-semibold">{{ t('settings.streamableHttpRecommended') }}</div>
+                            <p class="text-xs text-muted-foreground mt-1">{{ t('settings.streamableHttpDesc') }}</p>
                           </div>
                           <div class="rounded-md border bg-muted/40 px-3 py-2 font-mono text-xs break-all">{{ mcpStreamableEndpoint }}</div>
-                          <Button size="sm" variant="outline" @click="copyText(mcpStreamableEndpoint, 'Streamable HTTP Endpoint')">
+                          <Button size="sm" variant="outline" @click="copyText(mcpStreamableEndpoint, t('settings.streamableHttpEndpointLabel'))">
                             <Copy class="w-4 h-4 mr-2" />
-                            复制 Endpoint
+                            {{ t('settings.copyEndpoint') }}
                           </Button>
                         </div>
 
                         <div class="rounded-lg border p-4 space-y-3">
                           <div>
-                            <div class="text-sm font-semibold">兼容：Legacy SSE</div>
-                            <p class="text-xs text-muted-foreground mt-1">适合仍使用旧版 MCP SSE 协议的客户端，通常还会配合下方 JSON 配置一起使用。</p>
+                            <div class="text-sm font-semibold">{{ t('settings.legacySseCompatible') }}</div>
+                            <p class="text-xs text-muted-foreground mt-1">{{ t('settings.legacySseDesc') }}</p>
                           </div>
                           <div class="rounded-md border bg-muted/40 px-3 py-2 font-mono text-xs break-all">{{ mcpLegacySseEndpoint }}</div>
-                          <Button size="sm" variant="outline" @click="copyText(mcpLegacySseEndpoint, 'Legacy SSE Endpoint')">
+                          <Button size="sm" variant="outline" @click="copyText(mcpLegacySseEndpoint, t('settings.legacySseEndpointLabel'))">
                             <Copy class="w-4 h-4 mr-2" />
-                            复制 Endpoint
+                            {{ t('settings.copyEndpoint') }}
                           </Button>
                         </div>
                       </div>
                       <div class="rounded-lg border border-dashed bg-muted/20 p-4 text-xs text-muted-foreground leading-6">
-                        所有 MCP 请求都需要在请求头中携带 <span class="font-mono text-foreground">Authorization: Bearer pekno_pat_xxx</span>。
-                        如果你的客户端支持新版协议，优先使用 Streamable HTTP；只有在客户端明确要求 SSE 时，再使用 Legacy SSE。
+                        {{ t('settings.mcpAuthorizationHint') }}
                       </div>
                     </div>
 
@@ -1203,21 +1204,21 @@ function formatBillingCost(value: number | undefined, currency: string | undefin
                       <div class="flex items-center justify-between">
                         <div class="flex items-center gap-2">
                           <Shield class="w-4 h-4 text-primary" />
-                          <h4 class="font-semibold">Personal access token</h4>
+                          <h4 class="font-semibold">{{ t('settings.personalAccessToken') }}</h4>
                         </div>
                         <Button v-if="pats.length === 0" size="sm" @click="activeTab = 'tokens'">
                           <Plus class="w-4 h-4 mr-2" />
-                          创建令牌
+                          {{ t('settings.createToken') }}
                         </Button>
                       </div>
-                      <p class="text-sm text-muted-foreground">此访问令牌用于 MCP 服务的身份验证，请妥善保管。删除令牌将立即使连接失效。</p>
+                      <p class="text-sm text-muted-foreground">{{ t('settings.mcpTokenDesc') }}</p>
                       <div v-if="pats.length > 0">
                         <select v-model="selectedMcpToken" class="w-full rounded-md border bg-background px-3 py-2 text-sm">
                           <option v-for="pat in pats" :key="pat.id" :value="pat.token">{{ pat.alias }} ({{ formatPatExpiry(pat.expires_at) }})</option>
                         </select>
                       </div>
                       <div v-else class="rounded-lg border border-dashed p-4 text-center text-sm text-muted-foreground">
-                        未发现可用的访问令牌，请先创建一个。
+                        {{ t('settings.noAvailableTokens') }}
                       </div>
                     </div>
 
@@ -1225,34 +1226,34 @@ function formatBillingCost(value: number | undefined, currency: string | undefin
                       <div class="flex items-center justify-between">
                         <div class="flex items-center gap-2">
                           <Server class="w-4 h-4 text-primary" />
-                          <h4 class="font-semibold">Legacy SSE JSON 配置</h4>
+                          <h4 class="font-semibold">{{ t('settings.legacySseJsonConfig') }}</h4>
                         </div>
-                        <Button size="sm" variant="outline" @click="copyText(mcpJsonConfig, 'MCP 配置')">
+                        <Button size="sm" variant="outline" @click="copyText(mcpJsonConfig, t('settings.mcpConfigLabel'))">
                           <Copy class="w-4 h-4 mr-2" />
-                          Copy JSON
+                          {{ t('settings.copyJson') }}
                         </Button>
                       </div>
-                      <p class="text-xs text-muted-foreground">如果你的 MCP 客户端要求粘贴旧版 SSE 风格的 JSON 配置，可直接复制下面这一段。</p>
+                      <p class="text-xs text-muted-foreground">{{ t('settings.legacySseJsonConfigDesc') }}</p>
                       <pre class="bg-muted/50 rounded-lg p-4 text-xs font-mono overflow-x-auto border"><code>{{ mcpJsonConfig }}</code></pre>
                     </div>
 
                     <div class="rounded-xl border bg-card p-5 space-y-4">
                       <div class="flex items-center gap-2">
                         <BrainCircuit class="w-4 h-4 text-primary" />
-                        <h4 class="font-semibold">Support Tools</h4>
+                        <h4 class="font-semibold">{{ t('settings.supportTools') }}</h4>
                       </div>
                       <div class="grid gap-3">
                         <div class="rounded-lg border p-4">
                           <div class="font-semibold text-sm">get_recent_items</div>
-                          <p class="text-xs text-muted-foreground mt-1">获取最近指定小时数内的信息流条目；支持按信息源类型（如 bilibili, github）过滤。</p>
+                          <p class="text-xs text-muted-foreground mt-1">{{ t('settings.mcpToolGetRecentItemsDesc') }}</p>
                         </div>
                         <div class="rounded-lg border p-4">
                           <div class="font-semibold text-sm">add_to_watch_later</div>
-                          <p class="text-xs text-muted-foreground mt-1">将指定条目加入"稍后再看"收藏列表，相当于在前端点击星标。</p>
+                          <p class="text-xs text-muted-foreground mt-1">{{ t('settings.mcpToolAddWatchLaterDesc') }}</p>
                         </div>
                         <div class="rounded-lg border p-4">
                           <div class="font-semibold text-sm">fetch_item_content</div>
-                          <p class="text-xs text-muted-foreground mt-1">获取指定条目的完整内容或服务器缓存的 AI 摘要，支持按文章/视频类型智能返回不同格式。</p>
+                          <p class="text-xs text-muted-foreground mt-1">{{ t('settings.mcpToolFetchItemContentDesc') }}</p>
                         </div>
                       </div>
                     </div>
@@ -1262,17 +1263,17 @@ function formatBillingCost(value: number | undefined, currency: string | undefin
 
               <div v-else-if="activeTab === 'account'" class="space-y-8 animate-in fade-in slide-in-from-right-4 duration-300">
                 <div>
-                  <h3 class="text-2xl font-bold tracking-tight">账户信息</h3>
-                  <p class="text-muted-foreground text-sm mt-1 text-balance">管理当前登录账户的基础信息与安全设置。</p>
+                  <h3 class="text-2xl font-bold tracking-tight">{{ t('settings.accountHeading') }}</h3>
+                  <p class="text-muted-foreground text-sm mt-1 text-balance">{{ t('settings.accountDesc') }}</p>
                 </div>
 
                 <div class="rounded-xl border p-5 space-y-3 bg-card">
                   <div>
-                    <div class="text-sm text-muted-foreground">用户名</div>
+                    <div class="text-sm text-muted-foreground">{{ t('auth.username') }}</div>
                     <div class="text-lg font-semibold">{{ currentUser.username }}</div>
                   </div>
                   <div>
-                    <div class="text-sm text-muted-foreground">角色</div>
+                    <div class="text-sm text-muted-foreground">{{ t('settings.roleLabel') }}</div>
                     <div class="text-base font-medium">{{ currentUser.role }}</div>
                   </div>
                 </div>
@@ -1280,16 +1281,16 @@ function formatBillingCost(value: number | undefined, currency: string | undefin
                 <div class="rounded-xl border p-5 space-y-4 bg-card max-w-xl">
                   <div class="flex items-center gap-2">
                     <KeyRound class="w-4 h-4 text-primary" />
-                    <h4 class="font-semibold">修改密码</h4>
+                    <h4 class="font-semibold">{{ t('settings.changePassword') }}</h4>
                   </div>
 
                   <div class="space-y-2">
-                    <Label>当前密码</Label>
+                    <Label>{{ t('settings.currentPassword') }}</Label>
                     <Input v-model="currentPassword" type="password" />
                   </div>
 
                   <div class="space-y-2">
-                    <Label>新密码</Label>
+                    <Label>{{ t('settings.newPassword') }}</Label>
                     <Input v-model="newPassword" type="password" />
                   </div>
 
@@ -1297,11 +1298,11 @@ function formatBillingCost(value: number | undefined, currency: string | undefin
                     <Button @click="handleChangePassword" :disabled="isChangingPassword">
                       <Loader2 v-if="isChangingPassword" class="w-4 h-4 mr-2 animate-spin" />
                       <KeyRound v-else class="w-4 h-4 mr-2" />
-                      更新密码
+                      {{ t('settings.updatePassword') }}
                     </Button>
                     <Button variant="destructive" @click="logout">
                       <LogOut class="w-4 h-4 mr-2" />
-                      退出登录
+                      {{ t('common.logout') }}
                     </Button>
                   </div>
                 </div>
@@ -1316,15 +1317,15 @@ function formatBillingCost(value: number | undefined, currency: string | undefin
   <AlertDialog :open="isClearDialogOpen" @update:open="isClearDialogOpen = $event">
     <AlertDialogContent class="max-w-[400px]">
       <AlertDialogHeader>
-        <AlertDialogTitle>清空确认</AlertDialogTitle>
+        <AlertDialogTitle>{{ t('settings.clearConfirmTitle') }}</AlertDialogTitle>
         <AlertDialogDescription>
-          确定要清空 <span class="font-bold text-foreground">{{ sourceNames[sourceToClear] || sourceToClear }}</span> 下的所有缓存数据吗？此操作将永久抹除这些记录且不可恢复。
+          {{ t('settings.clearConfirmDesc', { source: sourceNames[sourceToClear] || sourceToClear }) }}
         </AlertDialogDescription>
       </AlertDialogHeader>
       <div class="flex gap-3 justify-end mt-2">
-        <AlertDialogCancel>取消</AlertDialogCancel>
+        <AlertDialogCancel>{{ t('common.cancel') }}</AlertDialogCancel>
         <AlertDialogAction class="bg-destructive hover:bg-destructive/90 text-destructive-foreground" @click="confirmClearData">
-          确认清空
+          {{ t('settings.confirmClear') }}
         </AlertDialogAction>
       </div>
     </AlertDialogContent>

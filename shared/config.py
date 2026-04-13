@@ -1,6 +1,6 @@
 """
-配置管理模块 - 用于读取和保存用户配置
-支持加密存储敏感信息
+Configuration management helpers for reading and persisting user settings.
+Sensitive values are stored in encrypted form.
 """
 from typing import Optional
 from shared.database import AsyncSessionLocal
@@ -38,7 +38,7 @@ SYSTEM_SCOPED_CONFIG_KEYS = {
 
 
 class ConfigManager:
-    """配置管理器"""
+    """Configuration manager."""
 
     @staticmethod
     def resolve_user_scope(key: str, user_id: Optional[str] = None) -> str:
@@ -54,15 +54,15 @@ class ConfigManager:
         user_id: Optional[str] = None,
     ) -> Optional[str]:
         """
-        获取配置值
+        Retrieve a configuration value.
         
         Args:
-            plugin_id: 插件命名空间标识
-            key: 配置键
-            default: 默认值
+            plugin_id: Plugin namespace identifier
+            key: Configuration key
+            default: Default value
             
         Returns:
-            配置值（已解密），如果不存在返回默认值
+            Decrypted configuration value, or the default if it does not exist.
         """
         async with AsyncSessionLocal() as session:
             result = await session.execute(
@@ -90,7 +90,7 @@ class ConfigManager:
             if not config or not config.value:
                 return default
             
-            # 解密值
+            # Decrypt stored value
             decrypted = decrypt_value(config.value)
             return decrypted if decrypted is not None else default
     
@@ -103,19 +103,19 @@ class ConfigManager:
         user_id: Optional[str] = None,
     ) -> bool:
         """
-        设置配置值
+        Persist a configuration value.
         
         Args:
-            plugin_id: 插件命名空间标识
-            key: 配置键
-            value: 配置值（会被加密）
-            description: 配置描述
+            plugin_id: Plugin namespace identifier
+            key: Configuration key
+            value: Configuration value, which will be encrypted
+            description: Human-readable description
             
         Returns:
-            是否设置成功
+            Whether the operation succeeded
         """
         try:
-            # 加密值
+            # Encrypt the value before persisting it
             encrypted_value = encrypt_value(value)
             
             async with AsyncSessionLocal() as session:
@@ -138,24 +138,24 @@ class ConfigManager:
                     
                     await session.execute(stmt)
                 
-                worker_log.info(f"✅ 配置已保存 [{plugin_id}]: {key}")
+                worker_log.info(f"✅ Configuration saved [{plugin_id}]: {key}")
                 return True
                 
         except Exception as e:
-            worker_log.error(f"❌ 保存配置失败 [{plugin_id}] {key}: {e}")
+            worker_log.error(f"❌ Failed to save configuration [{plugin_id}] {key}: {e}")
             return False
     
     @staticmethod
     async def delete_config(plugin_id: str, key: str, user_id: Optional[str] = None) -> bool:
         """
-        删除配置
+        Delete a configuration value.
         
         Args:
-            plugin_id: 插件命名空间标识
-            key: 配置键
+            plugin_id: Plugin namespace identifier
+            key: Configuration key
             
         Returns:
-            是否删除成功
+            Whether the delete operation succeeded
         """
         try:
             async with AsyncSessionLocal() as session:
@@ -168,9 +168,9 @@ class ConfigManager:
                     )
                     result = await session.execute(stmt)
                     if result.rowcount > 0:
-                        worker_log.info(f"🗑️ 配置已删除 [{plugin_id}]: {key}")
+                        worker_log.info(f"🗑️ Configuration deleted [{plugin_id}]: {key}")
                         return True
                     return False
         except Exception as e:
-            worker_log.error(f"❌ 删除配置失败 [{plugin_id}] {key}: {e}")
+            worker_log.error(f"❌ Failed to delete configuration [{plugin_id}] {key}: {e}")
             return False

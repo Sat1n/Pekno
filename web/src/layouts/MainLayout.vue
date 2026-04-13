@@ -2,7 +2,8 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useColorMode } from '@vueuse/core'
-import { Search, Clock, Settings, Sun, Moon, Monitor, LayoutList, LayoutGrid, Rows3, Bell, Plus, Archive, BarChart3 } from 'lucide-vue-next'
+import { useI18n } from 'vue-i18n'
+import { Search, Clock, Settings, Sun, Moon, Monitor, LayoutList, LayoutGrid, Rows3, Bell, Plus, Archive, BarChart3, Languages } from 'lucide-vue-next'
 import { Sidebar, SidebarContent, SidebarGroup, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -10,6 +11,7 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import SettingsDialog from '@/components/SettingsDialog.vue'
 import PluginSettingsDialog from '@/components/PluginSettingsDialog.vue'
+import { SUPPORTED_LOCALES, getAppLocale, setAppLocale } from '@/i18n'
 import {
   clearNotifications,
   clearStoredToken,
@@ -20,10 +22,11 @@ import {
   type NotificationItem,
 } from '@/lib/api'
 
+const { t, locale } = useI18n()
 const props = withDefaults(defineProps<{
   searchPlaceholder?: string
 }>(), {
-  searchPlaceholder: '搜索 GitHub 项目...',
+  searchPlaceholder: '',
 })
 
 defineEmits<{
@@ -48,7 +51,7 @@ async function loadNotifications() {
   try {
     notifications.value = await getNotifications(30)
   } catch (error) {
-    console.error('加载通知失败:', error)
+    console.error('Failed to load notifications:', error)
   } finally {
     isLoadingNotifications.value = false
   }
@@ -62,7 +65,7 @@ async function markAsRead(id: string) {
     const updated = await markNotificationRead(id)
     notifications.value = notifications.value.map((entry) => (entry.id === id ? updated : entry))
   } catch (error) {
-    console.error('标记通知已读失败:', error)
+    console.error('Failed to mark notification as read:', error)
   }
 }
 
@@ -76,7 +79,7 @@ async function markAllAsRead() {
       read_at: notification.read_at || new Date().toISOString(),
     }))
   } catch (error) {
-    console.error('全部标记已读失败:', error)
+    console.error('Failed to mark all notifications as read:', error)
   }
 }
 
@@ -85,7 +88,7 @@ async function clearAll() {
     await clearNotifications()
     notifications.value = []
   } catch (error) {
-    console.error('清空通知失败:', error)
+    console.error('Failed to clear notifications:', error)
   }
 }
 
@@ -95,33 +98,34 @@ function formatTime(value: string): string {
   const diff = now - date.getTime()
   const minutes = Math.floor(diff / 60000)
   
-  if (minutes < 1) return '刚刚'
-  if (minutes < 60) return `${minutes}分钟前`
-  if (minutes < 1440) return `${Math.floor(minutes / 60)}小时前`
-  return `${Math.floor(minutes / 1440)}天前`
+  if (minutes < 1) return t('common.justNow')
+  if (minutes < 60) return t('common.minutesAgo', { count: minutes })
+  if (minutes < 1440) return t('common.hoursAgo', { count: Math.floor(minutes / 60) })
+  return t('common.daysAgo', { count: Math.floor(minutes / 1440) })
 }
 
 const mode = useColorMode()
 const router = useRouter()
 const route = useRoute()
+const currentLocale = ref(getAppLocale())
 const currentUser = computed(() => getStoredAuthUser())
-const usernameLabel = computed(() => currentUser.value.username || 'Guest')
+const usernameLabel = computed(() => currentUser.value.username || t('common.guest'))
 const userInitials = computed(() => usernameLabel.value.slice(0, 2).toUpperCase())
+const effectiveSearchPlaceholder = computed(() => props.searchPlaceholder || t('layout.searchGithubProjects'))
+const languageOptions = computed(() =>
+  SUPPORTED_LOCALES.map((value) => ({
+    value,
+    label: value === 'zh-CN' ? t('common.chinese') : t('common.english'),
+  }))
+)
 
-// 布局模式 v-model
 const layoutMode = defineModel<'list' | 'grid' | 'compact'>('layout', { default: 'list' })
-
-// 搜索关键词 v-model
 const searchQuery = defineModel<string>('searchQuery', { default: '' })
 
 const SIDEBAR_STATE_KEY = 'pekno-sidebar-open'
-
-// 系统设置弹窗状态
 const isSettingsOpen = ref(false)
 const settingsTab = ref('plugins')
 const sidebarOpen = ref(true)
-
-// 插件设置弹窗状态
 const isPluginSettingsOpen = ref(false)
 const activePluginId = ref('')
 
@@ -136,12 +140,12 @@ defineExpose({
 
 const navMain = computed(() => {
   const items: Array<{ title: string; icon: any; to: string; disabled?: boolean }> = [
-    { title: '探索 (Explore)', icon: Search, to: '/' },
-    { title: '稍后再看', icon: Clock, to: '/watch-later' },
-    { title: '收藏库 / Vault', icon: Archive, to: '/vault' },
+    { title: t('layout.explore'), icon: Search, to: '/' },
+    { title: t('layout.watchLater'), icon: Clock, to: '/watch-later' },
+    { title: t('layout.vault'), icon: Archive, to: '/vault' },
   ]
   if (['admin', 'super_admin'].includes(currentUser.value.role || '')) {
-    items.push({ title: '监控看板', icon: BarChart3, to: '/dashboard' })
+    items.push({ title: t('layout.dashboard'), icon: BarChart3, to: '/dashboard' })
   }
   return items
 })
@@ -188,6 +192,19 @@ watch(sidebarOpen, (value) => {
   window.localStorage.setItem(SIDEBAR_STATE_KEY, String(value))
 })
 
+watch(currentLocale, (value) => {
+  const nextLocale = setAppLocale(value)
+  if (locale.value !== nextLocale) {
+    locale.value = nextLocale
+  }
+})
+
+watch(locale, (value) => {
+  if (currentLocale.value !== value) {
+    currentLocale.value = value as typeof currentLocale.value
+  }
+})
+
 watch(
   () => route.query,
   (query) => {
@@ -210,6 +227,10 @@ onBeforeUnmount(() => {
 
 function handleWindowFocus() {
   void loadNotifications()
+}
+
+function changeLocale(value: string) {
+  currentLocale.value = setAppLocale(value)
 }
 
 async function handleNotificationClick(notification: NotificationItem) {
@@ -251,7 +272,7 @@ async function handleNotificationClick(notification: NotificationItem) {
             <div class="w-7 h-7 bg-primary rounded flex items-center justify-center">
               <span class="text-primary-foreground font-bold text-lg">I</span>
             </div>
-            <span class="font-bold text-lg tracking-tight hidden md:block">Iris Hub</span>
+            <span class="font-bold text-lg tracking-tight hidden md:block">{{ t('layout.appName') }}</span>
           </div>
           <SidebarTrigger />
         </div>
@@ -260,7 +281,7 @@ async function handleNotificationClick(notification: NotificationItem) {
           <Search class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <Input 
             v-model="searchQuery"
-            :placeholder="props.searchPlaceholder" 
+            :placeholder="effectiveSearchPlaceholder" 
             class="w-full pl-9 bg-muted/50 border-transparent focus:bg-background rounded-md h-9 transition-all"
             @keyup.enter="$emit('search')"
           />
@@ -269,7 +290,7 @@ async function handleNotificationClick(notification: NotificationItem) {
         <div class="flex items-center gap-2">
           <Button variant="default" size="sm" class="hidden md:inline-flex gap-2 mr-2" @click="$emit('addContent')">
             <Plus class="w-4 h-4" />
-            添加内容
+            {{ t('layout.addItem') }}
           </Button>
 
           <!-- 布局切换按钮 -->
@@ -305,13 +326,31 @@ async function handleNotificationClick(notification: NotificationItem) {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem @click="mode = 'light'"><Sun class="mr-2 h-4 w-4"/>亮色</DropdownMenuItem>
-              <DropdownMenuItem @click="mode = 'dark'"><Moon class="mr-2 h-4 w-4"/>暗色</DropdownMenuItem>
-              <DropdownMenuItem @click="mode = 'auto'"><Monitor class="mr-2 h-4 w-4"/>跟随系统</DropdownMenuItem>
+              <DropdownMenuItem @click="mode = 'light'"><Sun class="mr-2 h-4 w-4"/>{{ t('common.light') }}</DropdownMenuItem>
+              <DropdownMenuItem @click="mode = 'dark'"><Moon class="mr-2 h-4 w-4"/>{{ t('common.dark') }}</DropdownMenuItem>
+              <DropdownMenuItem @click="mode = 'auto'"><Monitor class="mr-2 h-4 w-4"/>{{ t('common.system') }}</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
 
-          <!-- 通知铃铛 -->
+          <DropdownMenu>
+            <DropdownMenuTrigger as-child>
+              <Button variant="ghost" size="icon" class="h-9 w-9" :title="t('common.language')">
+                <Languages class="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem
+                v-for="option in languageOptions"
+                :key="option.value"
+                @click="changeLocale(option.value)"
+              >
+                <Languages class="mr-2 h-4 w-4" />
+                <span class="flex-1">{{ option.label }}</span>
+                <span v-if="currentLocale === option.value" class="text-xs text-muted-foreground">✓</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
           <Button variant="ghost" size="icon" class="h-9 w-9 md:hidden" @click="$emit('addContent')">
             <Plus class="h-4 w-4" />
           </Button>
@@ -330,7 +369,7 @@ async function handleNotificationClick(notification: NotificationItem) {
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" class="w-80">
               <div class="flex items-center justify-between px-3 py-2 border-b">
-                <span class="font-semibold">通知</span>
+                <span class="font-semibold">{{ t('common.notifications') }}</span>
                 <div class="flex gap-1">
                   <Button 
                     variant="ghost" 
@@ -338,7 +377,7 @@ async function handleNotificationClick(notification: NotificationItem) {
                     class="h-6 text-xs"
                     @click="markAllAsRead"
                   >
-                    全部已读
+                    {{ t('common.allRead') }}
                   </Button>
                   <Button 
                     variant="ghost" 
@@ -346,7 +385,7 @@ async function handleNotificationClick(notification: NotificationItem) {
                     class="h-6 text-xs text-muted-foreground"
                     @click="clearAll"
                   >
-                    清除
+                    {{ t('common.clear') }}
                   </Button>
                 </div>
               </div>
@@ -354,7 +393,7 @@ async function handleNotificationClick(notification: NotificationItem) {
               <!-- 通知列表 -->
               <div class="max-h-80 overflow-y-auto">
                 <div v-if="notifications.length === 0" class="p-4 text-center text-muted-foreground text-sm">
-                  暂无通知
+                  {{ t('common.noNotifications') }}
                 </div>
                 <div 
                   v-for="notification in notifications" 
@@ -403,7 +442,7 @@ async function handleNotificationClick(notification: NotificationItem) {
                 {{ usernameLabel }}
               </DropdownMenuItem>
               <DropdownMenuItem @click="logout">
-                退出登录
+                {{ t('common.logout') }}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -435,7 +474,7 @@ async function handleNotificationClick(notification: NotificationItem) {
               @click="isSettingsOpen = true; settingsTab = 'plugins'"
             >
               <Settings class="w-4 h-4 mr-2" />
-              <span>系统设置</span>
+              <span>{{ t('layout.systemSettings') }}</span>
             </SidebarMenuButton>
           </div>
         </Sidebar>

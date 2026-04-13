@@ -200,25 +200,25 @@ def _validate_and_classify_upload(filename: str, content_type: Optional[str]) ->
     mime_type = _normalize_upload_mime(filename, content_type)
 
     if ext in UNSUPPORTED_IMAGE_EXTENSIONS or mime_type in UNSUPPORTED_IMAGE_MIME_TYPES:
-        raise HTTPException(status_code=400, detail="GIF 动图暂不支持上传，请改用静态图片格式。")
+        raise HTTPException(status_code=400, detail="GIF uploads are not supported. Please use a static image format instead.")
 
     if ext in SUPPORTED_STATIC_IMAGE_EXTENSIONS or mime_type in SUPPORTED_STATIC_IMAGE_MIME_TYPES:
         return "image", mime_type
 
     if mime_type.startswith("image/"):
-        raise HTTPException(status_code=400, detail="当前仅支持 PNG、JPG/JPEG、WEBP、BMP 静态图片上传。")
+        raise HTTPException(status_code=400, detail="Only PNG, JPG/JPEG, WEBP, and BMP static images are supported.")
 
     if ext in SUPPORTED_VIDEO_EXTENSIONS or mime_type in SUPPORTED_VIDEO_MIME_TYPES:
         return "video", mime_type
 
     if mime_type.startswith("video/"):
-        raise HTTPException(status_code=400, detail="当前仅支持 MP4、WEBM、MOV、M4V、MKV、AVI 等常见视频格式。")
+        raise HTTPException(status_code=400, detail="Only common video formats such as MP4, WEBM, MOV, M4V, MKV, and AVI are supported.")
 
     if ext in SUPPORTED_AUDIO_EXTENSIONS or mime_type in SUPPORTED_AUDIO_MIME_TYPES:
         return "audio", mime_type
 
     if mime_type.startswith("audio/"):
-        raise HTTPException(status_code=400, detail="当前仅支持 MP3、WAV、M4A、AAC、FLAC、OGG、WEBM 等常见音频格式。")
+        raise HTTPException(status_code=400, detail="Only common audio formats such as MP3, WAV, M4A, AAC, FLAC, OGG, and WEBM are supported.")
 
     if ext in SUPPORTED_PDF_EXTENSIONS or mime_type in SUPPORTED_PDF_MIME_TYPES:
         return "document", "application/pdf"
@@ -235,9 +235,9 @@ def _validate_and_classify_upload(filename: str, content_type: Optional[str]) ->
         return "document", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
     if ext in UNSUPPORTED_OFFICE_EXTENSIONS or any(keyword in mime_type for keyword in UNSUPPORTED_OFFICE_MIME_KEYWORDS):
-        raise HTTPException(status_code=400, detail="当前仅支持 DOCX，其他 Office 文档请先转换为 PDF、TXT 或 Markdown。")
+        raise HTTPException(status_code=400, detail="Only DOCX is supported right now. Please convert other Office files to PDF, TXT, or Markdown first.")
 
-    raise HTTPException(status_code=400, detail="当前仅支持静态图片、常见视频音频、PDF、TXT、Markdown 与 DOCX 上传。")
+    raise HTTPException(status_code=400, detail="Only static images, common video/audio formats, PDF, TXT, Markdown, and DOCX uploads are supported.")
 
 
 def _is_text_upload_mime(mime_type: str) -> bool:
@@ -271,7 +271,7 @@ async def _resolve_plugin(plugin_name: str) -> BasePlugin:
 
     plugin = plugin_manager.get_plugin(plugin_id)
     if not plugin:
-        raise HTTPException(status_code=404, detail=f"未找到插件: {plugin_name}")
+        raise HTTPException(status_code=404, detail=f"Plugin not found: {plugin_name}")
     return plugin
 
 
@@ -348,7 +348,7 @@ async def _fetch_item_for_user(item_id: str, user_id: str) -> tuple[ItemORM, Use
         )
         row = result.first()
     if not row:
-        raise HTTPException(status_code=404, detail="找不到对应条目")
+        raise HTTPException(status_code=404, detail="The requested item could not be found.")
     return row
 
 
@@ -411,9 +411,9 @@ async def _queue_vault_download_if_needed(item_id: str, item: ItemORM, user_id: 
         from worker.tasks import task_download_vault_asset
 
         await task_download_vault_asset.kiq(item_id, user_id)
-        hub_log.info(f"📨 已投递 Vault 资源补齐任务: {item_id} | user={user_id or 'fallback'}")
+        hub_log.info(f"📨 Dispatched Vault asset backfill task: {item_id} | user={user_id or 'fallback'}")
     except Exception:
-        hub_log.exception("投递 Vault 下载任务失败")
+        hub_log.exception("Failed to dispatch Vault download task")
 
 
 @router.post("/{item_id}/ensure_vault_asset", response_model=ItemResponse)
@@ -436,7 +436,7 @@ async def _queue_video_summary_if_needed(item: ItemORM, user_id: str | None = No
 
         await process_multimedia_task.kiq(item.id, item.raw_link, user_id)
     except Exception:
-        hub_log.exception("投递视频总结任务失败")
+        hub_log.exception("Failed to dispatch video summary task")
 
 
 async def _queue_image_summary_if_needed(item: ItemORM, user_id: str | None = None):
@@ -452,7 +452,7 @@ async def _queue_image_summary_if_needed(item: ItemORM, user_id: str | None = No
 
         await process_image_understanding_task.kiq(item.id, user_id)
     except Exception:
-        hub_log.exception("投递图片理解任务失败")
+        hub_log.exception("Failed to dispatch image understanding task")
 
 
 async def _queue_text_processing_if_needed(item: ItemORM, user_id: str | None = None):
@@ -469,7 +469,7 @@ async def _queue_text_processing_if_needed(item: ItemORM, user_id: str | None = 
 
         await process_uploaded_text_document_task.kiq(item.id, user_id)
     except Exception:
-        hub_log.exception("投递文本上传分析任务失败")
+        hub_log.exception("Failed to dispatch uploaded text analysis task")
 
 
 async def _queue_pdf_ocr_if_needed(item: ItemORM, user_id: str | None = None):
@@ -488,7 +488,7 @@ async def _queue_pdf_ocr_if_needed(item: ItemORM, user_id: str | None = None):
 
         await process_pdf_ocr_task.kiq(item.id, user_id)
     except Exception:
-        hub_log.exception("投递 PDF OCR 任务失败")
+        hub_log.exception("Failed to dispatch PDF OCR task")
 
 
 @router.get("", response_model=List[ItemResponse])
@@ -543,7 +543,7 @@ async def get_parse_plugins(current_user=Depends(get_current_user)):
         results.append(
             ParsePluginInfo(
                 id=manifest.get("id", ""),
-                name=manifest.get("name", manifest.get("id", "未知插件")),
+                name=manifest.get("name", manifest.get("id", "Unknown Plugin")),
                 source_type=manifest.get("source_type", manifest.get("id", "")),
             )
         )
@@ -672,7 +672,7 @@ async def parse_item_url(
 ):
     plugin = await _resolve_plugin(payload.plugin_name)
     if not hasattr(plugin, "parse_single_item"):
-        raise HTTPException(status_code=400, detail=f"插件 {payload.plugin_name} 不支持单条解析")
+        raise HTTPException(status_code=400, detail=f"Plugin {payload.plugin_name} does not support single-item parsing.")
 
     try:
         from worker.plugins.pipeline import parse_single_plugin_item_task
@@ -684,13 +684,13 @@ async def parse_item_url(
             payload.retention_days,
         )
     except Exception as exc:
-        hub_log.exception("投递单条解析任务失败")
-        raise HTTPException(status_code=500, detail=f"解析任务投递失败: {exc}")
+        hub_log.exception("Failed to dispatch single-item parse task")
+        raise HTTPException(status_code=500, detail=f"Failed to dispatch parse task: {exc}")
 
     return {
         "status": "accepted",
         "task_id": str(task.task_id),
-        "message": "链接解析任务已提交，Worker 正在后台抓取并入库，请稍候刷新信息流查看结果。",
+        "message": "The parse task has been submitted. A worker is fetching and ingesting the content in the background.",
     }
 
 
@@ -700,7 +700,7 @@ async def toggle_item_watch_later(item_id: str, current_user=Depends(get_current
         async with session.begin():
             item = await session.get(ItemORM, item_id)
             if not item:
-                raise HTTPException(status_code=404, detail="找不到对应条目")
+                raise HTTPException(status_code=404, detail="The requested item could not be found.")
 
             result = await session.execute(
                 select(UserItemStateORM).where(
@@ -711,7 +711,7 @@ async def toggle_item_watch_later(item_id: str, current_user=Depends(get_current
             state = result.scalar_one_or_none()
 
             if state is None:
-                raise HTTPException(status_code=404, detail="当前用户无权操作该条目")
+                raise HTTPException(status_code=404, detail="You do not have access to this item.")
 
             state.is_watch_later = not state.is_watch_later
             state.updated_at = now_in_app_timezone_naive()
@@ -735,7 +735,7 @@ async def toggle_item_favorite(item_id: str, current_user=Depends(get_current_us
         async with session.begin():
             item = await session.get(ItemORM, item_id)
             if not item:
-                raise HTTPException(status_code=404, detail="找不到对应条目")
+                raise HTTPException(status_code=404, detail="The requested item could not be found.")
 
             result = await session.execute(
                 select(UserItemStateORM).where(
@@ -746,7 +746,7 @@ async def toggle_item_favorite(item_id: str, current_user=Depends(get_current_us
             state = result.scalar_one_or_none()
 
             if state is None:
-                raise HTTPException(status_code=404, detail="当前用户无权操作该条目")
+                raise HTTPException(status_code=404, detail="You do not have access to this item.")
 
             was_favorited = bool(state.is_favorited)
             state.is_favorited = not state.is_favorited
@@ -850,12 +850,12 @@ async def assign_item_vault_category(
             )
             state = result.scalar_one_or_none()
             if state is None:
-                raise HTTPException(status_code=404, detail="当前用户无权操作该条目")
+                raise HTTPException(status_code=404, detail="You do not have access to this item.")
 
             if payload.vault_category_id:
                 category = await session.get(VaultCategoryORM, payload.vault_category_id)
                 if not category or category.user_id != current_user["id"]:
-                    raise HTTPException(status_code=404, detail="目标分类不存在")
+                    raise HTTPException(status_code=404, detail="The target category could not be found.")
                 state.vault_category_id = category.id
             else:
                 state.vault_category_id = None
@@ -884,7 +884,7 @@ async def summarize_item(item_id: str, current_user=Depends(get_current_user)):
         )
         item = result.scalar_one_or_none()
         if not item:
-            raise HTTPException(status_code=404, detail="当前用户无权访问该条目")
+            raise HTTPException(status_code=404, detail="You do not have access to this item.")
 
     import uuid as task_uuid
     task_id = str(task_uuid.uuid4())
@@ -895,25 +895,25 @@ async def summarize_item(item_id: str, current_user=Depends(get_current_user)):
             return {
                 "status": "skipped",
                 "task_id": "",
-                "message": "该视频已经完成过多媒体分析，无需重复生成。",
+                "message": "This video already has multimedia analysis results. No new run is needed.",
             }
         from worker.tasks import process_multimedia_task
         await process_multimedia_task.kiq(item_id, item.raw_link, current_user["id"])
-        msg = "AI 多媒体分析管线已启动，正在剥离音轨并生成胶卷快照，请稍后..."
+        msg = "The AI multimedia analysis pipeline has started. Audio extraction and keyframe generation are in progress."
     elif item.intent == "image":
         if metadata.get("has_long_summary") and metadata.get("image_understanding"):
             return {
                 "status": "skipped",
                 "task_id": "",
-                "message": "该图片已经完成过图片理解，无需重复生成。",
+                "message": "This image already has image-understanding results. No new run is needed.",
             }
         from worker.tasks import process_image_understanding_task
         await process_image_understanding_task.kiq(item_id, current_user["id"])
-        msg = "图片理解任务已启动，正在提取视觉描述与图片文字，请稍后..."
+        msg = "The image understanding task has started. Visual description and OCR extraction are in progress."
     else:
         from worker.plugins.pipeline import summarize_repo_task
         await summarize_repo_task.kiq(item_id, task_id, current_user["id"])
-        msg = "AI 深度总结任务已启动，请稍后查询结果"
+        msg = "The AI summary task has started. Please check back shortly."
 
     return {
         "status": "accepted",
@@ -972,7 +972,7 @@ async def get_item_hover_blocks(item_id: str, current_user=Depends(get_current_u
         item = result.scalar_one_or_none()
 
     if not item:
-        raise HTTPException(status_code=404, detail="条目不存在或您无权访问")
+        raise HTTPException(status_code=404, detail="The item does not exist or you do not have access to it.")
 
     metadata_extra = item.metadata_extra or {}
     if "hover_blocks" in metadata_extra:
@@ -1005,5 +1005,5 @@ async def get_item_hover_blocks(item_id: str, current_user=Depends(get_current_u
         blocks = await plugin.get_hover_blocks(item_url=item.raw_link, user_config=user_config_dict)
         return blocks
     except Exception as exc:
-        hub_log.exception("获取 Hover 信息失败")
-        raise HTTPException(status_code=500, detail=f"获取 Hover 信息失败: {str(exc)}")
+        hub_log.exception("Failed to fetch hover preview blocks")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch hover preview blocks: {str(exc)}")
