@@ -24,6 +24,8 @@ var/
 venv/
 plugins_dev/
 dev.txt
+worker/plugins/third_party/*
+!worker/plugins/third_party/__init__.py
 
 # Node.js
 node_modules/
