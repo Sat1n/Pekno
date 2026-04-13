@@ -9,6 +9,7 @@ from hub.core.ocr import OCRConfigError, OCRDisabledError, run_image_ocr, run_pd
 from hub.core.notifications import create_notification_for_item_users
 from hub.core.model_settings import get_model_assignments
 from hub.core.llm.service import LLMManager
+from hub.core.billing import QuotaExceededException
 from shared.time_utils import now_in_app_timezone_naive
 from sqlalchemy import select
 import os
@@ -24,6 +25,47 @@ import re
 from pathlib import Path
 from urllib.parse import quote, unquote, urlparse
 from shared.config import ConfigManager, ConfigKeys
+
+
+async def _mark_item_failed_with_circuit_breaker(
+    item_id: str,
+    *,
+    error_message: str,
+    title: str | None = None,
+    user_id: str | None = None,
+    extra_metadata: dict | None = None,
+) -> None:
+    worker_log.error(f"❌ [CIRCUIT BREAKER] {item_id} | {error_message}")
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(ItemORM).where(ItemORM.id == item_id))
+        item = result.scalar_one_or_none()
+        if item:
+            metadata = dict(item.metadata_extra or {})
+            metadata["processing_status"] = "failed"
+            metadata["processing_error"] = error_message
+            if extra_metadata:
+                metadata.update(extra_metadata)
+            await session.execute(
+                ItemORM.__table__.update()
+                .where(ItemORM.id == item_id)
+                .values(
+                    metadata_extra=metadata,
+                    updated_at=now_in_app_timezone_naive(),
+                )
+            )
+            await session.commit()
+            if not title:
+                title = item.title
+
+    await create_notification_for_item_users(
+        item_id,
+        type="error",
+        category="upload_processing",
+        title="API 熔断器已触发",
+        description=f"{title or '该内容'} 因额度耗尽已停止后台分析。",
+        preferred_user_id=user_id,
+    )
 
 
 def _parse_github_repo_ref(item: ItemORM) -> tuple[str, str] | None:
@@ -569,6 +611,13 @@ async def process_multimedia_task(item_id: str, url: str, user_id: str | None = 
             preferred_user_id=user_id,
         )
             
+    except QuotaExceededException as exc:
+        await _mark_item_failed_with_circuit_breaker(
+            item_id,
+            error_message=exc.detail,
+            title=item_ctx.title,
+            user_id=user_id,
+        )
     except Exception as e:
         worker_log.error(f"❌ 多媒体任务核心链崩塌: {e}")
         async with AsyncSessionLocal() as session:
@@ -910,6 +959,14 @@ async def process_image_understanding_task(item_id: str, user_id: str | None = N
             preferred_user_id=user_id,
         )
 
+    except QuotaExceededException as exc:
+        await _mark_item_failed_with_circuit_breaker(
+            item_id,
+            error_message=exc.detail,
+            title=item.title if 'item' in locals() and item else None,
+            user_id=user_id,
+            extra_metadata={"image_understanding_error": exc.detail},
+        )
     except Exception as e:
         worker_log.error(f"❌ 图片理解任务失败: {item_id} | {e}")
         async with AsyncSessionLocal() as session:
@@ -1055,6 +1112,25 @@ async def process_pdf_ocr_task(item_id: str, user_id: str | None = None):
                     .values(metadata_extra=metadata, updated_at=now_in_app_timezone_naive())
                 )
                 await session.commit()
+    except QuotaExceededException as exc:
+        await _mark_item_failed_with_circuit_breaker(
+            item_id,
+            error_message=exc.detail,
+            title=item.title if 'item' in locals() and item else None,
+            user_id=user_id,
+            extra_metadata={
+                "ocr": {
+                    "kind": "pdf",
+                    "status": "failed",
+                    "full_text": "",
+                    "pages": [],
+                    "provider": "paddleocr_v5_cpu",
+                    "model": "PP-OCRv5",
+                    "processed_at": now_in_app_timezone_naive().isoformat(),
+                    "error": exc.detail,
+                }
+            },
+        )
     except Exception as exc:
         worker_log.error(f"❌ PDF OCR 任务失败: {item_id} | {exc}")
         async with AsyncSessionLocal() as session:
@@ -1181,6 +1257,21 @@ async def process_uploaded_text_document_task(item_id: str, user_id: str | None 
             title="文档分析已完成",
             description=f"{item.title or '该文档'} 已完成摘要与索引。",
             preferred_user_id=user_id,
+        )
+    except QuotaExceededException as exc:
+        await _mark_item_failed_with_circuit_breaker(
+            item_id,
+            error_message=exc.detail,
+            title=item.title if 'item' in locals() and item else None,
+            user_id=user_id,
+            extra_metadata={
+                "text_processing_error": exc.detail,
+                **(
+                    {"docx_extract_error": exc.detail}
+                    if mime_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    else {}
+                ),
+            },
         )
     except Exception as exc:
         worker_log.error(f"❌ 文本上传分析任务失败: {item_id} | {exc}")

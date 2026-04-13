@@ -190,6 +190,13 @@ class PluginHealthResponse(BaseModel):
 class MonitorMetricsResponse(BaseModel):
     rag_backlog_count: int
     api_today_total_cost: float
+    api_limit_type: Literal["token", "cost"]
+    api_limit_value: float
+    used_tokens: int
+    used_cost: float
+    limit_exceeded: bool
+    billing_warning: bool = False
+    warning_threshold_ratio: float = 0.9
     billing_currency: Literal["USD", "CNY", "EUR"]
     abnormal_plugin_count: int
     plugins: List[PluginHealthResponse]
@@ -199,3 +206,27 @@ class LogTailResponse(BaseModel):
     service: Literal["hub", "worker", "scheduler"]
     content: str
     lines: int
+
+
+class UsageTrendPointResponse(BaseModel):
+    date: str
+    total_tokens: int
+    total_cost: float
+
+
+class UsageTrendResponse(BaseModel):
+    api_limit_type: Literal["token", "cost"]
+    api_limit_value: float
+    currency: Literal["USD", "CNY", "EUR"]
+    used_tokens: int
+    used_cost: float
+    limit_exceeded: bool
+    billing_warning: bool = False
+    warning_threshold_ratio: float = 0.9
+    points: List[UsageTrendPointResponse]
+
+
+class ForceProcessResponse(BaseModel):
+    status: Literal["accepted"]
+    requeued_count: int
+    message: str

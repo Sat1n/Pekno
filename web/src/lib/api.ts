@@ -272,15 +272,46 @@ export interface PluginHealthItem {
 export interface AdminMetricsResponse {
   rag_backlog_count: number
   api_today_total_cost: number
+  api_limit_type: 'token' | 'cost'
+  api_limit_value: number
+  used_tokens: number
+  used_cost: number
+  limit_exceeded: boolean
+  billing_warning: boolean
+  warning_threshold_ratio: number
   billing_currency: 'USD' | 'CNY' | 'EUR'
   abnormal_plugin_count: number
   plugins: PluginHealthItem[]
+}
+
+export interface UsageTrendPoint {
+  date: string
+  total_tokens: number
+  total_cost: number
+}
+
+export interface AdminUsageTrendResponse {
+  api_limit_type: 'token' | 'cost'
+  api_limit_value: number
+  currency: 'USD' | 'CNY' | 'EUR'
+  used_tokens: number
+  used_cost: number
+  limit_exceeded: boolean
+  billing_warning: boolean
+  warning_threshold_ratio: number
+  points: UsageTrendPoint[]
 }
 
 export interface AdminLogTailResponse {
   service: 'hub' | 'worker' | 'scheduler'
   content: string
   lines: number
+}
+
+export interface ForceProcessResponse {
+  status: 'accepted'
+  requeued_count: number
+  message: string
 }
 
 // 搜索参数接口
@@ -614,8 +645,18 @@ export async function getAdminMetrics(): Promise<AdminMetricsResponse> {
   return response.data
 }
 
+export async function getAdminUsageTrend(): Promise<AdminUsageTrendResponse> {
+  const response = await apiClient.get<AdminUsageTrendResponse>('/api/admin/metrics/usage-trend')
+  return response.data
+}
+
 export async function getAdminLogTail(service: 'hub' | 'worker' | 'scheduler'): Promise<AdminLogTailResponse> {
   const response = await apiClient.get<AdminLogTailResponse>(`/api/admin/logs/${service}`)
+  return response.data
+}
+
+export async function forceProcessQueue(): Promise<ForceProcessResponse> {
+  const response = await apiClient.post<ForceProcessResponse>('/api/admin/queue/force-process')
   return response.data
 }
 

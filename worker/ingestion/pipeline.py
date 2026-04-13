@@ -4,6 +4,7 @@ from worker.broker import broker
 from shared.database import AsyncSessionLocal  # 导入会话工厂
 from shared.models import ItemORM, UserItemStateORM     # 导入数据库模型
 from sqlalchemy.dialects.postgresql import insert
+from hub.core.billing import QuotaExceededException
 from hub.core.llm.service import LLMManager
 
 class IngestionPipeline:
@@ -100,4 +101,20 @@ class IngestionPipeline:
 async def process_new_item_task(item_dict: dict):
     item = UniversalItem.model_validate(item_dict)
     pipeline = IngestionPipeline()
-    return await pipeline.process_item(item)
+    try:
+        return await pipeline.process_item(item)
+    except QuotaExceededException as exc:
+        worker_log.error(f"❌ [CIRCUIT BREAKER] 入库分析已熔断: {item.id} | {exc.detail}")
+        async with AsyncSessionLocal() as session:
+            async with session.begin():
+                existing_item = await session.get(ItemORM, item.id)
+                if existing_item:
+                    metadata = dict(existing_item.metadata_extra or {})
+                    metadata["processing_status"] = "failed"
+                    metadata["processing_error"] = exc.detail
+                    await session.execute(
+                        ItemORM.__table__.update()
+                        .where(ItemORM.id == item.id)
+                        .values(metadata_extra=metadata)
+                    )
+        return None

@@ -2,6 +2,7 @@ from shared.plugins.base import PluginContext
 from shared.plugins.manager import plugin_manager
 from shared.entities import UniversalItem
 from hub.core.notifications import create_notification_for_user
+from hub.core.billing import QuotaExceededException
 from worker.ingestion.pipeline import process_new_item_task
 from shared.logger import worker_log
 from worker.broker import broker
@@ -325,6 +326,17 @@ async def summarize_repo_task(item_id: str, task_id: str, user_id: str | None = 
             related_item_id=item_id,
         )
             
+    except QuotaExceededException as e:
+        worker_log.error(f"❌ [CIRCUIT BREAKER] AI 总结任务已熔断: {e.detail}")
+        await create_notification_for_user(
+            user_id,
+            type="error",
+            category="summary",
+            title="AI 总结失败",
+            description="API 限额可能已用尽，请联系管理员。",
+            related_item_id=item_id,
+        )
+        raise
     except Exception as e:
         worker_log.error(f"❌ AI 总结任务失败: {e}")
         await create_notification_for_user(

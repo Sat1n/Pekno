@@ -45,6 +45,10 @@ class ApiLimitExceededError(RuntimeError):
         super().__init__("API 限额可能已用尽，请联系管理员")
 
 
+class QuotaExceededException(ApiLimitExceededError):
+    pass
+
+
 def estimate_tokens(text: str | None) -> int:
     if not text:
         return 0
@@ -150,7 +154,7 @@ async def get_billing_state() -> dict[str, Any]:
     }
 
 
-async def check_api_limit_or_raise() -> None:
+async def check_api_quota_before_request() -> None:
     state = await get_billing_state()
     limit_value = float(state["api_limit_value"])
     if limit_value <= 0:
@@ -160,9 +164,13 @@ async def check_api_limit_or_raise() -> None:
     used_value = state["used_tokens"] if limit_type == "token" else state["used_cost"]
     if float(used_value) >= limit_value:
         unit = "tokens" if limit_type == "token" else state["currency"]
-        raise ApiLimitExceededError(
+        raise QuotaExceededException(
             f"API monthly {limit_type} limit exceeded: used={used_value}, limit={limit_value} {unit}"
         )
+
+
+async def check_api_limit_or_raise() -> None:
+    await check_api_quota_before_request()
 
 
 def estimate_cost(

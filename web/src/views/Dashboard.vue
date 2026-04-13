@@ -1,28 +1,41 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import MainLayout from '@/layouts/MainLayout.vue'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Loader2, RefreshCw, Server, Waves, Zap } from 'lucide-vue-next'
+import { Loader2, RefreshCw, Server, Waves, TerminalSquare, Flame, Siren, Rocket } from 'lucide-vue-next'
 import {
+  forceProcessQueue,
   getAdminLogTail,
   getAdminMetrics,
+  getAdminUsageTrend,
   getStoredAuthUser,
   triggerPluginSyncApi,
   type AdminMetricsResponse,
+  type AdminUsageTrendResponse,
   type PluginHealthItem,
 } from '@/lib/api'
 import { useToast } from '@/components/ui/toast/use-toast'
 import { Toaster } from '@/components/ui/toast'
+import VChart from 'vue-echarts'
+import { use } from 'echarts/core'
+import { CanvasRenderer } from 'echarts/renderers'
+import { LineChart } from 'echarts/charts'
+import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components'
+
+use([CanvasRenderer, LineChart, GridComponent, TooltipComponent, LegendComponent])
 
 type LogService = 'hub' | 'worker' | 'scheduler'
+type HighlightLevel = 'error' | 'warning' | 'normal'
 
 const { toast } = useToast()
 const currentUser = computed(() => getStoredAuthUser())
 const isAdmin = computed(() => ['admin', 'super_admin'].includes(currentUser.value.role || ''))
 const metrics = ref<AdminMetricsResponse | null>(null)
+const usageTrend = ref<AdminUsageTrendResponse | null>(null)
 const isLoadingMetrics = ref(false)
+const isForceProcessing = ref(false)
 const activeLogTab = ref<LogService>('hub')
 const logContent = ref<Record<LogService, string>>({
   hub: '',
@@ -35,20 +48,21 @@ const loadingLog = ref<Record<LogService, boolean>>({
   scheduler: false,
 })
 const retryingPlugins = ref<Record<string, boolean>>({})
+const logTerminalRef = ref<HTMLElement | null>(null)
 let pollTimer: number | undefined
 
 const cards = computed(() => [
   {
     title: 'RAG 积压数',
     value: metrics.value?.rag_backlog_count ?? 0,
-    description: '等待摘要或向量补齐的内容',
+    description: '等待摘要、OCR 或向量补齐的内容',
     icon: Waves,
   },
   {
     title: 'API 今日总消耗',
     value: `${metrics.value?.billing_currency || 'USD'} ${(metrics.value?.api_today_total_cost || 0).toFixed(4)}`,
     description: '按当前主要货币折算',
-    icon: Zap,
+    icon: Flame,
   },
   {
     title: '异常插件数',
@@ -57,6 +71,113 @@ const cards = computed(() => [
     icon: Server,
   },
 ])
+
+const warningBanner = computed(() => {
+  const data = usageTrend.value
+  if (!data || data.api_limit_value <= 0) return null
+
+  const usedValue = data.api_limit_type === 'token' ? data.used_tokens : data.used_cost
+  const ratio = usedValue / data.api_limit_value
+  if (ratio >= 1) {
+    return {
+      variant: 'critical' as const,
+      title: 'API 熔断器已触发 / 额度耗尽',
+      description: `本月已使用 ${usedValue} / ${data.api_limit_value} ${data.api_limit_type === 'token' ? 'tokens' : data.currency}，新的模型请求会被直接拦截。`,
+    }
+  }
+  if (ratio >= (data.warning_threshold_ratio || 0.9)) {
+    return {
+      variant: 'warning' as const,
+      title: 'API 熔断预警',
+      description: `当前已使用 ${usedValue} / ${data.api_limit_value} ${data.api_limit_type === 'token' ? 'tokens' : data.currency}，请留意预算消耗。`,
+    }
+  }
+  return null
+})
+
+const chartOption = computed(() => {
+  const data = usageTrend.value
+  const points = data?.points || []
+  const isCostMode = data?.api_limit_type === 'cost'
+  const values = points.map((point) => (isCostMode ? point.total_cost : point.total_tokens))
+  const axisLabels = points.map((point) => point.date.slice(5))
+  const color = warningBanner.value?.variant === 'critical' ? '#ef4444' : '#f97316'
+
+  return {
+    backgroundColor: 'transparent',
+    tooltip: {
+      trigger: 'axis',
+      backgroundColor: '#111827',
+      borderColor: '#374151',
+      textStyle: { color: '#f9fafb' },
+      valueFormatter: (value: number) =>
+        isCostMode ? `${data?.currency || 'USD'} ${Number(value || 0).toFixed(4)}` : `${Math.round(Number(value || 0))} tokens`,
+    },
+    grid: {
+      top: 28,
+      left: 16,
+      right: 16,
+      bottom: 10,
+      containLabel: true,
+    },
+    xAxis: {
+      type: 'category',
+      boundaryGap: false,
+      data: axisLabels,
+      axisLine: { lineStyle: { color: '#d1d5db' } },
+      axisLabel: { color: '#6b7280' },
+    },
+    yAxis: {
+      type: 'value',
+      axisLine: { show: false },
+      splitLine: { lineStyle: { color: '#e5e7eb' } },
+      axisLabel: {
+        color: '#6b7280',
+        formatter: (value: number) =>
+          isCostMode ? `${Number(value || 0).toFixed(3)}` : `${Math.round(Number(value || 0))}`,
+      },
+    },
+    series: [
+      {
+        name: isCostMode ? `API 消耗 (${data?.currency || 'USD'})` : 'API Token 消耗',
+        type: 'line',
+        smooth: true,
+        symbol: 'circle',
+        symbolSize: 8,
+        data: values,
+        lineStyle: { width: 3, color },
+        itemStyle: { color },
+        areaStyle: {
+          color: {
+            type: 'linear',
+            x: 0,
+            y: 0,
+            x2: 0,
+            y2: 1,
+            colorStops: [
+              { offset: 0, color: warningBanner.value?.variant === 'critical' ? 'rgba(239,68,68,0.35)' : 'rgba(249,115,22,0.28)' },
+              { offset: 1, color: 'rgba(249,115,22,0.02)' },
+            ],
+          },
+        },
+      },
+    ],
+  }
+})
+
+const parsedLogLines = computed(() => {
+  const raw = logContent.value[activeLogTab.value] || '暂无日志'
+  return raw.split('\n').map((line) => ({
+    text: line,
+    level: classifyLogLine(line),
+  }))
+})
+
+function classifyLogLine(line: string): HighlightLevel {
+  if (/ERROR|Exception/i.test(line)) return 'error'
+  if (/WARNING/i.test(line)) return 'warning'
+  return 'normal'
+}
 
 function formatTime(value?: string | null) {
   if (!value) return '从未成功同步'
@@ -71,11 +192,23 @@ function statusVariant(status: PluginHealthItem['status']) {
   return 'destructive'
 }
 
+async function scrollLogToBottom() {
+  await nextTick()
+  if (logTerminalRef.value) {
+    logTerminalRef.value.scrollTop = logTerminalRef.value.scrollHeight
+  }
+}
+
 async function loadMetrics() {
   if (!isAdmin.value || isLoadingMetrics.value) return
   isLoadingMetrics.value = true
   try {
-    metrics.value = await getAdminMetrics()
+    const [metricsResponse, usageTrendResponse] = await Promise.all([
+      getAdminMetrics(),
+      getAdminUsageTrend(),
+    ])
+    metrics.value = metricsResponse
+    usageTrend.value = usageTrendResponse
   } catch (error: any) {
     console.error('加载监控指标失败:', error)
     toast({
@@ -99,6 +232,7 @@ async function loadLog(service: LogService) {
     logContent.value[service] = error?.response?.data?.detail || '日志读取失败'
   } finally {
     loadingLog.value[service] = false
+    await scrollLogToBottom()
   }
 }
 
@@ -126,12 +260,46 @@ async function handleRetryPlugin(plugin: PluginHealthItem) {
   }
 }
 
+async function handleForceProcess() {
+  if (isForceProcessing.value) return
+  isForceProcessing.value = true
+  try {
+    const response = await forceProcessQueue()
+    toast({
+      title: '队列已唤醒',
+      description: response.message,
+    })
+    await Promise.all([loadMetrics(), loadLog('worker')])
+    activeLogTab.value = 'worker'
+  } catch (error: any) {
+    toast({
+      title: '唤醒失败',
+      description: error?.response?.data?.detail || '无法重投待处理队列。',
+      variant: 'destructive',
+    })
+  } finally {
+    isForceProcessing.value = false
+  }
+}
+
+watch(activeLogTab, async (service) => {
+  await loadLog(service)
+})
+
+watch(
+  () => logContent.value[activeLogTab.value],
+  async () => {
+    await scrollLogToBottom()
+  },
+)
+
 onMounted(async () => {
   if (!isAdmin.value) return
   await handleRefresh()
   pollTimer = window.setInterval(() => {
     void loadMetrics()
-  }, 45000)
+    void loadLog(activeLogTab.value)
+  }, 15000)
 })
 
 onBeforeUnmount(() => {
@@ -148,7 +316,7 @@ onBeforeUnmount(() => {
         <div>
           <h1 class="text-3xl font-bold tracking-tight">Homelab Dashboard</h1>
           <p class="mt-1 text-sm text-muted-foreground">
-            管理员统一查看队列积压、插件健康与多容器日志。
+            管理员统一查看预算熔断、队列积压、插件健康与多容器日志。
           </p>
         </div>
         <Button :disabled="isLoadingMetrics" @click="handleRefresh">
@@ -163,6 +331,50 @@ onBeforeUnmount(() => {
       </div>
 
       <template v-else>
+        <section class="space-y-4">
+          <div
+            v-if="warningBanner"
+            :class="[
+              'rounded-2xl border px-5 py-4 shadow-sm',
+              warningBanner.variant === 'critical'
+                ? 'border-red-500/40 bg-red-500/10 text-red-100'
+                : 'border-orange-400/40 bg-orange-500/10 text-orange-100',
+            ]"
+          >
+            <div class="flex items-start gap-3">
+              <Siren class="mt-0.5 h-5 w-5 shrink-0" />
+              <div>
+                <div class="font-semibold">
+                  {{ warningBanner.title }}
+                </div>
+                <p class="mt-1 text-sm opacity-90">
+                  {{ warningBanner.description }}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <Card class="border-border/60 overflow-hidden">
+            <CardHeader class="flex flex-row items-start justify-between gap-4">
+              <div>
+                <CardTitle class="flex items-center gap-2">
+                  <Flame class="h-5 w-5 text-primary" />
+                  API 燃烧雷达
+                </CardTitle>
+                <p class="mt-1 text-sm text-muted-foreground">
+                  展示最近 7 天的 API 消耗趋势，并结合当前限额状态给出预警。
+                </p>
+              </div>
+              <Badge variant="outline">
+                {{ usageTrend?.api_limit_type === 'cost' ? '按金额熔断' : '按 Token 熔断' }}
+              </Badge>
+            </CardHeader>
+            <CardContent>
+              <VChart class="h-[20rem] w-full" :option="chartOption" autoresize />
+            </CardContent>
+          </Card>
+        </section>
+
         <section class="grid gap-4 md:grid-cols-3">
           <Card v-for="card in cards" :key="card.title" class="border-border/60">
             <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -170,13 +382,29 @@ onBeforeUnmount(() => {
               <component :is="card.icon" class="h-4 w-4 text-primary" />
             </CardHeader>
             <CardContent>
-              <div class="text-3xl font-bold tracking-tight">{{ card.value }}</div>
-              <p class="mt-2 text-xs text-muted-foreground">{{ card.description }}</p>
+              <div class="flex items-start justify-between gap-3">
+                <div>
+                  <div class="text-3xl font-bold tracking-tight">{{ card.value }}</div>
+                  <p class="mt-2 text-xs text-muted-foreground">{{ card.description }}</p>
+                </div>
+                <Button
+                  v-if="card.title === 'RAG 积压数'"
+                  variant="destructive"
+                  size="sm"
+                  class="shrink-0"
+                  :disabled="isForceProcessing"
+                  @click="handleForceProcess"
+                >
+                  <Loader2 v-if="isForceProcessing" class="mr-2 h-3.5 w-3.5 animate-spin" />
+                  <Rocket v-else class="mr-2 h-3.5 w-3.5" />
+                  唤醒队列
+                </Button>
+              </div>
             </CardContent>
           </Card>
         </section>
 
-        <section class="grid gap-6 xl:grid-cols-[1.2fr,1fr]">
+        <section class="grid gap-6 xl:grid-cols-[1.1fr,1fr]">
           <Card class="border-border/60">
             <CardHeader class="flex flex-row items-start justify-between gap-4">
               <div>
@@ -232,9 +460,12 @@ onBeforeUnmount(() => {
 
           <Card class="border-border/60">
             <CardHeader>
-              <CardTitle>日志预览区</CardTitle>
+              <CardTitle class="flex items-center gap-2">
+                <TerminalSquare class="h-5 w-5 text-primary" />
+                深渊终端
+              </CardTitle>
               <p class="mt-1 text-sm text-muted-foreground">
-                每次切换标签会读取最近 200 行日志，便于快速排障。
+                黑底终端视图，自动滚动至底部，并按 ERROR / WARNING 高亮日志。
               </p>
             </CardHeader>
             <CardContent class="space-y-4">
@@ -244,21 +475,43 @@ onBeforeUnmount(() => {
                   :key="service"
                   :variant="activeLogTab === service ? 'default' : 'outline'"
                   size="sm"
-                  @click="activeLogTab = service; void loadLog(service)"
+                  @click="activeLogTab = service"
                 >
                   {{ service.toUpperCase() }}
                 </Button>
               </div>
 
-              <div class="min-h-[32rem] rounded-2xl border bg-black px-4 py-3">
-                <div v-if="loadingLog[activeLogTab]" class="flex h-full min-h-[28rem] items-center justify-center text-sm text-zinc-300">
-                  <Loader2 class="mr-2 h-4 w-4 animate-spin" />
-                  正在读取 {{ activeLogTab }} 日志...
+              <div class="overflow-hidden rounded-2xl border border-zinc-800 bg-[#1e1e1e]">
+                <div class="flex items-center justify-between border-b border-zinc-800 px-4 py-2 text-xs text-zinc-400">
+                  <span>{{ activeLogTab.toUpperCase() }} LOG TAIL</span>
+                  <span>{{ parsedLogLines.length }} lines</span>
                 </div>
-                <pre
-                  v-else
-                  class="max-h-[32rem] overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-6 text-zinc-100"
-                >{{ logContent[activeLogTab] || '暂无日志' }}</pre>
+                <div
+                  ref="logTerminalRef"
+                  class="h-[32rem] overflow-auto px-4 py-3 font-mono text-xs leading-6"
+                  style="font-family: 'Fira Code', ui-monospace, SFMono-Regular, Consolas, monospace;"
+                >
+                  <div v-if="loadingLog[activeLogTab]" class="flex h-full min-h-[28rem] items-center justify-center text-sm text-zinc-300">
+                    <Loader2 class="mr-2 h-4 w-4 animate-spin" />
+                    正在读取 {{ activeLogTab }} 日志...
+                  </div>
+                  <div v-else class="space-y-0.5">
+                    <div
+                      v-for="(line, index) in parsedLogLines"
+                      :key="`${activeLogTab}-${index}`"
+                      :class="[
+                        'whitespace-pre-wrap break-words',
+                        line.level === 'error'
+                          ? 'text-red-400'
+                          : line.level === 'warning'
+                            ? 'text-yellow-300'
+                            : 'text-zinc-100',
+                      ]"
+                    >
+                      {{ line.text || ' ' }}
+                    </div>
+                  </div>
+                </div>
               </div>
             </CardContent>
           </Card>
