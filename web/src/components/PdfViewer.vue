@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, markRaw, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, useTemplateRef, watch } from 'vue'
 import { useColorMode } from '@vueuse/core'
+import { useI18n } from 'vue-i18n'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Camera, Pin } from 'lucide-vue-next'
 import { getDocument, TextLayerBuilder, TextLayerImages, type PDFDocumentProxy } from '@/lib/pdfjs'
@@ -44,6 +45,7 @@ const pageShellRef = useTemplateRef<HTMLElement>('pageShell')
 const canvasRef = useTemplateRef<HTMLCanvasElement>('canvas')
 const textLayerRef = useTemplateRef<HTMLDivElement>('textLayer')
 
+const { t } = useI18n()
 const pdfDoc = shallowRef<PDFDocumentProxy | null>(null)
 const totalPages = ref(0)
 const currentPage = ref(1)
@@ -84,13 +86,13 @@ const pageHighlights = computed(() => {
       })),
     )
 })
-const zoomOptions = [
-  { value: 'fit-page', label: '整页' },
-  { value: 'fit-width', label: '适宽' },
-  { value: '100', label: '100%' },
-  { value: '125', label: '125%' },
-  { value: '150', label: '150%' },
-] as const
+const zoomOptions = computed(() => [
+  { value: 'fit-page' as const, label: t('vault.zoomFitPage') },
+  { value: 'fit-width' as const, label: t('vault.zoomFitWidth') },
+  { value: '100' as const, label: '100%' },
+  { value: '125' as const, label: '125%' },
+  { value: '150' as const, label: '150%' },
+] as const)
 
 function setZoomMode(mode: typeof zoomMode.value) {
   if (zoomMode.value === mode) return
@@ -203,7 +205,7 @@ async function loadDocument() {
     loaded = true
   } catch (error) {
     console.error('加载 PDF 失败:', error)
-    errorMessage.value = '无法加载 PDF，请确认文件路径和格式正常。'
+    errorMessage.value = t('vault.pdfLoadFailed')
   } finally {
     loading.value = false
     if (loaded && pdfDoc.value) {
@@ -354,7 +356,7 @@ async function renderPage() {
     }
     console.error('渲染 PDF 页面失败:', error)
     queueRender(80)
-    errorMessage.value = 'PDF 页面正在准备渲染，请稍候...'
+    errorMessage.value = t('vault.pdfRendering')
   }
 }
 
@@ -754,7 +756,7 @@ function handleViewerKeydown(event: KeyboardEvent) {
           />
           <div class="absolute left-3 top-3 inline-flex items-center gap-1 rounded-full border bg-background/95 px-3 py-1.5 text-xs font-medium shadow-sm backdrop-blur">
             <Camera class="h-3.5 w-3.5" />
-            拖拽框选截图区域，按 Esc 退出
+            {{ t('vault.pdfScreenshotHint') }}
           </div>
         </div>
 
@@ -766,7 +768,7 @@ function handleViewerKeydown(event: KeyboardEvent) {
           @click="emitQuote"
         >
           <Pin class="h-3.5 w-3.5" />
-          引用
+          {{ t('common.quote') }}
         </button>
       </div>
     </div>

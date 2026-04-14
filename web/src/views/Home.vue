@@ -241,7 +241,7 @@ function validateUploadFile(file: File): string | null {
   const mime = (file.type || '').toLowerCase()
 
   if (ext === 'gif' || mime === 'image/gif') {
-    return 'GIF uploads are not supported. Please use PNG, JPG, WEBP, or BMP instead.'
+    return t('home.validation.gifNotSupported')
   }
 
   if (SUPPORTED_STATIC_IMAGE_EXTENSIONS.has(ext) || SUPPORTED_STATIC_IMAGE_MIME_TYPES.has(mime)) {
@@ -249,7 +249,7 @@ function validateUploadFile(file: File): string | null {
   }
 
   if (mime.startsWith('image/')) {
-    return 'Only PNG, JPG/JPEG, WEBP, and BMP static images are supported.'
+    return t('home.validation.staticImageOnly')
   }
 
   if (SUPPORTED_VIDEO_EXTENSIONS.has(ext) || SUPPORTED_VIDEO_MIME_TYPES.has(mime)) {
@@ -257,7 +257,7 @@ function validateUploadFile(file: File): string | null {
   }
 
   if (mime.startsWith('video/')) {
-    return 'Only common video formats such as MP4, WEBM, MOV, M4V, MKV, and AVI are supported.'
+    return t('home.validation.commonVideoOnly')
   }
 
   if (SUPPORTED_AUDIO_EXTENSIONS.has(ext) || SUPPORTED_AUDIO_MIME_TYPES.has(mime)) {
@@ -265,7 +265,7 @@ function validateUploadFile(file: File): string | null {
   }
 
   if (mime.startsWith('audio/')) {
-    return 'Only common audio formats such as MP3, WAV, M4A, AAC, FLAC, OGG, and WEBM are supported.'
+    return t('home.validation.commonAudioOnly')
   }
 
   if (SUPPORTED_TEXT_EXTENSIONS.has(ext) || SUPPORTED_TEXT_MIME_TYPES.has(mime)) {
@@ -277,10 +277,10 @@ function validateUploadFile(file: File): string | null {
   }
 
   if (['doc', 'docm', 'xls', 'xlsx', 'ppt', 'pptx'].includes(ext)) {
-    return 'Only DOCX is supported right now. Please convert other Office files to PDF, TXT, or Markdown first.'
+    return t('home.validation.docxOnly')
   }
 
-  return 'Only static images, common video/audio formats, PDF, TXT, Markdown, and DOCX uploads are supported.'
+  return t('home.validation.unsupportedType')
 }
 
 function formatRelativeTime(input?: string) {

@@ -47,11 +47,11 @@ async function submitRegister() {
         <form class="space-y-5" @submit.prevent="submitRegister">
           <div class="space-y-2">
             <Label for="register-invite">{{ t('auth.inviteCode') }}</Label>
-            <Input id="register-invite" v-model="inviteCode" placeholder="IRIS-AB12-CD34" minlength="6" maxlength="128" required />
+            <Input id="register-invite" v-model="inviteCode" :placeholder="t('auth.inviteCodePlaceholder')" minlength="6" maxlength="128" required />
           </div>
           <div class="space-y-2">
             <Label for="register-username">{{ t('auth.username') }}</Label>
-            <Input id="register-username" v-model="username" placeholder="your-name" minlength="3" maxlength="64" required />
+            <Input id="register-username" v-model="username" :placeholder="t('auth.usernamePlaceholder')" minlength="3" maxlength="64" required />
           </div>
           <div class="space-y-2">
             <Label for="register-password">{{ t('auth.password') }}</Label>

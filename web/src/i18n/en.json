@@ -52,7 +52,11 @@
     "system": "System",
     "language": "Language",
     "chinese": "Simplified Chinese",
-    "english": "English"
+    "english": "English",
+    "noContent": "No content yet.",
+    "copyCode": "Copy code",
+    "quote": "Quote",
+    "noPreviewData": "No preview data available"
   },
   "layout": {
     "appName": "Pekno",
@@ -87,7 +91,10 @@
     "backToLogin": "Back to sign in",
     "loginFailed": "Sign-in failed. Please check your username and password.",
     "registerFailed": "Registration failed. Please check the invitation code or try again later.",
-    "initFailed": "Initialization failed. Please try again later."
+    "initFailed": "Initialization failed. Please try again later.",
+    "usernamePlaceholder": "admin",
+    "inviteCodePlaceholder": "IRIS-AB12-CD34",
+    "initialAdminPlaceholder": "super-admin"
   },
   "dashboard": {
     "title": "Homelab Dashboard",
@@ -201,7 +208,16 @@
     "fileAlreadyExists": "This file already exists",
     "uploadFailed": "Upload failed",
     "parseSubmitted": "Parse task submitted",
-    "parseFailed": "Parse failed"
+    "parseSubmitted": "Parse task submitted",
+    "parseFailed": "Parse failed",
+    "validation": {
+      "gifNotSupported": "GIF uploads are not supported. Please use PNG, JPG, WEBP, or BMP instead.",
+      "staticImageOnly": "Only PNG, JPG/JPEG, WEBP, and BMP static images are supported.",
+      "commonVideoOnly": "Only common video formats such as MP4, WEBM, MOV, M4V, MKV, and AVI are supported.",
+      "commonAudioOnly": "Only common audio formats such as MP3, WAV, M4A, AAC, FLAC, OGG, and WEBM are supported.",
+      "docxOnly": "Only DOCX is supported right now. Please convert other Office files to PDF, TXT, or Markdown first.",
+      "unsupportedType": "Only static images, common video/audio formats, PDF, TXT, Markdown, and DOCX uploads are supported."
+    }
   },
   "vault": {
     "searchResultDirect": "Search results are shown directly by relevance.",
@@ -259,7 +275,44 @@
     "saveDraftBeforeSwitch": "Save this draft before switching?",
     "saveDraftBeforeSwitchDesc": "Your current note has not been saved yet. You can save it before switching, or discard it.",
     "discardAndSwitch": "Discard & switch",
-    "saveAndSwitch": "Save & switch"
+    "saveAndSwitch": "Save & switch",
+    "zoomFitPage": "Fit Page",
+    "zoomFitWidth": "Fit Width",
+    "pdfLoadFailed": "Unable to load PDF. Please verify the file path and format.",
+    "pdfRendering": "PDF page is being prepared for rendering, please wait...",
+    "pdfScreenshotHint": "Drag to capture a region, press Esc to exit"
+  },
+  "plugins": {
+    "install": {
+      "title": "Install New Plugin",
+      "safeReview": "Security Review",
+      "uploadDesc": "Upload a plugin ZIP to extend Iris's capabilities",
+      "reviewDesc": "Please review the plugin code and permissions carefully",
+      "clickToUpload": "Click to upload plugin package",
+      "zipOnly": "Only standard .zip format is supported",
+      "selectFile": "Select File",
+      "checking": "Pre-checking...",
+      "formatError": "Format Error",
+      "zipOnlyDesc": "Only .zip files are supported",
+      "uploadFailed": "Upload Failed",
+      "preCheckFailed": "Pre-check request failed",
+      "installSuccess": "Installation Successful",
+      "pluginReady": "Plugin {name} is ready",
+      "installFailed": "Installation Failed",
+      "installFailedDesc": "Could not complete installation",
+      "permissions": "Permissions",
+      "readConfig": "Read Config",
+      "accessDatabase": "Access Database",
+      "possibleExternalAccess": "⚠️ May access external network",
+      "sourceAudit": "Source Audit",
+      "collapseSource": "Collapse source",
+      "expandPreview": "Expand preview",
+      "clickToExpand": "Click the button above to preview the main source code",
+      "riskNotice": "I acknowledge this plugin is from the community and agree to bear the potential risk of running this code",
+      "riskDesc": "Plugin code will run with full permissions on your server. Ensure the source is trusted.",
+      "installing": "Installing...",
+      "confirmInstall": "Confirm Installation"
+    }
   },
   "settings": {
     "title": "Pekno Settings",
@@ -341,6 +394,124 @@
     "assignmentsSavedTitle": "System model assignments saved",
     "assignmentsSavedDesc": "The new model assignment configuration is now active.",
     "assignmentsSaveFailed": "Unable to save the system model assignments.",
+    "assignmentGroup": {
+      "active": "Active Workflows",
+      "planned": "Multimodal Placeholders",
+      "当前工作流": "Active Workflows",
+      "核心多模态": "Core Multimodal",
+      "多模态占位": "Multimodal Placeholders"
+    },
+    "modelProviderMetadata": {
+      "local_whisper": {
+        "name": "Local (Faster-Whisper)",
+        "badge": "Local Preferred",
+        "description": "High-performance local speech-to-text engine based on CTranslate2, optimized for deep learning, works offline with hardware acceleration."
+      },
+      "ollama": {
+        "name": "Ollama",
+        "badge": "Local Preferred",
+        "description": "Connect to local or LAN Ollama, suitable for offline inference and self-hosted scenarios."
+      },
+      "openai_compatible": {
+        "name": "OpenAI Compatible",
+        "badge": "Generic Compatible",
+        "description": "Generic provider compatible with OpenAI API, supports LM Studio, vLLM, One API, etc."
+      },
+      "openai": {
+        "name": "OpenAI",
+        "badge": "Official",
+        "description": "Official OpenAI services, suitable for GPT and text-embedding series models."
+      },
+      "openrouter": {
+        "name": "OpenRouter",
+        "badge": "Aggregator",
+        "description": "Unified access to multiple model providers, ideal for quickly testing different models."
+      },
+      "siliconflow": {
+        "name": "SiliconFlow",
+        "badge": "Regional",
+        "description": "Popular regional inference platform, suitable for generic OpenAI compatible interfaces."
+      },
+      "deepseek": {
+        "name": "DeepSeek",
+        "badge": "Inference Optimized",
+        "description": "Optimized for code and general reasoning, accessible via OpenAI compatible interface."
+      },
+      "groq": {
+        "name": "Groq",
+        "badge": "Low Latency",
+        "description": "High-speed inference with ultra-low latency, ideal for real-time tagging and summaries."
+      },
+      "together": {
+        "name": "Together AI",
+        "badge": "Open Source Ecosystem",
+        "description": "Cloud hosting for various open-source models, easy access to text and embedding families."
+      },
+      "dashscope": {
+        "name": "DashScope (Qwen)",
+        "badge": "Multimodal Ready",
+        "description": "Alibaba Cloud model service, capable of text, multimodal, and speech tasks."
+      },
+      "zhipu": {
+        "name": "Zhipu AI (BigModel)",
+        "badge": "Regional Multimodal",
+        "description": "Regional model platform with advanced vision and video understanding capabilities."
+      },
+      "huggingface": {
+        "name": "Hugging Face",
+        "badge": "Open Source Ecosystem",
+        "description": "World's largest open-source AI community. Configure Access Token to bypass rate limits when downloading heavy models like Whisper."
+      },
+      "paddleocr_v5_cpu": {
+        "name": "PaddleOCR v5 (CPU)",
+        "badge": "Local OCR",
+        "description": "Local CPU-based OCR engine, suitable for image text extraction and scanned PDF recognition."
+      }
+    },
+    "systemModelMetadata": {
+      "tagging": {
+        "label": "Tag Extraction Model",
+        "description": "Responsible for generating keyword tags for content."
+      },
+      "short_summary": {
+        "label": "Short Summary Model",
+        "description": "Generates concise summaries for feed cards."
+      },
+      "long_summary": {
+        "label": "Long Summary Model",
+        "description": "Generates detailed AI Markdown summaries."
+      },
+      "embedding": {
+        "label": "Embedding Model",
+        "description": "Responsible for text vectorization used in semantic search and similarity matching."
+      },
+      "ocr": {
+        "label": "OCR Registry Engine",
+        "description": "Handles image text extraction and background OCR for scanned PDFs."
+      },
+      "speech_to_text": {
+        "label": "Speech-to-Text Engine",
+        "description": "Reserved for video audio extraction and podcast processing, converting speech to searchable text."
+      },
+      "image_understanding": {
+        "label": "Image Understanding Engine",
+        "description": "Extracts semantic info from cover images and screenshots, useful for image tagging and summaries."
+      },
+      "video_understanding": {
+        "label": "Video Understanding Engine",
+        "description": "Reserved for video content understanding, segment summaries, and timeline abstracts."
+      }
+    },
+    "modelConfigFields": {
+      "host": "Service Address",
+      "base_url": "Base URL",
+      "api_key": "API Key",
+      "hf_api_key": "HF Access Token",
+      "endpoint": "Download Mirror / Endpoint",
+      "enabled": "Enable OCR",
+      "lang": "Language",
+      "max_workers": "Max Workers"
+    },
     "billingHeading": "System & Billing Controls",
     "billingDesc": "Manage the monthly API limit and review the current model usage ledger.",
     "saveSettings": "Save Settings",
@@ -407,6 +578,12 @@
     "aliasColumn": "Alias",
     "permissionsColumn": "Permissions",
     "lastUsedColumn": "Last Used",
+    "patScopeReadKnowledge": "Read Knowledge Base",
+    "patScopeReadKnowledgeDesc": "Allows external agents to read your knowledge base via web or MCP. This is usually the baseline requirement.",
+    "patScopeWriteStar": "Save to Favorites",
+    "patScopeWriteStarDesc": "Allows agents to proactively save objects to your local star vault on your behalf.",
+    "patScopeWriteSystemConfig": "Modify System Config",
+    "patScopeWriteSystemConfigDesc": "Highly dangerous. Allows agents to directly change core settings like system billing limits and model assignments.",
     "expiryColumn": "Expiry",
     "createdAtColumn": "Created At",
     "adminRoleLabel": "Admin",

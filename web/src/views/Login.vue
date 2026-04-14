@@ -47,7 +47,7 @@ async function submitLogin() {
         <form class="space-y-5" @submit.prevent="submitLogin">
           <div class="space-y-2">
             <Label for="login-username">{{ t('auth.username') }}</Label>
-            <Input id="login-username" v-model="username" placeholder="admin" minlength="3" maxlength="64" required />
+            <Input id="login-username" v-model="username" :placeholder="t('auth.usernamePlaceholder')" minlength="3" maxlength="64" required />
           </div>
           <div class="space-y-2">
             <Label for="login-password">{{ t('auth.password') }}</Label>

@@ -1,9 +1,12 @@
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n'
 import type { HoverResponse } from '@/lib/api'
 
 defineProps<{
   blocks: HoverResponse
 }>()
+
+const { t } = useI18n()
 
 // Default colors for progress block if none provided
 const langColors = [
@@ -70,7 +73,7 @@ const langColors = [
     </template>
     
     <div v-if="!blocks || blocks.length === 0" class="text-center py-4 text-xs text-muted-foreground">
-      无悬浮预览数据
+      {{ t('common.noPreviewData') }}
     </div>
   </div>
 </template>

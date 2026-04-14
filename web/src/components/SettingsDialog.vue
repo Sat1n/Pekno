@@ -701,12 +701,18 @@ function formatBillingCost(value: number | undefined, currency: string | undefin
                           >
                             <div class="flex items-center justify-between gap-3">
                               <div>
-                                <div class="font-semibold text-base">{{ provider.name }}</div>
-                                <div class="text-xs text-muted-foreground mt-1">{{ provider.badge }}</div>
+                                <div class="font-semibold text-base">
+                                  {{ t('settings.modelProviderMetadata.' + provider.id + '.name', provider.name) }}
+                                </div>
+                                <div class="text-xs text-muted-foreground mt-1">
+                                  {{ t('settings.modelProviderMetadata.' + provider.id + '.badge', provider.badge || '') }}
+                                </div>
                               </div>
                               <div class="h-2.5 w-2.5 rounded-full" :class="provider.is_configured ? 'bg-green-500' : 'bg-muted-foreground/40'"></div>
                             </div>
-                            <p class="text-sm text-muted-foreground leading-relaxed mt-3">{{ provider.description }}</p>
+                            <p class="text-sm text-muted-foreground leading-relaxed mt-3">
+                              {{ t('settings.modelProviderMetadata.' + provider.id + '.description', provider.description) }}
+                            </p>
                             <div class="flex flex-wrap gap-2 mt-4">
                               <span v-for="capability in provider.capabilities" :key="capability" class="rounded-full bg-muted px-2.5 py-1 text-[11px] font-medium">
                                 {{ capability }}
@@ -725,10 +731,16 @@ function formatBillingCost(value: number | undefined, currency: string | undefin
                       <div class="space-y-2">
                         <div class="flex items-start justify-between gap-3">
                           <div>
-                            <h4 class="text-lg font-semibold">{{ selectedProvider.name }}</h4>
-                            <p class="text-sm text-muted-foreground mt-1">{{ selectedProvider.description }}</p>
+                            <h4 class="text-lg font-semibold">
+                              {{ t('settings.modelProviderMetadata.' + selectedProvider.id + '.name', selectedProvider.name) }}
+                            </h4>
+                            <p class="text-sm text-muted-foreground mt-1">
+                              {{ t('settings.modelProviderMetadata.' + selectedProvider.id + '.description', selectedProvider.description) }}
+                            </p>
                           </div>
-                          <span class="rounded-full bg-muted px-2.5 py-1 text-[11px] font-medium">{{ selectedProvider.badge }}</span>
+                          <span class="rounded-full bg-muted px-2.5 py-1 text-[11px] font-medium">
+                            {{ t('settings.modelProviderMetadata.' + selectedProvider.id + '.badge', selectedProvider.badge || '') }}
+                          </span>
                         </div>
                         <div class="flex flex-wrap gap-2">
                           <span v-for="capability in selectedProvider.capabilities" :key="capability" class="rounded-full bg-primary/10 text-primary px-2.5 py-1 text-[11px] font-medium">
@@ -742,7 +754,7 @@ function formatBillingCost(value: number | undefined, currency: string | undefin
                       </div>
 
                       <div v-for="field in selectedProvider.config_fields" :key="field.key" class="space-y-2">
-                        <Label>{{ field.label }}</Label>
+                        <Label>{{ t('settings.modelConfigFields.' + field.key, field.label) }}</Label>
                         <Input
                           v-model="providerDraft[field.key]"
                           :type="field.secret ? 'password' : 'text'"
@@ -798,7 +810,9 @@ function formatBillingCost(value: number | undefined, currency: string | undefin
                       >
                         <div class="flex items-center justify-between gap-3">
                           <div>
-                            <h4 class="text-lg font-semibold">{{ section.group }}</h4>
+                            <h4 class="text-lg font-semibold">
+                              {{ t('settings.assignmentGroup.' + section.group, section.group) }}
+                            </h4>
                               <p class="text-sm text-muted-foreground mt-1">
                                 {{ section.items.some((item) => item.status === 'active') ? t('settings.activeAssignmentGroupDesc') : t('settings.placeholderAssignmentGroupDesc') }}
                               </p>
@@ -815,8 +829,12 @@ function formatBillingCost(value: number | undefined, currency: string | undefin
                         >
                           <div class="flex items-start justify-between gap-3">
                             <div>
-                              <div class="font-semibold text-base">{{ assignment.label }}</div>
-                              <p class="text-sm text-muted-foreground mt-1">{{ assignment.description }}</p>
+                              <div class="font-semibold text-base">
+                                {{ t('settings.systemModelMetadata.' + assignment.key + '.label', assignment.label) }}
+                              </div>
+                              <p class="text-sm text-muted-foreground mt-1">
+                                {{ t('settings.systemModelMetadata.' + assignment.key + '.description', assignment.description) }}
+                              </p>
                             </div>
                             <span
                               class="rounded-full px-2.5 py-1 text-[11px] font-medium"
@@ -831,7 +849,7 @@ function formatBillingCost(value: number | undefined, currency: string | undefin
                               <Label>{{ t('settings.modelProviderLabel') }}</Label>
                               <select v-model="assignment.provider" class="w-full rounded-md border bg-background px-3 py-2 text-sm">
                                 <option v-for="provider in modelProviders" :key="provider.id" :value="provider.id">
-                                  {{ provider.name }}
+                                  {{ t('settings.modelProviderMetadata.' + provider.id + '.name', provider.name) }}
                                 </option>
                               </select>
                             </div>

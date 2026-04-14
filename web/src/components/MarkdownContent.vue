@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, useTemplateRef, watch } from 'vue'
 import { useColorMode } from '@vueuse/core'
+import { useI18n } from 'vue-i18n'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Pin } from 'lucide-vue-next'
 import { API_BASE_URL } from '@/lib/api'
 import { renderMarkdown, type MarkdownMode, type MarkdownTheme } from '@/lib/markdown'
 
+const { t } = useI18n()
 const props = withDefaults(
   defineProps<{
     content?: string | null
@@ -105,7 +107,7 @@ function enhanceCodeBlocks() {
     const button = document.createElement('button')
     button.type = 'button'
     button.className = 'vault-copy-button'
-    button.setAttribute('aria-label', '复制代码')
+    button.setAttribute('aria-label', t('common.copyCode'))
     button.innerHTML = '<span aria-hidden="true">⧉</span>'
     wrapper.appendChild(button)
 
@@ -171,7 +173,7 @@ function sanitizeRenderedHtml(html: string) {
 async function refreshMarkdown() {
   if (!props.content?.trim()) {
     isRendering.value = false
-    renderedHtml.value = '<p class="text-sm text-muted-foreground">暂无内容。</p>'
+    renderedHtml.value = `<p class="text-sm text-muted-foreground">${t('common.noContent')}</p>`
     await nextTick()
     enhanceCodeBlocks()
     hideQuoteButton()
@@ -339,7 +341,7 @@ watch(
       @click="emitQuote"
     >
       <Pin class="h-3.5 w-3.5" />
-      引用
+      {{ t('common.quote') }}
     </button>
   </div>
 </template>

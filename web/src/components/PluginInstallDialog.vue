@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -20,6 +21,7 @@ const emit = defineEmits<{
 }>()
 
 const { toast } = useToast()
+const { t } = useI18n()
 
 // 状态管理
 const step = ref<'upload' | 'review'>('upload')
@@ -46,8 +48,8 @@ async function handleFileUpload(event: Event) {
   // 校验文件类型
   if (!file.name.endsWith('.zip')) {
     toast({
-      title: '格式错误',
-      description: '仅支持 .zip 格式的插件包',
+      title: t('plugins.install.formatError'),
+      description: t('plugins.install.zipOnlyDesc'),
       variant: 'destructive'
     })
     return
@@ -60,8 +62,8 @@ async function handleFileUpload(event: Event) {
     step.value = 'review'
   } catch (error: any) {
     toast({
-      title: '上传失败',
-      description: error.response?.data?.detail || '预检请求失败',
+      title: t('plugins.install.uploadFailed'),
+      description: error.response?.data?.detail || t('plugins.install.preCheckFailed'),
       variant: 'destructive'
     })
   } finally {
@@ -79,16 +81,16 @@ async function handleInstall() {
   try {
     await confirmInstallPluginApi(previewData.value.temp_token)
     toast({
-      title: '安装成功',
-      description: `插件 ${previewData.value.manifest.name} 已就绪`,
+      title: t('plugins.install.installSuccess'),
+      description: t('plugins.install.pluginReady', { name: previewData.value.manifest.name }),
     })
     emit('install-success')
     emit('update:open', false)
     resetState()
   } catch (error: any) {
     toast({
-      title: '安装失败',
-      description: error.response?.data?.detail || '无法完成安装',
+      title: t('plugins.install.installFailed'),
+      description: error.response?.data?.detail || t('plugins.install.installFailedDesc'),
       variant: 'destructive'
     })
   } finally {
@@ -120,10 +122,10 @@ function resetState() {
       <DialogHeader class="p-6 border-b shrink-0">
         <DialogTitle class="flex items-center gap-2">
           <Box class="w-5 h-5 text-primary" />
-          {{ step === 'upload' ? '安装新插件' : '安全审查' }}
+          {{ step === 'upload' ? t('plugins.install.title') : t('plugins.install.safeReview') }}
         </DialogTitle>
         <DialogDescription>
-          {{ step === 'upload' ? '上传插件 ZIP 包以扩展 Iris 的能力' : '请仔细审查插件代码与权限' }}
+          {{ step === 'upload' ? t('plugins.install.uploadDesc') : t('plugins.install.reviewDesc') }}
         </DialogDescription>
       </DialogHeader>
 
@@ -132,13 +134,13 @@ function resetState() {
         <div class="p-4 rounded-full bg-background shadow-sm mb-4">
           <Upload class="w-8 h-8 text-muted-foreground" />
         </div>
-        <h3 class="font-semibold text-lg mb-1">点击上传插件包</h3>
-        <p class="text-sm text-muted-foreground mb-6">仅支持标准的 .zip 格式插件包</p>
+        <h3 class="font-semibold text-lg mb-1">{{ t('plugins.install.clickToUpload') }}</h3>
+        <p class="text-sm text-muted-foreground mb-6">{{ t('plugins.install.zipOnly') }}</p>
         
         <div class="relative">
           <Button :disabled="isUploading">
             <Loader2 v-if="isUploading" class="w-4 h-4 mr-2 animate-spin" />
-            {{ isUploading ? '正在预检...' : '选择文件' }}
+            {{ isUploading ? t('plugins.install.checking') : t('plugins.install.selectFile') }}
           </Button>
           <input 
             type="file" 
@@ -175,20 +177,20 @@ function resetState() {
           <div class="space-y-3">
             <h4 class="text-sm font-semibold flex items-center gap-2">
               <ShieldAlert class="w-4 h-4 text-orange-500" />
-              权限声明
+              {{ t('plugins.install.permissions') }}
             </h4>
             <div class="flex flex-wrap gap-2">
               <Badge variant="secondary" class="text-xs font-normal">
                 <CheckCircle2 class="w-3 h-3 mr-1 text-green-500" />
-                读取配置
+                {{ t('plugins.install.readConfig') }}
               </Badge>
               <Badge variant="secondary" class="text-xs font-normal">
                 <CheckCircle2 class="w-3 h-3 mr-1 text-green-500" />
-                访问数据库
+                {{ t('plugins.install.accessDatabase') }}
               </Badge>
               <!-- 如果 manifest 有 permissions 字段可以在这里遍历 -->
               <Badge variant="destructive" class="text-xs font-normal bg-red-50 text-red-600 border-red-200 hover:bg-red-100">
-                ⚠️ 可能访问外部网络
+                {{ t('plugins.install.possibleExternalAccess') }}
               </Badge>
             </div>
           </div>
@@ -200,11 +202,11 @@ function resetState() {
             <div class="flex items-center justify-between">
               <h4 class="text-sm font-semibold flex items-center gap-2">
                 <FileCode class="w-4 h-4" />
-                源码审计
+                {{ t('plugins.install.sourceAudit') }}
               </h4>
               <Button variant="ghost" size="sm" class="h-8 text-xs" @click="showSourceCode = !showSourceCode">
                 <component :is="showSourceCode ? EyeOff : Eye" class="w-3 h-3 mr-1" />
-                {{ showSourceCode ? '收起源码' : '展开预览' }}
+                {{ showSourceCode ? t('plugins.install.collapseSource') : t('plugins.install.expandPreview') }}
               </Button>
             </div>
             
@@ -212,7 +214,7 @@ function resetState() {
               <pre class="p-4 rounded-lg bg-slate-950 text-slate-50 text-xs overflow-x-auto max-h-[300px] font-mono leading-relaxed border border-slate-800">{{ previewData?.source_code }}</pre>
             </div>
             <div v-else class="p-4 rounded-lg bg-muted text-center text-sm text-muted-foreground border border-dashed">
-              点击上方按钮展开预览主入口源码
+              {{ t('plugins.install.clickToExpand') }}
             </div>
           </div>
         </div>
@@ -232,23 +234,23 @@ function resetState() {
               for="risk"
               class="text-sm font-medium leading-none text-destructive cursor-pointer peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
             >
-              我已知晓此插件来自开源社区，并同意自行承担运行此代码的潜在风险
+              {{ t('plugins.install.riskNotice') }}
             </label>
             <p class="text-xs text-muted-foreground">
-              插件代码将在您的服务器上以完全权限运行，请确保来源可信。
+              {{ t('plugins.install.riskDesc') }}
             </p>
           </div>
         </div>
 
         <div class="flex gap-2 justify-end">
-          <Button variant="outline" @click="resetState" :disabled="isInstalling">取消</Button>
+          <Button variant="outline" @click="resetState" :disabled="isInstalling">{{ t('common.cancel') }}</Button>
           <Button 
             variant="destructive" 
             @click="handleInstall" 
             :disabled="!riskAccepted || isInstalling"
           >
             <Loader2 v-if="isInstalling" class="w-4 h-4 mr-2 animate-spin" />
-            {{ isInstalling ? '安装中...' : '确认安装' }}
+            {{ isInstalling ? t('plugins.install.installing') : t('plugins.install.confirmInstall') }}
           </Button>
         </div>
       </div>

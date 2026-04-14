@@ -52,7 +52,11 @@
     "system": "跟随系统",
     "language": "语言",
     "chinese": "简体中文",
-    "english": "English"
+    "english": "English",
+    "noContent": "暂无内容。",
+    "copyCode": "复制代码",
+    "quote": "引用",
+    "noPreviewData": "无悬浮预览数据"
   },
   "layout": {
     "appName": "Pekno",
@@ -87,7 +91,10 @@
     "backToLogin": "返回登录",
     "loginFailed": "登录失败，请检查账号密码。",
     "registerFailed": "注册失败，请检查邀请码或稍后重试。",
-    "initFailed": "初始化失败，请稍后重试。"
+    "initFailed": "初始化失败，请稍后重试。",
+    "usernamePlaceholder": "admin",
+    "inviteCodePlaceholder": "IRIS-AB12-CD34",
+    "initialAdminPlaceholder": "super-admin"
   },
   "dashboard": {
     "title": "Homelab Dashboard",
@@ -200,7 +207,16 @@
     "fileAlreadyExists": "该文件已存在",
     "uploadFailed": "上传失败",
     "parseSubmitted": "解析任务已提交",
-    "parseFailed": "解析失败"
+    "parseSubmitted": "解析任务已提交",
+    "parseFailed": "解析失败",
+    "validation": {
+      "gifNotSupported": "当前暂不支持 GIF 上传。请使用 PNG、JPG、WEBP 或 BMP。",
+      "staticImageOnly": "仅支持 PNG、JPG/JPEG、WEBP 和 BMP 静态图片。",
+      "commonVideoOnly": "仅支持 MP4、WEBM、MOV、M4V、MKV 和 AVI 等常用视频格式。",
+      "commonAudioOnly": "仅支持 MP3、WAV、M4A、AAC、FLAC、OGG 和 WEBM 等常用音频格式。",
+      "docxOnly": "目前仅支持 DOCX。请先将其他 Office 文件转换为 PDF、TXT 或 Markdown。",
+      "unsupportedType": "仅支持静态图片、常用音视频、PDF、TXT、Markdown 和 DOCX 上传。"
+    }
   },
   "vault": {
     "searchResultDirect": "搜索结果按相关性直接展示。",
@@ -258,7 +274,44 @@
     "saveDraftBeforeSwitch": "切换前保存这条草稿？",
     "saveDraftBeforeSwitchDesc": "你当前的内化日志还没有保存。可以先保存后再切换，也可以放弃这次草稿。",
     "discardAndSwitch": "放弃并切换",
-    "saveAndSwitch": "保存并切换"
+    "saveAndSwitch": "保存并切换",
+    "zoomFitPage": "整页",
+    "zoomFitWidth": "适宽",
+    "pdfLoadFailed": "无法加载 PDF，请确认文件路径和格式正常。",
+    "pdfRendering": "PDF 页面正在准备渲染，请稍候...",
+    "pdfScreenshotHint": "拖拽框选截图区域，按 Esc 退出"
+  },
+  "plugins": {
+    "install": {
+      "title": "安装新插件",
+      "safeReview": "安全审查",
+      "uploadDesc": "上传插件 ZIP 包以扩展 Iris 的能力",
+      "reviewDesc": "请仔细审查插件代码与权限",
+      "clickToUpload": "点击上传插件包",
+      "zipOnly": "仅支持标准的 .zip 格式插件包",
+      "selectFile": "选择文件",
+      "checking": "正在预检...",
+      "formatError": "格式错误",
+      "zipOnlyDesc": "仅支持 .zip 格式的插件包",
+      "uploadFailed": "上传失败",
+      "preCheckFailed": "预检请求失败",
+      "installSuccess": "安装成功",
+      "pluginReady": "插件 {name} 已就绪",
+      "installFailed": "安装失败",
+      "installFailedDesc": "无法完成安装",
+      "permissions": "权限声明",
+      "readConfig": "读取配置",
+      "accessDatabase": "访问数据库",
+      "possibleExternalAccess": "⚠️ 可能访问外部网络",
+      "sourceAudit": "源码审计",
+      "collapseSource": "收起源码",
+      "expandPreview": "展开预览",
+      "clickToExpand": "点击上方按钮展开预览主入口源码",
+      "riskNotice": "我已知晓此插件来自开源社区，并同意自行承担运行此代码的潜在风险",
+      "riskDesc": "插件代码将在您的服务器上以完全权限运行，请确保来源可信。",
+      "installing": "安装中...",
+      "confirmInstall": "确认安装"
+    }
   },
   "settings": {
     "title": "Pekno Settings",
@@ -340,6 +393,124 @@
     "assignmentsSavedTitle": "系统模型设置已保存",
     "assignmentsSavedDesc": "新的模型用途配置已生效。",
     "assignmentsSaveFailed": "无法保存系统模型设置。",
+    "assignmentGroup": {
+      "active": "已落地工作流",
+      "planned": "预留多模态入口",
+      "当前工作流": "已落地工作流",
+      "核心多模态": "核心多模态",
+      "多模态占位": "预留多模态入口"
+    },
+    "modelProviderMetadata": {
+      "local_whisper": {
+        "name": "Local (Faster-Whisper)",
+        "badge": "本地优先",
+        "description": "本地高性能语音转写引擎，基于 CTranslate2 深度优化，无需网络即可硬解语音流。"
+      },
+      "ollama": {
+        "name": "Ollama",
+        "badge": "本地优先",
+        "description": "连接本地或局域网 Ollama，适合离线推理与自托管场景。"
+      },
+      "openai_compatible": {
+        "name": "OpenAI Compatible",
+        "badge": "通用兼容",
+        "description": "兼容 OpenAI API 的通用提供商，适配 LM Studio、vLLM、One API 等。"
+      },
+      "openai": {
+        "name": "OpenAI",
+        "badge": "官方",
+        "description": "OpenAI 官方服务，适合 GPT 与 text-embedding 系列模型。"
+      },
+      "openrouter": {
+        "name": "OpenRouter",
+        "badge": "聚合",
+        "description": "统一访问多家模型供应商，适合快速试用不同模型。"
+      },
+      "siliconflow": {
+        "name": "硅基流动 (SiliconFlow)",
+        "badge": "国产",
+        "description": "常见国产推理平台，适合接入通用 OpenAI 兼容模型接口。"
+      },
+      "deepseek": {
+        "name": "DeepSeek",
+        "badge": "推理优先",
+        "description": "适合代码与通用推理任务，可通过 OpenAI 兼容接口快速接入。"
+      },
+      "groq": {
+        "name": "Groq",
+        "badge": "低延迟",
+        "description": "主打极低延迟，适合作为标签提取和短总结的高速模型提供商。"
+      },
+      "together": {
+        "name": "Together AI",
+        "badge": "开源生态",
+        "description": "适合多种开源模型托管，方便尝试不同家族的文本与向量模型。"
+      },
+      "dashscope": {
+        "name": "通义千问 (DashScope)",
+        "badge": "多模态预备",
+        "description": "阿里云模型服务，后续适合接入文本、多模态和语音能力。"
+      },
+      "zhipu": {
+        "name": "智谱 AI",
+        "badge": "国产多模态",
+        "description": "国产模型平台，适合后续接入视觉理解与视频理解能力。"
+      },
+      "huggingface": {
+        "name": "Hugging Face",
+        "badge": "开源生态",
+        "description": "全球最大开源AI社区，提供海量模型。配置 Access Token 可以在下载 Whisper 等重量级模型时解除频率限制并获得加速体验。"
+      },
+      "paddleocr_v5_cpu": {
+        "name": "PaddleOCR v5 (CPU)",
+        "badge": "本地 OCR",
+        "description": "本地 CPU OCR 引擎，适合图片文字提取与扫描版 PDF 后台识别。"
+      }
+    },
+    "systemModelMetadata": {
+      "tagging": {
+        "label": "标签提取模型",
+        "description": "负责为内容生成关键词标签。"
+      },
+      "short_summary": {
+        "label": "短总结模型",
+        "description": "负责生成信息流卡片上的短摘要。"
+      },
+      "long_summary": {
+        "label": "长总结模型",
+        "description": "负责生成详细的 AI Markdown 总结。"
+      },
+      "embedding": {
+        "label": "向量模型",
+        "description": "负责全文向量化，用于语义检索与相似度匹配。"
+      },
+      "ocr": {
+        "label": "OCR 文字识别引擎",
+        "description": "负责图片文字提取与扫描版 PDF 的后台文字识别。"
+      },
+      "speech_to_text": {
+        "label": "语音转文字引擎",
+        "description": "为后续视频音轨抽取与播客内容处理预留，将语音内容转换为可检索文本。"
+      },
+      "image_understanding": {
+        "label": "图片语义理解引擎",
+        "description": "为封面图、截图和图文内容提取语义信息预留，后续可用于图像标签与摘要。"
+      },
+      "video_understanding": {
+        "label": "视频理解引擎",
+        "description": "为后续视频内容理解、片段总结与时间轴摘要预留。"
+      }
+    },
+    "modelConfigFields": {
+      "host": "服务地址",
+      "base_url": "Base URL",
+      "api_key": "API Key",
+      "hf_api_key": "HF Access Token",
+      "endpoint": "下载镜像 / Endpoint",
+      "enabled": "启用 OCR",
+      "lang": "语言",
+      "max_workers": "并发数"
+    },
     "billingHeading": "系统与计费控制",
     "billingDesc": "管理本自然月 API 使用上限，并查看当前大模型调用账本汇总。",
     "saveSettings": "保存设置",
@@ -406,6 +577,12 @@
     "aliasColumn": "别名",
     "permissionsColumn": "权限",
     "lastUsedColumn": "最近使用",
+    "patScopeReadKnowledge": "知识库读取",
+    "patScopeReadKnowledgeDesc": "允许外部智能体通过网页或者MCP获取你的知识库数据，这是大部分工具运作的基础。",
+    "patScopeWriteStar": "星标收藏",
+    "patScopeWriteStarDesc": "允许智能体代替你将外部数据沉淀到星标收藏匣中。",
+    "patScopeWriteSystemConfig": "修改系统配置",
+    "patScopeWriteSystemConfigDesc": "极度危险，允许智能体直接修改系统的底层模型用途、计费额度等核心配置。",
     "expiryColumn": "有效期",
     "createdAtColumn": "创建时间",
     "adminRoleLabel": "管理员",

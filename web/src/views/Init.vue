@@ -47,7 +47,7 @@ async function submitInit() {
         <form class="space-y-5" @submit.prevent="submitInit">
           <div class="space-y-2">
             <Label for="init-username">{{ t('auth.username') }}</Label>
-            <Input id="init-username" v-model="username" placeholder="super-admin" minlength="3" maxlength="64" required />
+            <Input id="init-username" v-model="username" :placeholder="t('auth.initialAdminPlaceholder')" minlength="3" maxlength="64" required />
           </div>
           <div class="space-y-2">
             <Label for="init-password">{{ t('auth.password') }}</Label>
