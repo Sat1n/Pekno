@@ -16,6 +16,18 @@ MODEL_SETTINGS_NAMESPACE = "__model_settings__"
 
 MODEL_PROVIDER_CATALOG: List[Dict[str, Any]] = [
     {
+        "id": "paddleocr_v5_cpu",
+        "name": "PaddleOCR v5 (CPU)",
+        "description": "本地 CPU OCR 引擎，适合图片文字提取与扫描版 PDF 后台识别。",
+        "badge": "本地 OCR",
+        "capabilities": ["OCR"],
+        "config_fields": [
+            {"key": "enabled", "label": "启用 OCR", "type": "string", "default": "true"},
+            {"key": "lang", "label": "语言", "type": "string", "default": "ch"},
+            {"key": "max_workers", "label": "并发数", "type": "string", "default": "1"},
+        ],
+    },
+    {
         "id": "local_whisper",
         "name": "Local (Faster-Whisper)",
         "description": "本地高性能语音转写引擎，基于 CTranslate2 深度优化，无需网络即可硬解语音流。",
@@ -143,18 +155,6 @@ MODEL_PROVIDER_CATALOG: List[Dict[str, Any]] = [
             {"key": "endpoint", "label": "下载镜像 / Endpoint", "type": "string", "default": ""},
         ],
     },
-    {
-        "id": "paddleocr_v5_cpu",
-        "name": "PaddleOCR v5 (CPU)",
-        "description": "本地 CPU OCR 引擎，适合图片文字提取与扫描版 PDF 后台识别。",
-        "badge": "本地 OCR",
-        "capabilities": ["OCR"],
-        "config_fields": [
-            {"key": "enabled", "label": "启用 OCR", "type": "string", "default": "true"},
-            {"key": "lang", "label": "语言", "type": "string", "default": "ch"},
-            {"key": "max_workers", "label": "并发数", "type": "string", "default": "1"},
-        ],
-    },
 ]
 
 MODEL_ASSIGNMENT_DEFINITIONS: List[Dict[str, Any]] = [
@@ -242,6 +242,9 @@ MODEL_ASSIGNMENT_DEFINITIONS: List[Dict[str, Any]] = [
 
 
 def _is_provider_configured(provider_id: str, config: Dict[str, Any], is_configured_in_db: bool) -> bool:
+    if provider_id == "local_whisper":
+        return True
+
     if provider_id == "paddleocr_v5_cpu":
         return str(config.get("enabled", "true")).strip().lower() not in {"false", "0", "no", "off"}
 

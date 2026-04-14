@@ -96,7 +96,9 @@ async def _get_ocr_runtime() -> tuple[str, str, dict[str, Any]]:
     provider_id = assignment.get("provider") or DEFAULT_OCR_PROVIDER
     model_name = assignment.get("model") or DEFAULT_OCR_MODEL
     if provider_id != DEFAULT_OCR_PROVIDER:
-        raise OCRConfigError(f"当前 OCR 提供商 [{provider_id}] 不受支持，仅支持本地 PaddleOCR v5 CPU")
+        raise OCRConfigError(
+            f"Unsupported OCR provider [{provider_id}]. Only local PaddleOCR v5 CPU is supported."
+        )
 
     config = await _load_provider_config(provider_id)
     return provider_id, model_name, config
@@ -157,7 +159,7 @@ async def _get_ocr_engine(lang: str, model_name: str, max_workers: int):
             except Exception as exc:
                 last_error = exc
 
-        raise OCRConfigError(f"本地 PaddleOCR 初始化失败: {last_error}")
+        raise OCRConfigError(f"Failed to initialize local PaddleOCR: {last_error}")
 
 
 def _looks_like_points(value: Any) -> bool:
@@ -267,14 +269,14 @@ def _run_ocr_sync(engine: Any, image_path: Path, width: int, height: int) -> dic
         elif hasattr(engine, "ocr"):
             raw_result = engine.ocr(str(image_path))
         else:
-            raise OCRConfigError("当前 PaddleOCR 实例不支持可识别的调用方式")
+            raise OCRConfigError("The current PaddleOCR instance does not support a recognized call pattern.")
     return _normalize_ocr_output(raw_result, width, height)
 
 
 async def run_image_ocr(image_path: str | Path) -> tuple[dict[str, Any], str, str]:
     provider_id, model_name, config = await _get_ocr_runtime()
     if not _parse_bool(config.get("enabled"), True):
-        raise OCRDisabledError("OCR 已在设置中禁用")
+        raise OCRDisabledError("OCR is disabled in settings.")
 
     lang = str(config.get("lang") or "ch").strip() or "ch"
     max_workers = _parse_positive_int(config.get("max_workers"), 1)
@@ -313,7 +315,7 @@ def _has_meaningful_text(text: str) -> bool:
 async def run_pdf_ocr(pdf_path: str | Path) -> tuple[dict[str, Any], str, str]:
     provider_id, model_name, config = await _get_ocr_runtime()
     if not _parse_bool(config.get("enabled"), True):
-        raise OCRDisabledError("OCR 已在设置中禁用")
+        raise OCRDisabledError("OCR is disabled in settings.")
 
     lang = str(config.get("lang") or "ch").strip() or "ch"
     max_workers = _parse_positive_int(config.get("max_workers"), 1)

@@ -749,9 +749,12 @@ function formatBillingCost(value: number | undefined, currency: string | undefin
                         </div>
                       </div>
 
-                      <div class="rounded-xl border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
-                        {{ t('settings.providerConfigHint') }}
-                      </div>
+                        <div
+                          v-if="selectedProvider.config_fields.length > 0"
+                          class="rounded-xl border bg-muted/30 px-4 py-3 text-sm text-muted-foreground"
+                        >
+                          {{ t('settings.providerConfigHint') }}
+                        </div>
 
                       <div v-for="field in selectedProvider.config_fields" :key="field.key" class="space-y-2">
                         <Label>{{ t('settings.modelConfigFields.' + field.key, field.label) }}</Label>
@@ -765,7 +768,12 @@ function formatBillingCost(value: number | undefined, currency: string | undefin
                         </p>
                       </div>
 
-                      <Button class="w-full" @click="handleSaveModelProvider" :disabled="isSavingModelProvider">
+                      <Button
+                        v-if="selectedProvider.config_fields.length > 0"
+                        class="w-full"
+                        @click="handleSaveModelProvider"
+                        :disabled="isSavingModelProvider"
+                      >
                         <Loader2 v-if="isSavingModelProvider" class="w-4 h-4 mr-2 animate-spin" />
                         <Save v-else class="w-4 h-4 mr-2" />
                         {{ t('settings.saveProviderConfig') }}
