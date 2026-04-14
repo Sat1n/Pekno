@@ -24,6 +24,7 @@ from shared.models import ItemORM, UserItemStateORM, VaultCategoryORM
 from shared.plugins.base import BasePlugin
 from shared.plugins.manager import plugin_manager
 from shared.time_utils import now_in_app_timezone_naive
+from shared.utils.path_guard import safe_resolve_path
 
 router = APIRouter(prefix="/api/items", tags=["Items"])
 
@@ -578,7 +579,7 @@ async def upload_item(
     target_dir = UPLOAD_ROOT / relative_dir
     target_dir.mkdir(parents=True, exist_ok=True)
     target_name = f"{uuid.uuid4().hex}{ext}"
-    target_path = target_dir / target_name
+    target_path = safe_resolve_path(target_dir, target_name)
 
     content = await file.read()
     file_hash = hashlib.sha256(content).hexdigest()
@@ -844,8 +845,17 @@ async def mark_items_read_batch(payload: ReadBatchRequest, current_user=Depends(
 async def delete_item(item_id: str, current_user=Depends(get_current_user)):
     async with AsyncSessionLocal() as session:
         async with session.begin():
-            await session.execute(delete(UserItemStateORM).where(UserItemStateORM.item_id == item_id))
-            await session.execute(delete(ItemORM).where(ItemORM.id == item_id))
+            # Ownership check: only delete the current user's association
+            result = await session.execute(
+                select(UserItemStateORM).where(
+                    UserItemStateORM.user_id == current_user["id"],
+                    UserItemStateORM.item_id == item_id,
+                )
+            )
+            state = result.scalar_one_or_none()
+            if not state:
+                raise HTTPException(status_code=404, detail="The requested item could not be found.")
+            await session.delete(state)
     return {"status": "success"}
 
 

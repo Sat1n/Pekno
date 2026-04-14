@@ -17,6 +17,7 @@ from worker.plugins.pipeline import reload_system_plugins_task, run_plugin_pipel
 from sqlalchemy import select, delete
 from hub.core.security import get_current_user, require_admin
 from shared.api_errors import ApiError
+from shared.utils.path_guard import safe_resolve_path
 
 router = APIRouter(prefix="/api/plugins", tags=["Plugins"])
 
@@ -136,7 +137,9 @@ async def upload_plugin_preview(file: UploadFile = File(...), current_user=Depen
         shutil.rmtree(TEMP_PREVIEW_DIR)
     TEMP_PREVIEW_DIR.mkdir(parents=True, exist_ok=True)
     
-    temp_zip_path = TEMP_PREVIEW_DIR / file.filename
+    # Sanitize filename to prevent directory traversal
+    safe_filename = Path(file.filename or "plugin.zip").name
+    temp_zip_path = safe_resolve_path(TEMP_PREVIEW_DIR, safe_filename)
     
     try:
         # 1. Persist ZIP
@@ -198,7 +201,9 @@ async def confirm_install_plugin(token: str, current_user=Depends(require_admin)
     Step 2: Confirm installation, move files into place, persist registry state,
     and trigger hot reload on runtime services.
     """
-    source_path = TEMP_PREVIEW_DIR / token
+    # Sanitize token to prevent directory traversal
+    safe_token = Path(token).name
+    source_path = TEMP_PREVIEW_DIR / safe_token
     if not source_path.exists():
         raise HTTPException(status_code=404, detail="The installation session expired. Please upload the plugin again.")
         

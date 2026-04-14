@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -14,6 +15,57 @@ SERVICE_DISPLAY_NAMES = {
     "worker": "Iris-Worker",
     "scheduler": "Iris-Scheduler",
 }
+
+# ---------------------------------------------------------------------------
+#  Sensitive-value masking
+# ---------------------------------------------------------------------------
+
+_SENSITIVE_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    # Bearer <token>
+    (re.compile(r'(Bearer\s+)\S+', re.IGNORECASE), r'\1***'),
+    # Authorization: <scheme> <token>
+    (re.compile(r'(Authorization["\']?\s*[:=]\s*["\']?)\S+', re.IGNORECASE), r'\1***'),
+    # GitHub PAT patterns (ghp_, gho_, ghs_, ghr_, github_pat_)
+    (re.compile(r'(ghp_|gho_|ghs_|ghr_|github_pat_)[A-Za-z0-9_]+'), '***'),
+    # Pekno PAT tokens
+    (re.compile(r'(pekno_pat_)[A-Za-z0-9_-]+'), r'\1***'),
+    # OpenAI-style keys  sk-...
+    (re.compile(r'sk-[A-Za-z0-9]{20,}'), '***'),
+    # Fernet-ish base64 tokens (gAAAAA prefix)
+    (re.compile(r'gAAAAA[A-Za-z0-9_/+-]{40,}={0,2}'), '***'),
+    # Generic key=value in query-strings or logs
+    (re.compile(
+        r'((?:token|key|secret|password|cookie|sessdata|credential)'
+        r'["\']?\s*[:=]\s*["\']?)([^\s"\',;]{4})[^\s"\',;]*',
+        re.IGNORECASE,
+    ), r'\1\2***'),
+]
+
+
+def _mask_sensitive(message: str) -> str:
+    for pattern, replacement in _SENSITIVE_PATTERNS:
+        message = pattern.sub(replacement, message)
+    return message
+
+
+class SensitiveFilter(logging.Filter):
+    """Redact tokens, keys, and credentials from every log record."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.msg, str):
+            record.msg = _mask_sensitive(record.msg)
+        if record.args:
+            if isinstance(record.args, dict):
+                record.args = {
+                    k: _mask_sensitive(str(v)) if isinstance(v, str) else v
+                    for k, v in record.args.items()
+                }
+            elif isinstance(record.args, tuple):
+                record.args = tuple(
+                    _mask_sensitive(str(a)) if isinstance(a, str) else a
+                    for a in record.args
+                )
+        return True
 
 
 class ColorFormatter(logging.Formatter):
@@ -132,11 +184,13 @@ def configure_logging(service_name: str | None = None) -> str:
     console_handler = _build_console_handler()
     file_handler = _build_file_handler(service)
     owned_handlers = [console_handler, file_handler]
+    sensitive_filter = SensitiveFilter()
     for handler in owned_handlers:
         root.addHandler(handler)
     for handler in root.handlers:
         if getattr(handler, "_iris_owned", False):
             handler.addFilter(ServiceNameFilter(service))
+            handler.addFilter(sensitive_filter)
     for logger_name in ("uvicorn", "uvicorn.error", "uvicorn.access", "fastapi"):
         _configure_named_logger(logger_name, owned_handlers, root.level)
     root._iris_service_name = service  # type: ignore[attr-defined]

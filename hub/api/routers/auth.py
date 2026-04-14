@@ -177,11 +177,17 @@ async def get_pats(current_user=Depends(get_current_user)):
             .order_by(PersonalAccessTokenORM.created_at.desc())
         )
         pats = result.scalars().all()
+
+        def _mask_pat_token(raw_token: str) -> str:
+            if len(raw_token) > 15:
+                return f"{raw_token[:12]}***{raw_token[-3:]}"
+            return "***"
+
         return [
             PATResponse(
                 id=p.id,
                 alias=p.alias,
-                token=p.token,
+                token=_mask_pat_token(p.token),
                 is_admin=p.is_admin,
                 scopes=list(p.scopes or []),
                 created_at=p.created_at.isoformat(),

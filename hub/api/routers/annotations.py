@@ -13,6 +13,7 @@ from hub.core.security import get_current_user
 from shared.database import AsyncSessionLocal
 from shared.models import ItemORM, UserAnnotationsORM, UserItemStateORM
 from shared.time_utils import now_in_app_timezone_naive
+from shared.utils.path_guard import safe_resolve_path
 
 router = APIRouter(prefix="/api/items", tags=["Annotations"])
 ANNOTATION_CAPTURE_ROOT = Path("data/static/annotation-captures")
@@ -120,7 +121,7 @@ async def upload_annotation_asset(
     target_dir = ANNOTATION_CAPTURE_ROOT / current_user["id"] / item_id
     target_dir.mkdir(parents=True, exist_ok=True)
     filename = f"{uuid.uuid4()}{suffix}"
-    target_path = target_dir / filename
+    target_path = safe_resolve_path(target_dir, filename)
 
     payload = await file.read()
     if not payload:

@@ -2,10 +2,14 @@
 加密工具类 - 用于安全存储敏感配置（如 Token）
 使用 Fernet 对称加密算法
 """
-from cryptography.fernet import Fernet
-import os
+import logging
 from typing import Optional
+
+from cryptography.fernet import Fernet
+
 from shared.secret_store import load_or_create_secret
+
+_log = logging.getLogger(__name__)
 
 ENCRYPTION_KEY = load_or_create_secret(
     env_key="IRIS_ENCRYPTION_KEY",
@@ -57,8 +61,8 @@ def decrypt_value(encrypted_value: str) -> Optional[str]:
         f = get_fernet()
         decrypted = f.decrypt(encrypted_value.encode())
         return decrypted.decode()
-    except Exception as e:
-        print(f"❌ 解密失败: {e}")
+    except Exception:
+        _log.warning("Decryption failed for a stored value (key may have changed).")
         return None
 
 

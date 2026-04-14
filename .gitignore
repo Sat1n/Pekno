@@ -66,3 +66,9 @@ data/cache/
 tests/output/
 !web/src/lib/
 !web/src/lib/**
+
+# 开发临时文件
+test_ytdlp.py
+report/
+pyrightconfig.json
+scripts/test_mcp.py
