@@ -21,7 +21,7 @@ from shared.config import ConfigManager, ConfigKeys
 from sqlalchemy import select, delete
 from shared.plugins.manager import plugin_manager
 from hub.core.security import get_current_user
-from hub.core.init_db import ensure_runtime_tables
+from hub.core.init_db import ensure_runtime_environment
 from shared.api_errors import ApiError
 from shared.error_codes import ERR_INTERNAL_SERVER_ERROR, ERR_VALIDATION_FAILED, resolve_error_code_and_detail
 
@@ -32,7 +32,7 @@ logger = logging.getLogger("Iris-Hub")
 async def lifespan(app: FastAPI):
     """系统启动时动态加载插件以及执行环境巡检"""
     check_media_dependencies()
-    await ensure_runtime_tables()
+    await ensure_runtime_environment()
     async with AsyncSessionLocal() as session:
         await plugin_manager.load_enabled_plugins(session)
     yield

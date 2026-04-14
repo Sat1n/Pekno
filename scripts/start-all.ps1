@@ -10,13 +10,13 @@ Write-Host @"
 ╠═══════════════════════════════════════════════════════════╣
 ║  请在 4 个不同的终端中运行以下命令:                         ║
 ║                                                            ║
-║  终端 1: .\scripts\start-hub.ps1    (Hub API 服务)          ║
+║  终端 1: .\scripts\start-hub-with-migrate.ps1 (Hub API)    ║
 ║  终端 2: .\scripts\start-worker.ps1 (Worker 任务服务)      ║
 ║  终端 3: .\scripts\start-scheduler.ps1 (TaskIQ 调度器)    ║
 ║  终端 4: .\scripts\start-web.ps1    (Vue 前端)             ║
 ║                                                            ║
 ║  或者使用 PowerShell 后台运行:                              ║
-║   Start-Process powershell -ArgumentList '-NoExit', '-Command', '.\scripts\start-hub.ps1'    -WorkingDirectory 'F:\Cardinal\Pekno'     ║
+║   Start-Process powershell -ArgumentList '-NoExit', '-Command', '.\scripts\start-hub-with-migrate.ps1' -WorkingDirectory 'F:\Cardinal\Pekno' ║
 ║   Start-Process powershell -ArgumentList '-NoExit', '-Command', '.\scripts\start-worker.ps1' -WorkingDirectory 'F:\Cardinal\Pekno'     ║
 ║   Start-Process powershell -ArgumentList '-NoExit', '-Command', '.\scripts\start-scheduler.ps1' -WorkingDirectory 'F:\Cardinal\Pekno'  ║
 ║   Start-Process powershell -ArgumentList '-NoExit', '-Command', '.\scripts\start-web.ps1'    -WorkingDirectory 'F:\Cardinal\Pekno\web'  ║
