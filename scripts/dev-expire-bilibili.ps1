@@ -8,7 +8,7 @@ if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
 }
 
 $containerName = "iris-db"
-$dbUser = "natis"
+$dbUser = "pekno"
 $dbName = "pekno_iris"
 
 $sql = @"

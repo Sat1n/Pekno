@@ -21,7 +21,7 @@ services:
         EXECUTION_MODE: ${EXECUTION_MODE:-cpu}
     container_name: pekno-hub
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-natis}
+      POSTGRES_USER: ${POSTGRES_USER:-pekno}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pekno_password}
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
@@ -52,7 +52,7 @@ services:
         EXECUTION_MODE: ${EXECUTION_MODE:-cpu}
     container_name: pekno-worker
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-natis}
+      POSTGRES_USER: ${POSTGRES_USER:-pekno}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pekno_password}
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
@@ -91,7 +91,7 @@ services:
         EXECUTION_MODE: ${EXECUTION_MODE:-cpu}
     container_name: pekno-scheduler
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-natis}
+      POSTGRES_USER: ${POSTGRES_USER:-pekno}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pekno_password}
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
@@ -120,11 +120,11 @@ services:
     image: ankane/pgvector:latest
     container_name: pekno-postgres
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-natis}
+      POSTGRES_USER: ${POSTGRES_USER:-pekno}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pekno_password}
       POSTGRES_DB: ${POSTGRES_DB:-pekno_iris}
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-natis} -d ${POSTGRES_DB:-pekno_iris}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-pekno} -d ${POSTGRES_DB:-pekno_iris}"]
       interval: 5s
       timeout: 5s
       retries: 20

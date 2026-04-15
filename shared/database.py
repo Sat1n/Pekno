@@ -1,7 +1,7 @@
 import os
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 
-DB_USER = os.getenv("POSTGRES_USER", "natis")
+DB_USER = os.getenv("POSTGRES_USER", "pekno")
 DB_PASS = os.getenv("POSTGRES_PASSWORD", "pekno_password")
 DB_HOST = os.getenv("POSTGRES_HOST", "127.0.0.1")
 DB_PORT = os.getenv("POSTGRES_PORT", "5432")
