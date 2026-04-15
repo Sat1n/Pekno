@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Blocks, User, ChevronRight, Database, Trash2, Loader2, HardDrive, Puzzle, Plus, MailPlus, LogOut, KeyRound, Copy, BrainCircuit, SlidersHorizontal, Cpu, Save, Search, Sparkles, GalleryVerticalEnd, Shield, Server } from 'lucide-vue-next'
 import { usePluginStore } from '@/store/usePluginStore'
-import { changePassword, clearStoredToken, createInvitationCode, getDataSources, getInvitationCodes, getModelProviders, getStoredAuthUser, clearDataSource, saveModelAssignments, saveModelProvider, getPATs, createPAT, deletePAT, getSystemBillingSettings, saveSystemBillingSettings, resolveApiErrorMessage, type DataSourceStat, type InvitationCodeInfo, type ModelAssignmentInfo, type ModelProviderInfo, type PATItem, type SystemBillingSettings } from '@/lib/api'
+import { API_BASE_URL, changePassword, clearStoredToken, createInvitationCode, getDataSources, getInvitationCodes, getModelProviders, getStoredAuthUser, clearDataSource, saveModelAssignments, saveModelProvider, getPATs, createPAT, deletePAT, getSystemBillingSettings, saveSystemBillingSettings, resolveApiErrorMessage, type DataSourceStat, type InvitationCodeInfo, type ModelAssignmentInfo, type ModelProviderInfo, type PATItem, type SystemBillingSettings } from '@/lib/api'
 import { useToast } from '@/components/ui/toast/use-toast'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import PluginInstallDialog from './PluginInstallDialog.vue'
@@ -66,6 +66,16 @@ const newPatIsAdmin = ref(false)
 const justCreatedToken = ref<string | null>(null)
 const selectedMcpToken = ref('')
 const isChangingPassword = ref(false)
+
+function getRuntimeOrigin(): string {
+  if (API_BASE_URL) {
+    return API_BASE_URL.replace(/\/$/, '')
+  }
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    return window.location.origin.replace(/\/$/, '')
+  }
+  return String(import.meta.env.VITE_PUBLIC_ORIGIN || '').trim().replace(/\/$/, '')
+}
 
 const availablePatScopes = computed(() => [
   {
@@ -514,7 +524,7 @@ async function copyText(text: string, label: string = '') {
 
 const mcpJsonConfig = computed(() => {
   const token = selectedMcpToken.value || (pats.value.length > 0 ? (pats.value[0]?.token ?? '') : '')
-  const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:8001'
+  const baseUrl = getRuntimeOrigin()
   return JSON.stringify({
     "mcpServers": {
       "iris-hub": {
@@ -528,7 +538,7 @@ const mcpJsonConfig = computed(() => {
 })
 
 const mcpBaseUrl = computed(() => {
-  return typeof window !== 'undefined' ? window.location.origin : 'http://localhost:8001'
+  return getRuntimeOrigin()
 })
 
 const mcpStreamableEndpoint = computed(() => `${mcpBaseUrl.value}/api/mcp/v2/stream`)

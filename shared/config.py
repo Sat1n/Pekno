@@ -2,6 +2,7 @@
 Configuration management helpers for reading and persisting user settings.
 Sensitive values are stored in encrypted form.
 """
+import os
 from typing import Optional
 from shared.database import AsyncSessionLocal
 from shared.models import ConfigORM
@@ -30,6 +31,7 @@ class ConfigKeys:
 
 
 SYSTEM_CONFIG_USER_ID = "system"
+EXECUTION_MODE = os.getenv("EXECUTION_MODE", "cpu").strip().lower() or "cpu"
 SYSTEM_SCOPED_CONFIG_KEYS = {
     ConfigKeys.SYNC_LIMIT,
     ConfigKeys.AUTO_SYNC,
@@ -40,6 +42,10 @@ SYSTEM_SCOPED_CONFIG_KEYS = {
     ConfigKeys.AUTO_SHORT_SUMMARY,
     ConfigKeys.RETENTION_HOURS,
 }
+
+
+def is_cuda_execution_mode() -> bool:
+    return EXECUTION_MODE == "cuda"
 
 
 class ConfigManager:

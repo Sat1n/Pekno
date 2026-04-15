@@ -1,8 +1,11 @@
-from shared.logger import hub_log
-from hub.core.llm.ollama_manager import clear_vram_for_whisper
-from hub.core.billing import estimate_tokens, record_api_usage
+import asyncio
 import os
 from typing import Any
+
+from hub.core.billing import estimate_tokens, record_api_usage
+from hub.core.llm.ollama_manager import force_unload_ollama
+from shared.config import is_cuda_execution_mode
+from shared.logger import hub_log
 
 
 async def _record_whisper_usage(model_name: str, transcript_text: str = "") -> None:
@@ -69,31 +72,46 @@ class TranscriberFactory:
     async def transcribe_audio(audio_path: str, provider: str = "local_whisper", model_name: str = "small"):
         """Transcribe audio with the configured speech-to-text provider."""
         if provider == "local_whisper":
-            # Clear Ollama VRAM before Whisper loads to reduce memory pressure.
-            await clear_vram_for_whisper()
+            use_cuda = is_cuda_execution_mode()
+            if use_cuda:
+                hub_log.info("CUDA execution mode detected. Releasing Ollama VRAM before Whisper transcription.")
+                await force_unload_ollama()
+                await asyncio.sleep(2)
             try:
                 await resolve_huggingface_env()
                 
                 from faster_whisper import WhisperModel
-                import asyncio
-                
-                hub_log.info("Loading Faster-Whisper (%s) on CUDA...", model_name)
-                hub_log.info(
-                    "Current Hugging Face download environment: "
-                    f"endpoint={os.environ.get('HF_ENDPOINT', 'https://huggingface.co')} | "
-                    f"disable_xet={os.environ.get('HF_HUB_DISABLE_XET', '0')}"
-                )
-                model = await asyncio.to_thread(WhisperModel, model_name, device="cuda", compute_type="int8")
-                hub_log.info("Faster-Whisper (%s) loaded successfully on GPU.", model_name)
+                current_endpoint = os.environ.get("HF_ENDPOINT", "https://huggingface.co")
+                disable_xet = os.environ.get("HF_HUB_DISABLE_XET", "0")
+
+                if use_cuda:
+                    hub_log.info("Loading Faster-Whisper (%s) on CUDA...", model_name)
+                    hub_log.info(
+                        "Current Hugging Face download environment: endpoint=%s | disable_xet=%s",
+                        current_endpoint,
+                        disable_xet,
+                    )
+                    model = await asyncio.to_thread(WhisperModel, model_name, device="cuda", compute_type="int8")
+                    hub_log.info("Faster-Whisper (%s) loaded successfully on GPU.", model_name)
+                else:
+                    hub_log.info("CPU execution mode detected. Loading Faster-Whisper (%s) on CPU.", model_name)
+                    hub_log.info(
+                        "Current Hugging Face download environment: endpoint=%s | disable_xet=%s",
+                        current_endpoint,
+                        disable_xet,
+                    )
+                    model = await asyncio.to_thread(WhisperModel, model_name, device="cpu", compute_type="int8")
             except Exception as e:
+                if not use_cuda:
+                    raise
                 hub_log.error("Whisper failed to load on GPU: %s", str(e))
                 hub_log.warning(
                     "Falling back to CPU transcription. Performance may be significantly slower."
                 )
                 hub_log.info(
-                    "Hugging Face environment before CPU fallback: "
-                    f"endpoint={os.environ.get('HF_ENDPOINT', 'https://huggingface.co')} | "
-                    f"disable_xet={os.environ.get('HF_HUB_DISABLE_XET', '0')}"
+                    "Hugging Face environment before CPU fallback: endpoint=%s | disable_xet=%s",
+                    os.environ.get("HF_ENDPOINT", "https://huggingface.co"),
+                    os.environ.get("HF_HUB_DISABLE_XET", "0"),
                 )
                 model = await asyncio.to_thread(WhisperModel, model_name, device="cpu", compute_type="int8")
 

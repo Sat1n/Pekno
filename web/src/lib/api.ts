@@ -2,6 +2,22 @@ import axios from 'axios'
 import i18n from '@/i18n'
 
 const TOKEN_KEY = 'pekno-access-token'
+const ENV_API_BASE_URL = String(import.meta.env.VITE_API_BASE_URL || '').trim()
+const DEV_API_BASE_URL = 'http://127.0.0.1:8001'
+
+function resolveApiBaseUrl(): string {
+  if (ENV_API_BASE_URL) {
+    return ENV_API_BASE_URL.replace(/\/$/, '')
+  }
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    const origin = window.location.origin.replace(/\/$/, '')
+    if (import.meta.env.DEV && /:(5173|4173|4174)$/.test(origin)) {
+      return DEV_API_BASE_URL
+    }
+    return origin
+  }
+  return DEV_API_BASE_URL
+}
 
 export function getStoredToken(): string | null {
   return localStorage.getItem(TOKEN_KEY)
@@ -66,7 +82,7 @@ export function getStoredAuthUser(): StoredAuthUser {
 
 // API 客户端配置
 export const apiClient = axios.create({
-  baseURL: 'http://localhost:8001', // FastAPI 后端地址
+  baseURL: resolveApiBaseUrl(),
   timeout: 10000, // 10 秒超时
   headers: {
     'Content-Type': 'application/json',

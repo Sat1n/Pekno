@@ -1,20 +1,132 @@
 services:
-  # 神经纤维：Redis 任务队列
-  iris-redis:
-    image: redis:7-alpine
-    container_name: iris-redis
+  nginx:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: nginx-runtime
+    container_name: pekno-nginx
+    depends_on:
+      hub:
+        condition: service_started
     ports:
-      - "6379:6379"
+      - "80:80"
 
-  # 长期记忆：带向量插件的数据库
-  iris-db:
-    image: ankane/pgvector:latest
-    container_name: iris-db
+  hub:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: app-runtime
+      args:
+        BASE_IMAGE: python:3.13-slim
+        EXECUTION_MODE: ${EXECUTION_MODE:-cpu}
+    container_name: pekno-hub
     environment:
-      POSTGRES_USER: natis
-      POSTGRES_PASSWORD: pekno_password
-      POSTGRES_DB: pekno_iris
-    ports:
-      - "5432:5432"
+      POSTGRES_USER: ${POSTGRES_USER:-natis}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pekno_password}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-pekno_iris}
+      REDIS_URL: redis://redis:6379
+      USE_REDIS: "True"
+      APP_ENV: ${APP_ENV:-prod}
+      APP_TIMEZONE: ${APP_TIMEZONE:-Asia/Shanghai}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      EXECUTION_MODE: ${EXECUTION_MODE:-cpu}
+      RUN_DB_MIGRATIONS: "1"
+    command: ["uv", "run", "python", "hub/main.py"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - ./data:/app/data
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: app-runtime
+      args:
+        BASE_IMAGE: ${WORKER_BASE_IMAGE:-python:3.13-slim}
+        EXECUTION_MODE: ${EXECUTION_MODE:-cpu}
+    container_name: pekno-worker
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-natis}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pekno_password}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-pekno_iris}
+      REDIS_URL: redis://redis:6379
+      USE_REDIS: "True"
+      APP_ENV: ${APP_ENV:-prod}
+      APP_TIMEZONE: ${APP_TIMEZONE:-Asia/Shanghai}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      EXECUTION_MODE: ${EXECUTION_MODE:-cpu}
+      RUN_DB_MIGRATIONS: "0"
+    command: ["uv", "run", "taskiq", "worker", "worker.main:broker"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - ./data:/app/data
+    # Uncomment the block below on NVIDIA hosts to enable GPU passthrough.
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: app-runtime
+      args:
+        BASE_IMAGE: python:3.13-slim
+        EXECUTION_MODE: ${EXECUTION_MODE:-cpu}
+    container_name: pekno-scheduler
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-natis}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pekno_password}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-pekno_iris}
+      REDIS_URL: redis://redis:6379
+      USE_REDIS: "True"
+      APP_ENV: ${APP_ENV:-prod}
+      APP_TIMEZONE: ${APP_TIMEZONE:-Asia/Shanghai}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      EXECUTION_MODE: ${EXECUTION_MODE:-cpu}
+      RUN_DB_MIGRATIONS: "0"
+    command: ["uv", "run", "taskiq", "scheduler", "worker.main:scheduler"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - ./data:/app/data
+
+  redis:
+    image: redis:7-alpine
+    container_name: pekno-redis
+
+  postgres:
+    image: ankane/pgvector:latest
+    container_name: pekno-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-natis}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pekno_password}
+      POSTGRES_DB: ${POSTGRES_DB:-pekno_iris}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-natis} -d ${POSTGRES_DB:-pekno_iris}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
     volumes:
       - ./data/postgres:/var/lib/postgresql/data
