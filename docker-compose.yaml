@@ -30,6 +30,7 @@ services:
       USE_REDIS: "True"
       APP_ENV: ${APP_ENV:-prod}
       APP_TIMEZONE: ${APP_TIMEZONE:-Asia/Shanghai}
+      TZ: ${APP_TIMEZONE:-Asia/Shanghai}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       EXECUTION_MODE: ${EXECUTION_MODE:-cpu}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
@@ -62,6 +63,7 @@ services:
       USE_REDIS: "True"
       APP_ENV: ${APP_ENV:-prod}
       APP_TIMEZONE: ${APP_TIMEZONE:-Asia/Shanghai}
+      TZ: ${APP_TIMEZONE:-Asia/Shanghai}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       EXECUTION_MODE: ${EXECUTION_MODE:-cpu}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
@@ -102,11 +104,12 @@ services:
       USE_REDIS: "True"
       APP_ENV: ${APP_ENV:-prod}
       APP_TIMEZONE: ${APP_TIMEZONE:-Asia/Shanghai}
+      TZ: ${APP_TIMEZONE:-Asia/Shanghai}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       EXECUTION_MODE: ${EXECUTION_MODE:-cpu}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
       RUN_DB_MIGRATIONS: "0"
-    command: ["uv", "run", "taskiq", "scheduler", "worker.main:scheduler"]
+    command: ["sh", "-lc", "uv run python scripts/scheduler_bootstrap.py && uv run taskiq scheduler worker.main:scheduler"]
     depends_on:
       postgres:
         condition: service_healthy

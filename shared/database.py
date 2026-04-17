@@ -17,9 +17,11 @@ DATABASE_URL = build_database_url()
 SYNC_DATABASE_URL = build_database_url(sync=True)
 
 engine = create_async_engine(
-    DATABASE_URL, 
-    echo=False, 
-    future=True
+    DATABASE_URL,
+    echo=False,
+    future=True,
+    pool_pre_ping=True,
+    pool_recycle=1800,
 )
 
 AsyncSessionLocal = async_sessionmaker(

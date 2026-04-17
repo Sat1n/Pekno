@@ -54,6 +54,17 @@ def _decrypt_token_value(raw_value: str | None) -> str:
     return decrypted
 
 
+def _resolve_token_value(raw_value: str | None) -> str:
+    value = (raw_value or "").strip()
+    if not value:
+        return ""
+    # Response builders may receive either an encrypted DB value or an already
+    # decrypted/plaintext value from upstream helpers.
+    if value.startswith("gAAAAA"):
+        return _decrypt_token_value(value)
+    return value
+
+
 async def list_user_credentials(user_id: str) -> list[UserCredentialORM]:
     async with AsyncSessionLocal() as session:
         result = await session.execute(
@@ -115,7 +126,7 @@ async def upsert_user_credential(user_id: str, platform: str, token_value: str) 
 
 def build_credential_response_payload(credential: UserCredentialORM) -> dict[str, Any]:
     meta = PLATFORM_WHITELIST[credential.platform]
-    token_value = _decrypt_token_value(credential.token_value)
+    token_value = _resolve_token_value(credential.token_value)
     return {
         "id": credential.id,
         "platform": credential.platform,

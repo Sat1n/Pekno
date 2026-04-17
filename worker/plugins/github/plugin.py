@@ -21,6 +21,8 @@ class GitHubStarsPlugin(BasePlugin):
             "framework_defaults": {
                 "retention_hours": -1,
                 "auto_short_summary": True,
+                "auto_sync": True,
+                "auto_sync_interval": 5,
             },
             "settings_schema": {}
         }

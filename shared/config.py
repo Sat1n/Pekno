@@ -7,7 +7,7 @@ from typing import Optional
 from shared.database import AsyncSessionLocal
 from shared.models import ConfigORM
 from shared.crypto import encrypt_value, decrypt_value
-from shared.logger import worker_log
+from shared.logger import app_log
 from sqlalchemy import select
 
 
@@ -164,11 +164,11 @@ class ConfigManager:
                     
                     await session.execute(stmt)
                 
-                worker_log.info(f"✅ Configuration saved [{plugin_id}]: {key}")
+                app_log.info(f"✅ Configuration saved [{plugin_id}]: {key}")
                 return True
                 
         except Exception as e:
-            worker_log.error(f"❌ Failed to save configuration [{plugin_id}] {key}: {e}")
+            app_log.error(f"❌ Failed to save configuration [{plugin_id}] {key}: {e}")
             return False
     
     @staticmethod
@@ -194,9 +194,9 @@ class ConfigManager:
                     )
                     result = await session.execute(stmt)
                     if result.rowcount > 0:
-                        worker_log.info(f"🗑️ Configuration deleted [{plugin_id}]: {key}")
+                        app_log.info(f"🗑️ Configuration deleted [{plugin_id}]: {key}")
                         return True
                     return False
         except Exception as e:
-            worker_log.error(f"❌ Failed to delete configuration [{plugin_id}] {key}: {e}")
+            app_log.error(f"❌ Failed to delete configuration [{plugin_id}] {key}: {e}")
             return False

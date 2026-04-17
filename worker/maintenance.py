@@ -11,6 +11,19 @@ from shared.plugins.manager import plugin_manager
 from shared.time_utils import get_app_timezone, now_in_app_timezone_naive
 
 
+async def _get_plugin_setting(plugin_id: str, key: str, fallback: str, user_id: str | None = None) -> str:
+    value = await ConfigManager.get_config(plugin_id, key, user_id=user_id)
+    if value not in (None, ""):
+        return value
+
+    plugin = plugin_manager.get_plugin(plugin_id)
+    schema = (plugin.manifest.get("settings_schema") or {}).get(key) if plugin else None
+    default = schema.get("default") if schema else None
+    if default in (None, ""):
+        return fallback
+    return str(default).lower() if isinstance(default, bool) else str(default)
+
+
 async def _resolve_auto_sync_user_id(plugin_id: str) -> str | None:
     plugin = plugin_manager.get_plugin(plugin_id)
     if not plugin:
@@ -84,7 +97,7 @@ async def system_heartbeat_task():
 
     triggered_count = 0
     for plugin_id in plugin_ids:
-        auto_sync = await ConfigManager.get_config(plugin_id, ConfigKeys.AUTO_SYNC, "false")
+        auto_sync = await _get_plugin_setting(plugin_id, ConfigKeys.AUTO_SYNC, "false")
         if auto_sync != "true":
             continue
 
@@ -93,7 +106,7 @@ async def system_heartbeat_task():
             worker_log.info(f"⏭️ [{plugin_id}] Heartbeat detected an active sync task. Skipping this auto-sync cycle.")
             continue
 
-        interval_str = await ConfigManager.get_config(plugin_id, ConfigKeys.AUTO_SYNC_INTERVAL, "60")
+        interval_str = await _get_plugin_setting(plugin_id, ConfigKeys.AUTO_SYNC_INTERVAL, "60")
         last_sync = await ConfigManager.get_config(plugin_id, ConfigKeys.LAST_SYNC_TIME)
 
         try:

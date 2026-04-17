@@ -6,6 +6,9 @@ import re
 import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+from datetime import datetime
+
+from shared.time_utils import get_app_timezone
 
 LOG_DIR = Path("data/logs")
 LOG_MAX_BYTES = int(os.getenv("LOG_MAX_BYTES", str(10 * 1024 * 1024)))
@@ -87,10 +90,25 @@ class ColorFormatter(logging.Formatter):
         logging.CRITICAL: bold_red + format_str + reset,
     }
 
+    def formatTime(self, record: logging.LogRecord, datefmt: str | None = None) -> str:
+        dt = datetime.fromtimestamp(record.created, tz=get_app_timezone())
+        if datefmt:
+            return dt.strftime(datefmt)
+        return dt.isoformat(timespec="seconds")
+
     def format(self, record: logging.LogRecord) -> str:
         log_fmt = self.FORMATS.get(record.levelno, self.format_str)
         formatter = logging.Formatter(log_fmt, datefmt="%H:%M:%S")
+        formatter.formatTime = self.formatTime  # type: ignore[method-assign]
         return formatter.format(record)
+
+
+class AppFileFormatter(logging.Formatter):
+    def formatTime(self, record: logging.LogRecord, datefmt: str | None = None) -> str:
+        dt = datetime.fromtimestamp(record.created, tz=get_app_timezone())
+        if datefmt:
+            return dt.strftime(datefmt)
+        return dt.isoformat(timespec="seconds")
 
 
 class ServiceNameFilter(logging.Filter):
@@ -146,7 +164,7 @@ def _build_file_handler(service_name: str) -> logging.Handler:
         encoding="utf-8",
     )
     handler.setFormatter(
-        logging.Formatter(
+        AppFileFormatter(
             "%(asctime)s - [%(name)s] - %(levelname)s - %(message)s",
             datefmt="%Y-%m-%d %H:%M:%S",
         )
@@ -167,6 +185,14 @@ def _configure_named_logger(logger_name: str, handlers: list[logging.Handler], l
         logger.addHandler(handler)
 
 
+def _logger_level_overrides(service: str, root_level: int) -> dict[str, int]:
+    overrides: dict[str, int] = {}
+    if service == "scheduler":
+        overrides["taskiq"] = max(root_level, logging.INFO)
+        overrides["taskiq.cli.scheduler.run"] = max(root_level, logging.INFO)
+    return overrides
+
+
 def configure_logging(service_name: str | None = None) -> str:
     explicit_service = os.getenv("IRIS_SERVICE", "").strip().lower()
     service = explicit_service if explicit_service in SERVICE_DISPLAY_NAMES else (service_name or detect_service_name())
@@ -177,9 +203,21 @@ def configure_logging(service_name: str | None = None) -> str:
 
     root.setLevel(_get_log_level())
     for handler in list(root.handlers):
-        if getattr(handler, "_iris_owned", False):
-            root.removeHandler(handler)
+        root.removeHandler(handler)
+        try:
             handler.close()
+        except Exception:
+            pass
+
+    for logger_obj in list(logging.root.manager.loggerDict.values()):
+        if not isinstance(logger_obj, logging.Logger):
+            continue
+        for handler in list(logger_obj.handlers):
+            logger_obj.removeHandler(handler)
+            try:
+                handler.close()
+            except Exception:
+                pass
 
     console_handler = _build_console_handler()
     file_handler = _build_file_handler(service)
@@ -191,11 +229,30 @@ def configure_logging(service_name: str | None = None) -> str:
         if getattr(handler, "_iris_owned", False):
             handler.addFilter(ServiceNameFilter(service))
             handler.addFilter(sensitive_filter)
-    for logger_name in ("uvicorn", "uvicorn.error", "uvicorn.access", "fastapi"):
-        _configure_named_logger(logger_name, owned_handlers, root.level)
+    logger_names = (
+        "uvicorn",
+        "uvicorn.error",
+        "uvicorn.access",
+        "fastapi",
+        "taskiq",
+        "taskiq.worker",
+        "taskiq.process-manager",
+        "taskiq.receiver.receiver",
+        "taskiq.cli.scheduler.run",
+        "httpx",
+        "httpcore",
+        "httpcore.connection",
+        "httpcore.http11",
+        "openai",
+        "openai._base_client",
+    )
+    overrides = _logger_level_overrides(service, root.level)
+    for logger_name in logger_names:
+        _configure_named_logger(logger_name, owned_handlers, overrides.get(logger_name, root.level))
     root._iris_service_name = service  # type: ignore[attr-defined]
     return service
 
 hub_log = logging.getLogger("Iris-Hub")
 worker_log = logging.getLogger("Iris-Worker")
 scheduler_log = logging.getLogger("Iris-Scheduler")
+app_log = logging.getLogger(SERVICE_DISPLAY_NAMES.get(detect_service_name(), SERVICE_DISPLAY_NAMES["hub"]))

@@ -3,9 +3,10 @@ import importlib
 import inspect
 from copy import deepcopy
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert
 from shared.plugins.base import BasePlugin
 from shared.credentials import validate_required_credentials
-from shared.logger import hub_log
+from shared.logger import app_log
 from shared.models import PluginRegistryORM
 
 class PluginManager:
@@ -67,20 +68,20 @@ class PluginManager:
             "type": "integer",
             "label": "同步限制",
             "scope": "system",
-            "default": 100,
+            "default": self._get_framework_default(normalized, "sync_limit", 100),
             "description": "每次同步抓取的最大条数",
         }
         settings_schema["auto_sync"] = {
             "type": "boolean",
             "label": "自动同步",
             "scope": "system",
-            "default": False,
+            "default": self._get_framework_default(normalized, "auto_sync", False),
         }
         settings_schema["auto_sync_interval"] = {
             "type": "integer",
             "label": "同步间隔 (分钟)",
             "scope": "system",
-            "default": 60,
+            "default": self._get_framework_default(normalized, "auto_sync_interval", 60),
             "description": "自动同步开启后，按此分钟间隔巡检",
         }
 
@@ -91,26 +92,40 @@ class PluginManager:
         try:
             manifest = self._inject_global_settings(plugin.manifest)
         except Exception as exc:
-            hub_log.error(f"Failed to register plugin due to invalid manifest credentials: {exc}")
+            app_log.error(f"Failed to register plugin due to invalid manifest credentials: {exc}")
             return
         plugin_id = manifest.get("id")
         if not plugin_id:
-            hub_log.error("❌ Failed to register plugin: plugin id is missing.")
+            app_log.error("❌ Failed to register plugin: plugin id is missing.")
             return
         
         plugin._manifest = manifest
         self.plugins[plugin_id] = plugin
-        hub_log.info(f"🧩 Plugin registered: {manifest.get('name')} ({plugin_id})")
+        app_log.info(f"🧩 Plugin registered: {manifest.get('name')} ({plugin_id})")
 
     def get_plugin(self, plugin_id: str) -> Optional[BasePlugin]:
         return self.plugins.get(plugin_id)
 
     def get_all_manifests(self) -> List[Dict]:
         return [deepcopy(plugin._manifest or plugin.manifest) for plugin in self.plugins.values()]
+
+    async def ensure_builtin_plugins(self, session) -> None:
+        """Ensure built-in plugins are present before any service loads the registry."""
+        stmt = insert(PluginRegistryORM).values(
+            plugin_id="github_stars",
+            name="GitHub Stars",
+            module_path="worker.plugins.github.plugin",
+            is_enabled=True,
+            version="1.0.0",
+        )
+        stmt = stmt.on_conflict_do_nothing(index_elements=["plugin_id"])
+        await session.execute(stmt)
     
     async def load_enabled_plugins(self, session):
         """动态加载已启用的插件"""
-        hub_log.info("🔌 Loading enabled plugins...")
+        app_log.info("🔌 Loading enabled plugins...")
+
+        await self.ensure_builtin_plugins(session)
         
         # 1. 查询已启用的插件
         result = await session.execute(
@@ -119,14 +134,14 @@ class PluginManager:
         enabled_plugins = result.scalars().all()
         
         if not enabled_plugins:
-            hub_log.info("⚠️ No enabled plugins were found.")
+            app_log.info("⚠️ No enabled plugins were found.")
             return
 
         for plugin_record in enabled_plugins:
             try:
                 # 2. 动态导入模块
                 module_path = plugin_record.module_path
-                hub_log.info(f"🔍 Loading module: {module_path}")
+                app_log.info(f"🔍 Loading module: {module_path}")
                 module = importlib.import_module(module_path)
                 
                 # 3. 扫描并实例化 BasePlugin 子类
@@ -161,7 +176,7 @@ class PluginManager:
                                         # 合并文件配置（文件中的 schema 等更详细）
                                         manifest_data.update(file_manifest)
                                 except Exception as e:
-                                    hub_log.error(f"Failed to read manifest.json: {e}")
+                                    app_log.error(f"Failed to read manifest.json: {e}")
                                     
                         plugin_instance._manifest = manifest_data
                         self.register(plugin_instance)
@@ -169,10 +184,10 @@ class PluginManager:
                         break
                 
                 if not found:
-                    hub_log.warning(f"⚠️ No matching plugin class was found in module {module_path}")
+                    app_log.warning(f"⚠️ No matching plugin class was found in module {module_path}")
                     
             except Exception as e:
-                hub_log.error(f"❌ Failed to load plugin {plugin_record.plugin_id}: {e}")
+                app_log.error(f"❌ Failed to load plugin {plugin_record.plugin_id}: {e}")
 
 # 全局单例
 plugin_manager = PluginManager()

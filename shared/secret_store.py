@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 from typing import Callable
 
-from shared.logger import hub_log
+from shared.logger import app_log
 
 
 def _secret_dir() -> Path:
@@ -30,17 +30,17 @@ def load_or_create_secret(
 ) -> str:
     env_value = os.getenv(env_key)
     if env_value:
-        hub_log.info("Using %s from environment variable %s.", announce_label, env_key)
+        app_log.info("Using %s from environment variable %s.", announce_label, env_key)
         return env_value.strip()
 
     secret_path = _secret_dir() / filename
     if secret_path.exists():
-        hub_log.info("Reusing persisted %s from %s.", announce_label, secret_path)
+        app_log.info("Reusing persisted %s from %s.", announce_label, secret_path)
         return secret_path.read_text(encoding="utf-8").strip()
 
     value = generator()
     _write_secret_once(secret_path, value)
 
     final_value = secret_path.read_text(encoding="utf-8").strip()
-    hub_log.info("Generated %s and persisted it to %s.", announce_label, secret_path)
+    app_log.info("Generated %s and persisted it to %s.", announce_label, secret_path)
     return final_value

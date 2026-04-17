@@ -20,6 +20,7 @@ from shared.config import ConfigKeys, ConfigManager
 from shared.database import AsyncSessionLocal
 from shared.logger import get_log_file_path
 from shared.models import ApiUsageORM, ItemORM, PluginRegistryORM
+from shared.plugins.manager import plugin_manager
 from shared.time_utils import now_in_app_timezone_naive
 
 router = APIRouter(prefix="/api/admin", tags=["Monitor"])
@@ -87,10 +88,23 @@ def _build_billing_warning(state: dict) -> bool:
     return float(used_value) >= limit_value * WARNING_THRESHOLD_RATIO
 
 
+async def _get_plugin_setting(plugin: PluginRegistryORM, key: str, fallback: str) -> str:
+    value = await ConfigManager.get_config(plugin.plugin_id, key)
+    if value not in (None, ""):
+        return value
+
+    plugin_instance = plugin_manager.get_plugin(plugin.plugin_id)
+    schema = (plugin_instance.manifest.get("settings_schema") or {}).get(key) if plugin_instance else None
+    default = schema.get("default") if schema else None
+    if default in (None, ""):
+        return fallback
+    return str(default).lower() if isinstance(default, bool) else str(default)
+
+
 async def _get_plugin_health(plugin: PluginRegistryORM) -> PluginHealthResponse:
     plugin_id = plugin.plugin_id
-    auto_sync = (await ConfigManager.get_config(plugin_id, ConfigKeys.AUTO_SYNC, "false")) == "true"
-    interval_raw = await ConfigManager.get_config(plugin_id, ConfigKeys.AUTO_SYNC_INTERVAL, "60")
+    auto_sync = (await _get_plugin_setting(plugin, ConfigKeys.AUTO_SYNC, "false")) == "true"
+    interval_raw = await _get_plugin_setting(plugin, ConfigKeys.AUTO_SYNC_INTERVAL, "60")
     sync_status = await ConfigManager.get_config(plugin_id, ConfigKeys.SYNC_STATUS, "idle")
     last_sync_at = _parse_dt(await ConfigManager.get_config(plugin_id, ConfigKeys.LAST_SYNC_TIME))
     last_successful_sync_at = _parse_dt(
@@ -120,6 +134,8 @@ async def _get_plugin_health(plugin: PluginRegistryORM) -> PluginHealthResponse:
     else:
         status = "Healthy"
 
+    visible_error = last_error if last_sync_result in {"error", "warning"} and last_error else None
+
     return PluginHealthResponse(
         plugin_id=plugin_id,
         name=plugin.name,
@@ -129,7 +145,7 @@ async def _get_plugin_health(plugin: PluginRegistryORM) -> PluginHealthResponse:
         status=status,
         auto_sync=auto_sync,
         auto_sync_interval=auto_sync_interval,
-        last_error=last_error or None,
+        last_error=visible_error,
     )
 
 

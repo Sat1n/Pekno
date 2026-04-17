@@ -16,6 +16,7 @@ from sqlalchemy.dialects.postgresql import insert
 import datetime
 import re
 import inspect
+from shared.time_utils import now_in_app_timezone_naive
 
 
 class MissingPluginCredentialError(RuntimeError):
@@ -121,9 +122,10 @@ async def run_plugin_pipeline_task(plugin_id: str, limit: int = None, user_id: s
 
         raw_items = await plugin.fetch_data(ctx)
         if not raw_items:
-            now_iso = datetime.datetime.now().isoformat()
+            now_iso = now_in_app_timezone_naive().isoformat()
             await ConfigManager.set_config(plugin_id, ConfigKeys.LAST_SUCCESSFUL_SYNC_TIME, now_iso, user_id=user_id)
             await ConfigManager.set_config(plugin_id, ConfigKeys.LAST_SYNC_RESULT, "success", user_id=user_id)
+            await ConfigManager.set_config(plugin_id, ConfigKeys.LAST_SYNC_ERROR, "", user_id=user_id)
             if user_id:
                 await create_notification_for_user(
                     user_id,
@@ -195,9 +197,10 @@ async def run_plugin_pipeline_task(plugin_id: str, limit: int = None, user_id: s
                 await process_new_item_task.kiq(item.model_dump())
 
         worker_log.info(f"✅ [{plugin_id}] Sync dispatch completed. Processed {len(raw_items)} records.")
-        now_iso = datetime.datetime.now().isoformat()
+        now_iso = now_in_app_timezone_naive().isoformat()
         await ConfigManager.set_config(plugin_id, ConfigKeys.LAST_SUCCESSFUL_SYNC_TIME, now_iso, user_id=user_id)
         await ConfigManager.set_config(plugin_id, ConfigKeys.LAST_SYNC_RESULT, "success", user_id=user_id)
+        await ConfigManager.set_config(plugin_id, ConfigKeys.LAST_SYNC_ERROR, "", user_id=user_id)
         if user_id:
             await create_notification_for_user(
                 user_id,
@@ -226,7 +229,7 @@ async def run_plugin_pipeline_task(plugin_id: str, limit: int = None, user_id: s
                 related_plugin_id=plugin_id,
             )
     finally:
-        now_iso = datetime.datetime.now().isoformat()
+        now_iso = now_in_app_timezone_naive().isoformat()
         await ConfigManager.set_config(plugin_id, ConfigKeys.SYNC_STATUS, "idle", user_id=user_id)
         await ConfigManager.set_config(plugin_id, ConfigKeys.LAST_SYNC_TIME, now_iso, user_id=user_id)
 
