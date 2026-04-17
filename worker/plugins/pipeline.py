@@ -129,8 +129,8 @@ async def run_plugin_pipeline_task(plugin_id: str, limit: int = None, user_id: s
                     user_id,
                     type="success",
                     category="plugin_sync",
-                    title="手动同步已完成",
-                    description=f"{plugin.manifest.get('name', plugin_id)} 没有新的内容。",
+                    title="Manual sync completed",
+                    description=f"{plugin.manifest.get('name', plugin_id)} has no new content.",
                     related_plugin_id=plugin_id,
                 )
             return
@@ -203,8 +203,8 @@ async def run_plugin_pipeline_task(plugin_id: str, limit: int = None, user_id: s
                 user_id,
                 type="success",
                 category="plugin_sync",
-                title="手动同步已完成",
-                description=f"{plugin.manifest.get('name', plugin_id)} 已完成同步。",
+                title="Manual sync completed",
+                description=f"{plugin.manifest.get('name', plugin_id)} finished syncing successfully.",
                 related_plugin_id=plugin_id,
             )
 
@@ -221,7 +221,7 @@ async def run_plugin_pipeline_task(plugin_id: str, limit: int = None, user_id: s
                 user_id,
                 type="error",
                 category="plugin_sync",
-                title="手动同步失败",
+                title="Manual sync failed",
                 description=str(e)[:160],
                 related_plugin_id=plugin_id,
             )
@@ -384,8 +384,8 @@ async def summarize_repo_task(
             user_id,
             type="success",
             category="summary",
-            title="AI 总结已完成",
-            description=f"{item.title or '该内容'} 已生成 AI 总结。",
+            title="AI summary completed",
+            description=f"AI summary is ready for {item.title or 'this item'}.",
             related_item_id=item_id,
         )
             
@@ -395,8 +395,8 @@ async def summarize_repo_task(
             user_id,
             type="error",
             category="summary",
-            title="AI 总结失败",
-            description="API 限额可能已用尽，请联系管理员。",
+            title="AI summary failed",
+            description="The API quota may be exhausted. Please contact an administrator.",
             related_item_id=item_id,
         )
         raise
@@ -406,7 +406,7 @@ async def summarize_repo_task(
             user_id,
             type="error",
             category="summary",
-            title="AI 总结失败",
+            title="AI summary failed",
             description=str(e)[:160],
             related_item_id=item_id,
         )

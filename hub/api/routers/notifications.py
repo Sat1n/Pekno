@@ -37,7 +37,7 @@ async def mark_notification_read(notification_id: str, current_user=Depends(get_
         )
         notification = result.scalar_one_or_none()
         if not notification:
-            raise HTTPException(status_code=404, detail="通知不存在")
+            raise HTTPException(status_code=404, detail="The notification could not be found.")
 
         if notification.status != "read":
             notification.status = "read"

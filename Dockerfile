@@ -5,7 +5,8 @@ FROM ${NODE_IMAGE} AS web-builder
 WORKDIR /app/web
 
 COPY web/package.json ./
-RUN npm install
+COPY web/package-lock.json ./
+RUN npm ci
 
 COPY web ./
 RUN npm run build
@@ -19,6 +20,7 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app \
+    PATH=/app/.venv/bin:${PATH} \
     EXECUTION_MODE=${EXECUTION_MODE}
 
 RUN apt-get update && apt-get install -y --no-install-recommends \

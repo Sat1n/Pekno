@@ -5,8 +5,8 @@ from shared.plugins.base import BasePlugin, PluginContext
 
 class GitHubStarsPlugin(BasePlugin):
     """
-    GitHub Star 插件
-    负责同步用户的 Star 仓库并交给 Pipeline 处理
+    GitHub stars plugin.
+    Syncs starred repositories and hands them off to the ingestion pipeline.
     """
     def __init__(self):
         super().__init__()
@@ -14,7 +14,7 @@ class GitHubStarsPlugin(BasePlugin):
             "id": "github_stars",
             "name": "GitHub Stars",
             "source_type": "github_star",
-            "description": "同步你 Star 的 GitHub 仓库",
+            "description": "Sync the repositories you starred on GitHub.",
             "version": "1.0.0",
             "required_credentials": ["github"],
             "auto_sync_supported": True,
@@ -26,23 +26,23 @@ class GitHubStarsPlugin(BasePlugin):
         }
 
     async def fetch_data(self, ctx: PluginContext) -> List[Dict[str, Any]]:
-        """获取目标列表数据 (GitHub API)"""
+        """Fetch starred repositories from the GitHub API."""
         limit = ctx.config.get('sync_limit', 100)
         
-        ctx.log.info(f"📥 [GitHub] 开始获取 Star 仓库列表 (Limit: {limit})")
+        ctx.log.info(f"📥 [GitHub] Fetching starred repositories (limit: {limit})")
         
         # ctx.http 目前是我们在外部初始化好传进来的 GitHubClient
         # 对应 ctx.http = GitHubClient(token)
         repos = await ctx.http.get_starred_repos(limit)
         
         if not repos:
-            ctx.log.warning("⚠️ 未找到任何 Star 仓库，请检查 Token 权限。")
+            ctx.log.warning("⚠️ No starred repositories were returned. Please verify the token permissions.")
             return []
             
         return repos
 
     def normalize_item(self, raw_data: Dict[str, Any]) -> Dict[str, Any]:
-        """清洗原始 JSON 数据为 Iris 标准化模型字典"""
+        """Normalize raw GitHub API data into the universal item format."""
         repo_id = raw_data.get('id', '')
         owner = raw_data.get('owner', {}).get('login', '')
         repo = raw_data.get('name', '') # Assuming 'repo' refers to the repository name only

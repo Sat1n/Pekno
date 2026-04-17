@@ -9,7 +9,7 @@ services:
       hub:
         condition: service_started
     ports:
-      - "80:80"
+      - "9080:80"
 
   hub:
     build:
@@ -32,6 +32,7 @@ services:
       APP_TIMEZONE: ${APP_TIMEZONE:-Asia/Shanghai}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       EXECUTION_MODE: ${EXECUTION_MODE:-cpu}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
       RUN_DB_MIGRATIONS: "1"
     command: ["uv", "run", "python", "hub/main.py"]
     depends_on:
@@ -40,7 +41,7 @@ services:
       redis:
         condition: service_started
     volumes:
-      - ./data:/app/data
+      - ${DATA_DIR:-./data}:/app/data
 
   worker:
     build:
@@ -63,6 +64,7 @@ services:
       APP_TIMEZONE: ${APP_TIMEZONE:-Asia/Shanghai}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       EXECUTION_MODE: ${EXECUTION_MODE:-cpu}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
       RUN_DB_MIGRATIONS: "0"
     command: ["uv", "run", "taskiq", "worker", "worker.main:broker"]
     depends_on:
@@ -71,7 +73,7 @@ services:
       redis:
         condition: service_started
     volumes:
-      - ./data:/app/data
+      - ${DATA_DIR:-./data}:/app/data
     # Uncomment the block below on NVIDIA hosts to enable GPU passthrough.
     # deploy:
     #   resources:
@@ -102,6 +104,7 @@ services:
       APP_TIMEZONE: ${APP_TIMEZONE:-Asia/Shanghai}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       EXECUTION_MODE: ${EXECUTION_MODE:-cpu}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
       RUN_DB_MIGRATIONS: "0"
     command: ["uv", "run", "taskiq", "scheduler", "worker.main:scheduler"]
     depends_on:
@@ -110,7 +113,7 @@ services:
       redis:
         condition: service_started
     volumes:
-      - ./data:/app/data
+      - ${DATA_DIR:-./data}:/app/data
 
   redis:
     image: redis:7-alpine
@@ -129,4 +132,4 @@ services:
       timeout: 5s
       retries: 20
     volumes:
-      - ./data/postgres:/var/lib/postgresql/data
+      - ${DATA_DIR:-./data}/postgres:/var/lib/postgresql/data

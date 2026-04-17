@@ -12,6 +12,7 @@
     "ERR_NOTIFICATION_NOT_FOUND": "The notification does not exist or has already been removed.",
     "ERR_VAULT_CATEGORY_EXISTS": "A category with this name already exists.",
     "ERR_INVALID_CREDENTIALS": "Incorrect username or password.",
+    "ERR_CREDENTIAL_UNREADABLE": "This stored credential can no longer be decrypted. Please enter it again.",
     "ERR_INVITE_INVALID": "The invitation code is invalid or has already been used.",
     "ERR_USER_EXISTS": "This username already exists.",
     "ERR_ITEM_NOT_FOUND": "The requested item could not be found.",

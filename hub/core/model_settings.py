@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Tuple
 import openai
 from langchain_ollama import OllamaEmbeddings
 
-from shared.config import SYSTEM_CONFIG_USER_ID, ConfigManager
+from shared.config import SYSTEM_CONFIG_USER_ID, ConfigManager, get_default_ollama_base_url
 from hub.core.llm.providers.ollama_adapter import OllamaProvider
 from hub.core.llm.providers.openai_adapter import OpenAIProvider
 from hub.core.billing import check_api_limit_or_raise, estimate_tokens, read_response_usage, record_api_usage
@@ -18,8 +18,8 @@ MODEL_PROVIDER_CATALOG: List[Dict[str, Any]] = [
     {
         "id": "paddleocr_v5_cpu",
         "name": "PaddleOCR v5 (CPU)",
-        "description": "本地 CPU OCR 引擎，适合图片文字提取与扫描版 PDF 后台识别。",
-        "badge": "本地 OCR",
+        "description": "Local CPU-based OCR engine for image text extraction and scanned PDF processing.",
+        "badge": "Local OCR",
         "capabilities": ["OCR"],
         "config_fields": [
             {"key": "enabled", "label": "启用 OCR", "type": "string", "default": "true"},
@@ -30,19 +30,19 @@ MODEL_PROVIDER_CATALOG: List[Dict[str, Any]] = [
     {
         "id": "local_whisper",
         "name": "Local (Faster-Whisper)",
-        "description": "本地高性能语音转写引擎，基于 CTranslate2 深度优化，无需网络即可硬解语音流。",
-        "badge": "本地优先",
+        "description": "High-performance local speech-to-text engine based on CTranslate2, optimized for offline use.",
+        "badge": "Local Preferred",
         "capabilities": ["Speech"],
         "config_fields": [],
     },
     {
         "id": "ollama",
         "name": "Ollama",
-        "description": "连接本地或局域网 Ollama，适合离线推理与自托管场景。",
-        "badge": "本地优先",
+        "description": "Connect to local or LAN Ollama for offline inference and self-hosted deployments.",
+        "badge": "Local Preferred",
         "capabilities": ["LLM", "Embedding", "Vision"],
         "config_fields": [
-            {"key": "host", "label": "服务地址", "type": "string", "default": "http://127.0.0.1:11434"},
+            {"key": "host", "label": "Service Address", "type": "string", "default": get_default_ollama_base_url()},
         ],
     },
     {
@@ -124,10 +124,10 @@ MODEL_PROVIDER_CATALOG: List[Dict[str, Any]] = [
     },
     {
         "id": "dashscope",
-        "name": "通义千问（DashScope）",
-        "description": "阿里云模型服务，后续适合接入文本、多模态和语音能力。",
-        "badge": "多模态预备",
-        "capabilities": ["LLM", "Speech", "Vision"],
+        "name": "DashScope (Qwen)",
+        "description": "Alibaba Cloud model service suitable for text, multimodal, speech, and future video workflows.",
+        "badge": "Multimodal Ready",
+        "capabilities": ["LLM", "Speech", "Vision", "Video"],
         "config_fields": [
             {"key": "base_url", "label": "Base URL", "type": "string", "default": "https://dashscope.aliyuncs.com/compatible-mode/v1"},
             {"key": "api_key", "label": "API Key", "type": "string", "secret": True, "default": ""},
@@ -260,7 +260,7 @@ def _is_provider_configured(provider_id: str, config: Dict[str, Any], is_configu
 
 
 def _normalize_ollama_host(host: str) -> str:
-    normalized = (host or "http://127.0.0.1:11434").rstrip("/")
+    normalized = (host or get_default_ollama_base_url()).rstrip("/")
     if normalized.endswith("/v1"):
         normalized = normalized[:-3]
     return normalized
@@ -361,7 +361,7 @@ async def get_model_provider_state() -> Dict[str, Any]:
 async def save_model_provider_config(provider_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     provider = _catalog_map().get(provider_id)
     if not provider:
-        raise ValueError("未知模型提供商")
+        raise ValueError("Unknown model provider.")
 
     defaults = {
         field["key"]: field.get("default")
@@ -418,6 +418,7 @@ async def save_model_assignments(assignments: List[Dict[str, Any]]) -> List[Dict
         "video": "Video",
         "ocr": "OCR",
     }
+    validated_payloads: list[tuple[str, dict[str, Any], str]] = []
     for assignment in assignments:
         key = assignment.get("key")
         if key not in definition_map:
@@ -427,21 +428,23 @@ async def save_model_assignments(assignments: List[Dict[str, Any]]) -> List[Dict
         if provider_id:
             provider = _catalog_map().get(provider_id)
             if not provider:
-                raise ValueError(f"未知模型提供商: {provider_id}")
+                raise ValueError(f"Unknown model provider: {provider_id}")
             required_capability = capability_map.get(definition["task_type"])
             if required_capability and required_capability not in provider.get("capabilities", []):
-                raise ValueError(f"模型提供商 [{provider_id}] 不支持用途 [{definition['label']}]")
-        payload = {
+                raise ValueError(f"Provider [{provider_id}] does not support assignment [{definition['label']}].")
+        validated_payloads.append((key, {
             "provider": provider_id,
             "model": assignment.get("model", definition["default_model"]),
-        }
+        }, f"System model assignment: {definition['label']}"))
+
+    for key, payload, description in validated_payloads:
         success = await _save_json_config(
             _assignment_key(key),
             payload,
-            description=f"系统模型用途配置: {definition['label']}",
+            description=description,
         )
         if not success:
-            raise ValueError(f"保存模型用途失败: {key}")
+            raise ValueError(f"Failed to save model assignment: {key}")
     return await get_model_assignments()
 
 
@@ -460,12 +463,12 @@ async def _build_llm_provider(purpose: str):
     provider_config = await _load_json_config(_provider_config_key(provider_id), {})
 
     if provider_id == "ollama":
-        return OllamaProvider(_normalize_ollama_host(provider_config.get("host", "http://127.0.0.1:11434")), model), model
+        return OllamaProvider(_normalize_ollama_host(provider_config.get("host", get_default_ollama_base_url())), model), model
 
     api_key = provider_config.get("api_key")
     base_url = provider_config.get("base_url", "https://api.openai.com/v1")
     if not api_key:
-        raise ValueError(f"模型提供商 [{provider_id}] 尚未配置 API Key")
+        raise ValueError(f"Provider [{provider_id}] does not have an API key configured.")
     return OpenAIProvider(api_key=api_key, base_url=base_url, model=model), model
 
 
@@ -492,7 +495,7 @@ async def embed_text(text: str) -> Tuple[List[float], str]:
     if provider_id == "ollama":
         client = OllamaEmbeddings(
             model=model_name,
-            base_url=_normalize_ollama_host(provider_config.get("host", "http://127.0.0.1:11434")),
+            base_url=_normalize_ollama_host(provider_config.get("host", get_default_ollama_base_url())),
         )
         vector = await asyncio.to_thread(client.embed_query, text)
         await record_api_usage(
@@ -506,7 +509,7 @@ async def embed_text(text: str) -> Tuple[List[float], str]:
     api_key = provider_config.get("api_key")
     base_url = provider_config.get("base_url", "https://api.openai.com/v1")
     if not api_key:
-        raise ValueError(f"模型提供商 [{provider_id}] 尚未配置 API Key")
+        raise ValueError(f"Provider [{provider_id}] does not have an API key configured.")
 
     client = openai.AsyncOpenAI(api_key=api_key, base_url=base_url)
     response = await client.embeddings.create(model=model_name, input=text)

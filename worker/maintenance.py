@@ -1,12 +1,65 @@
 from sqlalchemy import delete, select
 from shared.database import AsyncSessionLocal
-from shared.models import ItemORM, PluginRegistryORM, UserItemStateORM
+from shared.models import ConfigORM, ItemORM, PluginRegistryORM, UserItemStateORM
 from datetime import datetime, timedelta
 from worker.broker import broker
 from shared.logger import worker_log
 from shared.config import ConfigManager, ConfigKeys
 from worker.plugins.pipeline import run_plugin_pipeline_task
+from shared.credentials import get_user_credential, validate_required_credentials
+from shared.plugins.manager import plugin_manager
 from shared.time_utils import get_app_timezone, now_in_app_timezone_naive
+
+
+async def _resolve_auto_sync_user_id(plugin_id: str) -> str | None:
+    plugin = plugin_manager.get_plugin(plugin_id)
+    if not plugin:
+        return None
+
+    required_credentials = validate_required_credentials(plugin.manifest.get("required_credentials"))
+    if not required_credentials:
+        return None
+
+    async with AsyncSessionLocal() as session:
+        candidate_user_ids: set[str] = set()
+        for platform in required_credentials:
+            binding_key = ConfigKeys.credential_binding(platform)
+            result = await session.execute(
+                select(ConfigORM.user_id).where(
+                    ConfigORM.plugin_id == plugin_id,
+                    ConfigORM.key == binding_key,
+                    ConfigORM.value.is_not(None),
+                )
+            )
+            for user_id in result.scalars().all():
+                if user_id and user_id != "system":
+                    candidate_user_ids.add(user_id)
+
+        for user_id in sorted(candidate_user_ids):
+            all_bound = True
+            all_readable = True
+            for platform in required_credentials:
+                binding_enabled = await ConfigManager.get_config(
+                    plugin_id,
+                    ConfigKeys.credential_binding(platform),
+                    user_id=user_id,
+                )
+                if binding_enabled != "true":
+                    all_bound = False
+                    break
+                try:
+                    credential = await get_user_credential(user_id, platform)
+                except Exception:
+                    all_readable = False
+                    break
+                if credential is None or not credential.token_value:
+                    all_readable = False
+                    break
+
+            if all_bound and all_readable:
+                return user_id
+
+    return None
 
 @broker.task(
     task_name="system_heartbeat",
@@ -61,8 +114,24 @@ async def system_heartbeat_task():
                 should_sync = True
 
         if should_sync:
-            worker_log.info(f"💓 [{plugin_id}] Auto-sync conditions met. Dispatching incremental sync task.")
-            await run_plugin_pipeline_task.kiq(plugin_id)
+            plugin = plugin_manager.get_plugin(plugin_id)
+            required_credentials = validate_required_credentials(
+                plugin.manifest.get("required_credentials") if plugin else []
+            )
+            if required_credentials:
+                user_id = await _resolve_auto_sync_user_id(plugin_id)
+                if not user_id:
+                    worker_log.info(
+                        f"💓 [{plugin_id}] Auto-sync skipped because no user has all required credentials bound and readable."
+                    )
+                    continue
+                worker_log.info(
+                    f"💓 [{plugin_id}] Auto-sync conditions met. Dispatching incremental sync task for user {user_id}."
+                )
+                await run_plugin_pipeline_task.kiq(plugin_id, None, user_id)
+            else:
+                worker_log.info(f"💓 [{plugin_id}] Auto-sync conditions met. Dispatching incremental sync task.")
+                await run_plugin_pipeline_task.kiq(plugin_id)
             triggered_count += 1
         else:
             worker_log.info(

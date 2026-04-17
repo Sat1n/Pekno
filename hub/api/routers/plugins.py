@@ -276,6 +276,16 @@ async def confirm_install_plugin(token: str, current_user=Depends(require_admin)
 async def uninstall_plugin(plugin_id: str, current_user=Depends(require_admin)):
     """Uninstall a plugin."""
     try:
+        async with AsyncSessionLocal() as session:
+            existing = await session.execute(
+                select(PluginRegistryORM.plugin_id).where(PluginRegistryORM.plugin_id == plugin_id)
+            )
+            exists_in_registry = existing.scalar_one_or_none() is not None
+
+        plugin_dir = PLUGIN_INSTALL_DIR / plugin_id
+        if not exists_in_registry and not plugin_dir.exists():
+            raise HTTPException(status_code=404, detail=f"Plugin was not found: {plugin_id}")
+
         # 1. Remove plugin metadata from the database
         async with AsyncSessionLocal() as session:
             # Remove registry row
@@ -293,9 +303,8 @@ async def uninstall_plugin(plugin_id: str, current_user=Depends(require_admin)):
                 del plugin_manager.plugins[plugin_id]
 
         # 2. Remove files
-        plugin_dir = PLUGIN_INSTALL_DIR / plugin_id
         if plugin_dir.exists():
-            shutil.rmtree(plugin_dir)
+            shutil.rmtree(plugin_dir, ignore_errors=True)
 
         # 3. Trigger worker reload
         await reload_system_plugins_task.kiq()

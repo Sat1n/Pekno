@@ -32,13 +32,16 @@ class ConfigKeys:
 
 SYSTEM_CONFIG_USER_ID = "system"
 EXECUTION_MODE = os.getenv("EXECUTION_MODE", "cpu").strip().lower() or "cpu"
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "").strip()
 SYSTEM_SCOPED_CONFIG_KEYS = {
     ConfigKeys.SYNC_LIMIT,
     ConfigKeys.AUTO_SYNC,
     ConfigKeys.AUTO_SYNC_INTERVAL,
+    ConfigKeys.LAST_SYNC_TIME,
     ConfigKeys.LAST_SUCCESSFUL_SYNC_TIME,
     ConfigKeys.LAST_SYNC_RESULT,
     ConfigKeys.LAST_SYNC_ERROR,
+    ConfigKeys.SYNC_STATUS,
     ConfigKeys.AUTO_SHORT_SUMMARY,
     ConfigKeys.RETENTION_HOURS,
 }
@@ -46,6 +49,18 @@ SYSTEM_SCOPED_CONFIG_KEYS = {
 
 def is_cuda_execution_mode() -> bool:
     return EXECUTION_MODE == "cuda"
+
+
+def is_running_in_container() -> bool:
+    return os.getenv("DOTNET_RUNNING_IN_CONTAINER") == "true" or os.path.exists("/.dockerenv")
+
+
+def get_default_ollama_base_url() -> str:
+    if OLLAMA_BASE_URL:
+        return OLLAMA_BASE_URL.rstrip("/")
+    if is_running_in_container():
+        return "http://host.docker.internal:11434"
+    return "http://127.0.0.1:11434"
 
 
 class ConfigManager:

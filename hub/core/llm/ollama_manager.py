@@ -1,11 +1,12 @@
 import httpx
 
 from hub.core.model_settings import _load_json_config, _provider_config_key
+from shared.config import get_default_ollama_base_url
 from shared.logger import hub_log
 
 
 def _normalize_ollama_base_url(base_url: str | None) -> str:
-    normalized = (base_url or "http://127.0.0.1:11434").strip().rstrip("/")
+    normalized = (base_url or get_default_ollama_base_url()).strip().rstrip("/")
     if normalized.endswith("/v1"):
         normalized = normalized[:-3]
     return normalized

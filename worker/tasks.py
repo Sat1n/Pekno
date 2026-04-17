@@ -64,8 +64,8 @@ async def _mark_item_failed_with_circuit_breaker(
         item_id,
         type="error",
         category="upload_processing",
-        title="API 熔断器已触发",
-        description=f"{title or '该内容'} 因额度耗尽已停止后台分析。",
+        title="API circuit breaker triggered",
+        description=f"Background processing stopped for {title or 'this item'} because the quota was exhausted.",
         preferred_user_id=user_id,
     )
 
@@ -664,8 +664,8 @@ async def process_multimedia_task(
             item_id,
             type="success",
             category="upload_processing",
-            title="多媒体分析已完成",
-            description=f"{item_data.title or '该内容'} 已完成转录与总结。",
+            title="Multimedia processing completed",
+            description=f"Transcription and summarization finished for {item_data.title or 'this item'}.",
             preferred_user_id=user_id,
         )
             
@@ -694,7 +694,7 @@ async def process_multimedia_task(
             item_id,
             type="error",
             category="upload_processing",
-            title="多媒体分析失败",
+            title="Multimedia processing failed",
             description=str(e)[:160],
             preferred_user_id=user_id,
         )
@@ -1025,8 +1025,8 @@ async def process_image_understanding_task(
             item_id,
             type="success",
             category="upload_processing",
-            title="图片分析已完成",
-            description=f"{item.title or '该图片'} 已完成识别与总结。",
+            title="Image processing completed",
+            description=f"Recognition and summarization finished for {item.title or 'this image'}.",
             preferred_user_id=user_id,
         )
 
@@ -1060,7 +1060,7 @@ async def process_image_understanding_task(
             item_id,
             type="error",
             category="upload_processing",
-            title="图片分析失败",
+            title="Image processing failed",
             description=str(e)[:160],
             preferred_user_id=user_id,
         )
@@ -1161,8 +1161,8 @@ async def process_pdf_ocr_task(
             item_id,
             type="success",
             category="upload_processing",
-            title="PDF OCR 已完成",
-            description=f"{item.title or '该 PDF'} 已完成文本识别。",
+            title="PDF OCR completed",
+            description=f"Text recognition finished for {item.title or 'this PDF'}.",
             preferred_user_id=user_id,
         )
     except OCRDisabledError as exc:
@@ -1236,7 +1236,7 @@ async def process_pdf_ocr_task(
             item_id,
             type="error",
             category="upload_processing",
-            title="PDF OCR 失败",
+            title="PDF OCR failed",
             description=str(exc)[:160],
             preferred_user_id=user_id,
         )
@@ -1341,8 +1341,8 @@ async def process_uploaded_text_document_task(
             item_id,
             type="success",
             category="upload_processing",
-            title="文档分析已完成",
-            description=f"{item.title or '该文档'} 已完成摘要与索引。",
+            title="Document processing completed",
+            description=f"Summarization and indexing finished for {item.title or 'this document'}.",
             preferred_user_id=user_id,
         )
     except QuotaExceededException as exc:
@@ -1381,7 +1381,7 @@ async def process_uploaded_text_document_task(
             item_id,
             type="error",
             category="upload_processing",
-            title="文档分析失败",
+            title="Document processing failed",
             description=str(exc)[:160],
             preferred_user_id=user_id,
         )

@@ -9,7 +9,7 @@ from shared.api_errors import ApiError
 from shared.constants import PLATFORM_WHITELIST
 from shared.crypto import decrypt_value, encrypt_value
 from shared.database import AsyncSessionLocal
-from shared.error_codes import ERR_INVALID_INPUT
+from shared.error_codes import ERR_CREDENTIAL_UNREADABLE, ERR_INVALID_INPUT
 from shared.models import UserCredentialORM
 
 
@@ -45,7 +45,13 @@ def mask_credential(token_value: str | None) -> str | None:
 def _decrypt_token_value(raw_value: str | None) -> str:
     value = raw_value or ""
     decrypted = decrypt_value(value)
-    return decrypted if decrypted is not None else value
+    if decrypted is None:
+        raise ApiError(
+            ERR_CREDENTIAL_UNREADABLE,
+            "The stored credential cannot be decrypted. Please re-enter it.",
+            status_code=400,
+        )
+    return decrypted
 
 
 async def list_user_credentials(user_id: str) -> list[UserCredentialORM]:
