@@ -23,7 +23,8 @@ var/
 .venv/
 venv/
 plugins_dev/
-dev.txt
+dev
+.codex
 worker/plugins/third_party/*
 !worker/plugins/third_party/__init__.py
 
