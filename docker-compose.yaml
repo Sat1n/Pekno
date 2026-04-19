@@ -17,8 +17,8 @@ services:
       dockerfile: Dockerfile
       target: app-runtime
       args:
-        BASE_IMAGE: ${APP_BASE_IMAGE:-python:3.13-slim}
-        EXECUTION_MODE: ${EXECUTION_MODE:-cpu}
+        BASE_IMAGE: python:3.13-slim
+        EXECUTION_MODE: cpu
     container_name: pekno-hub
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-pekno}
@@ -32,7 +32,6 @@ services:
       APP_TIMEZONE: ${APP_TIMEZONE:-Asia/Shanghai}
       TZ: ${APP_TIMEZONE:-Asia/Shanghai}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      EXECUTION_MODE: ${EXECUTION_MODE:-cpu}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
       RUN_DB_MIGRATIONS: "1"
     command: ["uv", "run", "python", "hub/main.py"]
@@ -51,7 +50,10 @@ services:
       target: app-runtime
       args:
         BASE_IMAGE: ${WORKER_BASE_IMAGE:-python:3.13-slim}
-        EXECUTION_MODE: ${EXECUTION_MODE:-cpu}
+        EXECUTION_MODE: ${WORKER_EXECUTION_MODE:-cpu}
+    extends:
+      file: worker.ml.yml
+      service: cuda # set to one of [cpu, cuda, rocm] for worker-side ML acceleration
     container_name: pekno-worker
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-pekno}
@@ -65,7 +67,7 @@ services:
       APP_TIMEZONE: ${APP_TIMEZONE:-Asia/Shanghai}
       TZ: ${APP_TIMEZONE:-Asia/Shanghai}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      EXECUTION_MODE: ${EXECUTION_MODE:-cpu}
+      WORKER_EXECUTION_MODE: ${WORKER_EXECUTION_MODE:-cpu}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
       RUN_DB_MIGRATIONS: "0"
     command: ["uv", "run", "taskiq", "worker", "worker.main:broker"]
@@ -76,14 +78,15 @@ services:
         condition: service_started
     volumes:
       - ${DATA_DIR:-./data}:/app/data
+
   scheduler:
     build:
       context: .
       dockerfile: Dockerfile
       target: app-runtime
       args:
-        BASE_IMAGE: ${APP_BASE_IMAGE:-python:3.13-slim}
-        EXECUTION_MODE: ${EXECUTION_MODE:-cpu}
+        BASE_IMAGE: python:3.13-slim
+        EXECUTION_MODE: cpu
     container_name: pekno-scheduler
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-pekno}
@@ -97,7 +100,6 @@ services:
       APP_TIMEZONE: ${APP_TIMEZONE:-Asia/Shanghai}
       TZ: ${APP_TIMEZONE:-Asia/Shanghai}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      EXECUTION_MODE: ${EXECUTION_MODE:-cpu}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
       RUN_DB_MIGRATIONS: "0"
     command: ["sh", "-lc", "uv run python scripts/scheduler_bootstrap.py && uv run taskiq scheduler worker.main:scheduler"]

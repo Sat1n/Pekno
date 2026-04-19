@@ -20,6 +20,8 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app \
+    UV_INSTALL_DIR=/usr/local/bin \
+    UV_PYTHON=3.13 \
     PATH=/app/.venv/bin:${PATH} \
     EXECUTION_MODE=${EXECUTION_MODE}
 
@@ -29,13 +31,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     && if ! command -v python >/dev/null 2>&1; then apt-get install -y --no-install-recommends python3 python3-pip python3-venv; fi \
     && if ! command -v python >/dev/null 2>&1; then ln -sf /usr/bin/python3 /usr/local/bin/python; fi \
-    && if ! command -v pip >/dev/null 2>&1; then ln -sf /usr/bin/pip3 /usr/local/bin/pip; fi \
     && rm -rf /var/lib/apt/lists/*
 
-RUN python -m pip install --no-cache-dir uv
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 
 COPY pyproject.toml ./pyproject.toml
 COPY uv.lock ./uv.lock
+COPY .python-version ./.python-version
 RUN uv sync --frozen --no-dev
 
 COPY . .

@@ -1,4 +1,4 @@
-from worker.ocr import OCRConfigError, OCRDisabledError, run_image_ocr, run_pdf_ocr
+from .service import OCRConfigError, OCRDisabledError, run_image_ocr, run_pdf_ocr
 
 __all__ = [
     "OCRConfigError",

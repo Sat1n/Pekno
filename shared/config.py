@@ -31,7 +31,6 @@ class ConfigKeys:
 
 
 SYSTEM_CONFIG_USER_ID = "system"
-EXECUTION_MODE = os.getenv("EXECUTION_MODE", "cpu").strip().lower() or "cpu"
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "").strip()
 SYSTEM_SCOPED_CONFIG_KEYS = {
     ConfigKeys.SYNC_LIMIT,
@@ -45,12 +44,6 @@ SYSTEM_SCOPED_CONFIG_KEYS = {
     ConfigKeys.AUTO_SHORT_SUMMARY,
     ConfigKeys.RETENTION_HOURS,
 }
-
-
-def is_cuda_execution_mode() -> bool:
-    return EXECUTION_MODE == "cuda"
-
-
 def is_running_in_container() -> bool:
     return os.getenv("DOTNET_RUNNING_IN_CONTAINER") == "true" or os.path.exists("/.dockerenv")
 
