@@ -17,7 +17,7 @@ services:
       dockerfile: Dockerfile
       target: app-runtime
       args:
-        BASE_IMAGE: python:3.13-slim
+        BASE_IMAGE: ${APP_BASE_IMAGE:-python:3.13-slim}
         EXECUTION_MODE: ${EXECUTION_MODE:-cpu}
     container_name: pekno-hub
     environment:
@@ -76,22 +76,13 @@ services:
         condition: service_started
     volumes:
       - ${DATA_DIR:-./data}:/app/data
-    # Uncomment the block below on NVIDIA hosts to enable GPU passthrough.
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: all
-    #           capabilities: [gpu]
-
   scheduler:
     build:
       context: .
       dockerfile: Dockerfile
       target: app-runtime
       args:
-        BASE_IMAGE: python:3.13-slim
+        BASE_IMAGE: ${APP_BASE_IMAGE:-python:3.13-slim}
         EXECUTION_MODE: ${EXECUTION_MODE:-cpu}
     container_name: pekno-scheduler
     environment:
