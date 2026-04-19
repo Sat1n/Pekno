@@ -7,7 +7,7 @@ if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
     throw "未找到 docker 命令，请先确认 Docker Desktop 正在运行。"
 }
 
-$containerName = "iris-db"
+$containerName = "pekno-postgres"
 $dbUser = "pekno"
 $dbName = "pekno_iris"
 

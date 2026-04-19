@@ -476,11 +476,15 @@ def format_github_time(time_str: str) -> str:
 
 if __name__ == "__main__":
     import uvicorn
+
+    # Auto-reload is expensive inside containers because uvicorn falls back to
+    # polling the whole application tree. Keep it opt-in via env var.
+    reload_enabled = os.getenv("UVICORN_RELOAD", "").strip().lower() in {"1", "true", "yes", "on"}
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
         port=8001,
-        reload=True,
+        reload=reload_enabled,
         log_config=None,
         access_log=True,
     )
