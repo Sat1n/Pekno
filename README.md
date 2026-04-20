@@ -119,6 +119,10 @@ services:
 
 For worker-side ML acceleration in local builds, configure the worker extension in `worker.ml.yml`. For prebuilt images, the production compose file runs `pekno-worker-cpu` by default and provides an opt-in `cuda` profile for `pekno-worker-cuda12`. Hub stays CPU-only by design.
 
+### ML Runtime Roadmap
+
+Pekno currently supports CPU workers and CUDA workers through prebuilt images. ROCm and other popular acceleration runtimes are not available as official prebuilt worker images yet, but they are on the project TODO list.
+
 ## Architecture & Plugins
 
 ```mermaid
