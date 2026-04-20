@@ -46,6 +46,14 @@ The pipeline turns heterogeneous source data into consistent knowledge objects:
 
 To build a plugin, start with the [Pekno Plugin Development Guide](./PEKNO_PLUGIN_GUIDE.md). If you use a CLI coding agent, clone this repository first and ask the agent to read `PEKNO_PLUGIN_GUIDE.md` before writing code; that file documents the runtime contract, manifest format, credential rules, framework-injected settings, and worker-side pipeline expectations.
 
+### Installing Plugins
+
+Pekno includes a built-in GitHub Stars plugin, so GitHub repository collection works out of the box after you configure credentials.
+
+For third-party plugins, download the plugin repository as a ZIP archive from GitHub instead of cloning it locally. Open the plugin repository, choose **Code** -> **Download ZIP**, then go to Pekno's plugin page, click install, select the downloaded ZIP file, and finish the installation.
+
+The first official plugin is [PeknoPlugin_bilibili_subscribe](https://github.com/Sat1n/PeknoPlugin_bilibili_subscribe), which syncs Bilibili subscription content into Pekno.
+
 ## Quick Start
 
 Use the prebuilt GHCR images if you only want to run Pekno:
