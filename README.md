@@ -52,14 +52,19 @@ To build a plugin, start with the [Pekno Plugin Development Guide](./PEKNO_PLUGI
 Use the prebuilt GHCR images if you only want to run Pekno:
 
 ```bash
-wget -O docker-compose.prod.yml https://raw.githubusercontent.com/Sat1n/Pekno/main/docker-compose.prod.yml
-PEKNO_IMAGE_OWNER=sat1n docker compose -f docker-compose.prod.yml up -d
+PEKNO_REPO=Sat1n/Pekno
+wget -O docker-compose.prod.yml "https://raw.githubusercontent.com/${PEKNO_REPO}/main/docker-compose.prod.yml"
+wget -O .env.example "https://raw.githubusercontent.com/${PEKNO_REPO}/main/.env.example"
+cp .env.example .env
+docker compose -f docker-compose.prod.yml up -d
 ```
+
+Edit `.env` before starting if you need to change the HTTP port, database password, image owner, image tag, timezone, or `OLLAMA_BASE_URL`.
 
 Clone the repository, create your environment file, and start Pekno with Docker Compose:
 
 ```bash
-git clone https://github.com/Sat1n/Pekno.git && cd pekno && cp .env.example .env && docker compose up -d --build
+git clone https://github.com/Sat1n/Pekno.git && cd Pekno && cp .env.example .env && docker compose up -d --build
 ```
 
 Open the app at:

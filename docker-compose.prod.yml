@@ -1,7 +1,8 @@
 # Pekno production compose file for prebuilt GHCR images.
 #
 # Quick start:
-#   PEKNO_IMAGE_OWNER=sat1n docker compose -f docker-compose.prod.yml up -d
+#   cp .env.example .env
+#   docker compose -f docker-compose.prod.yml up -d
 #
 # Published images follow this repository-owner pattern:
 #   ghcr.io/${{ github.repository_owner }}/pekno-xxx:latest
