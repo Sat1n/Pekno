@@ -11,7 +11,6 @@
 <p align="center">
   <a href="./LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-green.svg" /></a>
   <img alt="Version" src="https://img.shields.io/badge/version-0.1.0-blue.svg" />
-  <img alt="Docker Pulls" src="https://img.shields.io/docker/pulls/pekno/pekno?label=docker%20pulls" />
 </p>
 
 ## What Is Pekno?
