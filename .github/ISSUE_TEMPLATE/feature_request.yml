@@ -1,0 +1,75 @@
+name: Feature Request
+description: Suggest an improvement or new capability for Pekno.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form to describe the user problem first. Concrete use cases are much easier to evaluate than broad feature names.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      description: What are you trying to accomplish, and what is difficult today?
+      placeholder: "I want Pekno to ingest papers from arXiv because..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed-solution
+    attributes:
+      label: Proposed solution
+      description: Describe the feature, workflow, plugin, API, or UI behavior you want.
+      placeholder: "Add an arXiv plugin that can sync saved searches and normalize papers into the Vault."
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What workarounds or other tools have you tried?
+      placeholder: "I currently export links manually, but..."
+    validations:
+      required: false
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Which part of Pekno would this affect most?
+      options:
+        - Plugin system
+        - Worker pipeline
+        - Vault / reader
+        - Dashboard / monitoring
+        - MCP / agent integration
+        - Docker / deployment
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: impact
+    attributes:
+      label: Why this matters
+      description: Explain who benefits and how often this would be used.
+      placeholder: "This helps users who follow research topics daily and want agent-ready paper summaries."
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: Contribution
+      options:
+        - label: I am willing to test this feature.
+          required: false
+        - label: I am willing to help implement this feature.
+          required: false
+        - label: I checked existing issues and did not find a duplicate request.
+          required: true

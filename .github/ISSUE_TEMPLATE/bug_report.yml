@@ -1,0 +1,106 @@
+name: Bug Report
+description: Report a reproducible problem with Pekno.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Please include enough context for maintainers to reproduce the issue without guessing.
+
+  - type: input
+    id: pekno-version
+    attributes:
+      label: Pekno version
+      description: Use the release tag, commit SHA, or Docker image tag you are running.
+      placeholder: "v0.1.0, latest, or commit SHA"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install-method
+    attributes:
+      label: Installation method
+      description: How are you running Pekno?
+      options:
+        - Docker Compose
+        - Dev Container
+        - Manual local development
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: host-environment
+    attributes:
+      label: Host environment
+      description: Include OS, CPU architecture, Docker version, Docker Compose version, and GPU/runtime details if relevant.
+      placeholder: |
+        OS: Ubuntu 24.04 / Windows 11 / macOS 15
+        Architecture: x86_64 / arm64
+        Docker: 28.x
+        Docker Compose: v2.x
+        GPU/runtime: NVIDIA CUDA / ROCm / CPU only
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Describe the problem and the expected behavior.
+      placeholder: "The Vault PDF viewer fails to load uploaded PDFs. I expected the PDF to render inside the Vault page."
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction steps
+      description: Provide exact steps. Reports without reproduction steps are usually not actionable.
+      placeholder: |
+        1. Start Pekno with ...
+        2. Upload ...
+        3. Open ...
+        4. See error ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs and error output
+      description: Paste relevant logs from browser console, hub, worker, scheduler, nginx, or Docker Compose. Remove secrets before posting.
+      render: shell
+      placeholder: |
+        docker logs pekno-hub --tail 200
+        docker logs pekno-worker --tail 200
+        docker logs pekno-scheduler --tail 200
+        docker logs pekno-nginx --tail 200
+    validations:
+      required: true
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Relevant configuration
+      description: Share relevant `.env` or compose snippets with secrets removed.
+      render: shell
+      placeholder: |
+        APP_ENV=prod
+        APP_TIMEZONE=Asia/Shanghai
+        WORKER_EXECUTION_MODE=cpu
+        OLLAMA_BASE_URL=http://ollama:11434
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: safety-checks
+    attributes:
+      label: Safety checks
+      options:
+        - label: I removed tokens, passwords, cookies, and private URLs from the logs/config above.
+          required: true
+        - label: I searched existing issues and did not find a duplicate.
+          required: true
