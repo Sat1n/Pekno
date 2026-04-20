@@ -11,6 +11,13 @@
 <p align="center">
   <a href="./LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-green.svg" /></a>
   <img alt="Version" src="https://img.shields.io/badge/version-0.1.0-blue.svg" />
+  <img alt="Phase" src="https://img.shields.io/badge/phase-0%20Genesis-8A2BE2.svg" />
+  <img alt="Python" src="https://img.shields.io/badge/python-3.13-3776AB.svg" />
+  <img alt="Vue" src="https://img.shields.io/badge/frontend-Vue%203%20%2B%20Vite-42b883.svg" />
+  <img alt="Docker" src="https://img.shields.io/badge/images-GHCR-2496ED.svg" />
+  <img alt="CPU Worker" src="https://img.shields.io/badge/worker-CPU%20ready-success.svg" />
+  <img alt="CUDA Worker" src="https://img.shields.io/badge/worker-CUDA%2012%20ready-76B900.svg" />
+  <a href="https://github.com/Sat1n/Pekno/actions/workflows/docker-publish.yml"><img alt="Docker Publish" src="https://github.com/Sat1n/Pekno/actions/workflows/docker-publish.yml/badge.svg" /></a>
 </p>
 
 ## What Is Pekno?
@@ -68,6 +75,29 @@ docker compose -f docker-compose.prod.yml up -d
 
 Edit `.env` before starting if you need to change the HTTP port, database password, image owner, image tag, timezone, or `OLLAMA_BASE_URL`.
 
+### CUDA Worker Deployment
+
+To use the prebuilt CUDA worker image on a NAS or Linux host, use `docker-compose.prod.cuda.yml` instead of the default CPU compose file. Make sure the host has an NVIDIA GPU, a working NVIDIA driver, and NVIDIA Container Toolkit installed. A quick host check should succeed before you start the CUDA stack:
+
+```bash
+nvidia-smi
+docker run --rm --gpus all nvidia/cuda:12.2.2-cudnn8-runtime-ubuntu22.04 nvidia-smi
+```
+
+Download the CUDA production compose file:
+
+```bash
+wget -O docker-compose.prod.cuda.yml "https://raw.githubusercontent.com/${PEKNO_REPO}/main/docker-compose.prod.cuda.yml"
+```
+
+Then start the CUDA stack directly:
+
+```bash
+docker compose -f docker-compose.prod.cuda.yml up -d
+```
+
+Use either `docker-compose.prod.yml` for CPU or `docker-compose.prod.cuda.yml` for CUDA. Avoid running both stacks at the same time unless you intentionally want both workers consuming jobs from the same Redis queue. ROCm and other accelerators do not have official production compose files yet.
+
 Clone the repository, create your environment file, and start Pekno with Docker Compose:
 
 ```bash
@@ -117,11 +147,18 @@ services:
     image: redis:7-alpine
 ```
 
-For worker-side ML acceleration in local builds, configure the worker extension in `worker.ml.yml`. For prebuilt images, the production compose file runs `pekno-worker-cpu` by default and provides an opt-in `cuda` profile for `pekno-worker-cuda12`. Hub stays CPU-only by design.
+For worker-side ML acceleration in local builds, configure the worker extension in `worker.ml.yml`. For prebuilt images, use `docker-compose.prod.yml` for CPU or `docker-compose.prod.cuda.yml` for CUDA. Hub stays CPU-only by design.
 
 ### ML Runtime Roadmap
 
-Pekno currently supports CPU workers and CUDA workers through prebuilt images. ROCm and other popular acceleration runtimes are not available as official prebuilt worker images yet, but they are on the project TODO list.
+Hardware acceleration support is tracked explicitly:
+
+- [x] **CPU**: default worker runtime, available through `docker-compose.prod.yml`.
+- [x] **NVIDIA CUDA 12**: prebuilt `pekno-worker-cuda12` image, available through `docker-compose.prod.cuda.yml`.
+- [ ] **AMD ROCm**: planned; no official production compose file yet.
+- [ ] **Apple Silicon / Metal**: planned investigation for local developer workflows.
+- [ ] **Intel GPU / oneAPI**: planned investigation.
+- [ ] **Other community runtimes**: welcome as focused proposals once the worker runtime contract stabilizes.
 
 ## Architecture & Plugins
 

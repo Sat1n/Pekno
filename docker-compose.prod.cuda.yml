@@ -1,13 +1,11 @@
-# Pekno production compose file for prebuilt GHCR images.
+# Pekno production compose file for prebuilt CUDA worker images.
 #
 # Quick start:
 #   cp .env.example .env
-#   docker compose -f docker-compose.prod.yml up -d
+#   docker compose -f docker-compose.prod.cuda.yml up -d
 #
-# Published images follow this repository-owner pattern:
-#   ghcr.io/${{ github.repository_owner }}/pekno-xxx:latest
-#
-# Docker image names must be lowercase, so use a lowercase owner in PEKNO_IMAGE_OWNER.
+# This file starts the CUDA worker directly. It does not start worker-cpu.
+# NVIDIA Container Toolkit must be installed on the host.
 
 x-app-env: &app-env
   POSTGRES_USER: ${POSTGRES_USER:-pekno}
@@ -65,14 +63,15 @@ services:
         condition: service_started
     volumes: *app-volumes
 
-  # CPU worker is enabled by default and works on machines without NVIDIA GPUs.
-  worker-cpu:
-    image: ghcr.io/${PEKNO_IMAGE_OWNER:-sat1n}/pekno-worker-cpu:${PEKNO_IMAGE_TAG:-latest}
-    container_name: pekno-worker-cpu
+  worker-cuda12:
+    image: ghcr.io/${PEKNO_IMAGE_OWNER:-sat1n}/pekno-worker-cuda12:${PEKNO_IMAGE_TAG:-latest}
+    container_name: pekno-worker-cuda12
     environment:
       <<: *app-env
-      WORKER_EXECUTION_MODE: cpu
+      WORKER_EXECUTION_MODE: cuda
       RUN_DB_MIGRATIONS: "0"
+      NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-all}
+      NVIDIA_DRIVER_CAPABILITIES: ${NVIDIA_DRIVER_CAPABILITIES:-compute,utility}
     command: ["uv", "run", "taskiq", "worker", "worker.main:broker"]
     depends_on:
       postgres:
@@ -80,6 +79,13 @@ services:
       redis:
         condition: service_started
     volumes: *app-volumes
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: ${NVIDIA_GPU_COUNT:-all}
+              capabilities: [gpu]
 
   redis:
     image: redis:7-alpine
