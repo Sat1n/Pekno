@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, Request, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import and_, delete, select
 from sqlalchemy.dialects.postgresql import insert
@@ -171,6 +171,32 @@ def _build_local_asset_url(local_asset_path: Optional[str]) -> Optional[str]:
             return _public_upload_path(relative)
     except Exception:
         return None
+
+
+def _resolve_item_asset_path(item: ItemORM) -> Path | None:
+    candidates: list[Path] = []
+
+    if item.local_asset_path:
+        candidates.append(Path(item.local_asset_path))
+
+    raw_link = str(item.raw_link or "").strip()
+    if raw_link.startswith("/uploads/"):
+        candidates.append(UPLOAD_ROOT / raw_link.removeprefix("/uploads/"))
+    elif raw_link.startswith("/api/static/vault/"):
+        candidates.append(VAULT_ROOT / raw_link.removeprefix("/api/static/vault/"))
+
+    allowed_roots = [UPLOAD_ROOT.resolve(), VAULT_ROOT.resolve()]
+    for candidate in candidates:
+        try:
+            resolved = candidate.resolve()
+            if not any(resolved.is_relative_to(root) for root in allowed_roots):
+                continue
+            if resolved.is_file():
+                return resolved
+        except Exception:
+            continue
+
+    return None
 
 
 def _infer_upload_type(filename: str, content_type: Optional[str]) -> tuple[str, str]:
@@ -430,6 +456,18 @@ async def ensure_vault_asset(item_id: str, current_user=Depends(get_current_user
     item, state = await _fetch_item_for_user(item_id, current_user["id"])
     await _queue_vault_download_if_needed(item_id, item, current_user["id"])
     return _to_item_response(item, state)
+
+
+@router.get("/{item_id}/asset")
+async def get_item_asset(item_id: str, current_user=Depends(get_current_user)):
+    item, _ = await _fetch_item_for_user(item_id, current_user["id"])
+    asset_path = _resolve_item_asset_path(item)
+    if not asset_path:
+        raise HTTPException(status_code=404, detail="The requested asset could not be found.")
+
+    metadata = item.metadata_extra or {}
+    media_type = str(metadata.get("mime_type") or metadata.get("vault_download_content_type") or "").strip() or None
+    return FileResponse(asset_path, media_type=media_type)
 
 
 async def _queue_video_summary_if_needed(item: ItemORM, user_id: str | None = None, preferred_locale: str | None = None):

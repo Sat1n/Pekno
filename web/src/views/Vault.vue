@@ -336,6 +336,14 @@ const articleContent = computed(() => {
 })
 
 const openableDocumentUrl = computed(() => toAbsoluteUrl(activeItem.value?.local_asset_url || activeItem.value?.raw_link || ''))
+const pdfDocumentUrl = computed(() => {
+  const item = activeItem.value
+  if (!item) return ''
+  if (item.local_asset_url) {
+    return `${API_BASE_URL}/api/items/${encodeURIComponent(item.id)}/asset`
+  }
+  return openableDocumentUrl.value
+})
 
 const isPdfDocument = computed(() => {
   if (!activeItem.value || activeItem.value.intent !== 'document') return false
@@ -1472,7 +1480,7 @@ onBeforeUnmount(() => {
                   <div class="h-[calc(100vh-11rem)] min-h-[640px]">
                     <PdfViewer
                       ref="pdfViewer"
-                      :url="openableDocumentUrl"
+                      :url="pdfDocumentUrl"
                       :highlights="pdfAnnotationHighlights"
                       @quote="handleQuote"
                       @screenshot-capture="handlePdfScreenshotCapture"
