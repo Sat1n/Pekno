@@ -42,6 +42,7 @@ services:
         condition: service_started
     volumes:
       - ${DATA_DIR:-./data}:/app/data
+      - ${DATA_DIR:-./data}/plugins/third_party:/app/worker/plugins/third_party
 
   worker:
     build:
@@ -78,6 +79,7 @@ services:
         condition: service_started
     volumes:
       - ${DATA_DIR:-./data}:/app/data
+      - ${DATA_DIR:-./data}/plugins/third_party:/app/worker/plugins/third_party
 
   scheduler:
     build:
@@ -110,6 +112,7 @@ services:
         condition: service_started
     volumes:
       - ${DATA_DIR:-./data}:/app/data
+      - ${DATA_DIR:-./data}/plugins/third_party:/app/worker/plugins/third_party
 
   redis:
     image: redis:7-alpine

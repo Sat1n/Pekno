@@ -8,7 +8,7 @@ import openai
 from langchain_ollama import OllamaEmbeddings
 
 from shared.config import SYSTEM_CONFIG_USER_ID, ConfigManager, get_default_ollama_base_url
-from hub.core.llm.providers.ollama_adapter import OllamaProvider
+from hub.core.llm.providers.ollama_adapter import OllamaProvider, ensure_ollama_model
 from hub.core.llm.providers.openai_adapter import OpenAIProvider
 from hub.core.billing import check_api_limit_or_raise, estimate_tokens, read_response_usage, record_api_usage
 
@@ -493,9 +493,11 @@ async def embed_text(text: str) -> Tuple[List[float], str]:
     provider_config = await _load_json_config(_provider_config_key(provider_id), {})
 
     if provider_id == "ollama":
+        base_url = _normalize_ollama_host(provider_config.get("host", get_default_ollama_base_url()))
+        await ensure_ollama_model(base_url, model_name)
         client = OllamaEmbeddings(
             model=model_name,
-            base_url=_normalize_ollama_host(provider_config.get("host", get_default_ollama_base_url())),
+            base_url=base_url,
         )
         vector = await asyncio.to_thread(client.embed_query, text)
         await record_api_usage(

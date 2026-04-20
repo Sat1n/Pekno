@@ -26,6 +26,13 @@ PLUGIN_INSTALL_DIR = Path("worker/plugins/third_party").resolve()
 TEMP_PREVIEW_DIR = Path(tempfile.gettempdir()) / "iris_plugins"
 
 
+def _ensure_plugin_install_dir() -> None:
+    PLUGIN_INSTALL_DIR.mkdir(parents=True, exist_ok=True)
+    init_file = PLUGIN_INSTALL_DIR / "__init__.py"
+    if not init_file.exists():
+        init_file.write_text("", encoding="utf-8")
+
+
 async def _get_bound_credentials(plugin_id: str, user_id: str, required_credentials: list[str]) -> list[str]:
     bound: list[str] = []
     for platform in required_credentials:
@@ -208,6 +215,8 @@ async def confirm_install_plugin(token: str, current_user=Depends(require_admin)
         raise HTTPException(status_code=404, detail="The installation session expired. Please upload the plugin again.")
         
     try:
+        _ensure_plugin_install_dir()
+
         # 1. Read manifest to get plugin id
         manifest_path = source_path / "manifest.json"
         # Re-check nested root directory layout

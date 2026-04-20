@@ -97,19 +97,39 @@ class IngestionPipeline:
     async def _generate_summary(self, core_text: str):
         model = await self.ai.get_summary_model_name("short")
         self.logger.info(f"🤖 [LLM] Requesting summary generation from model [{model}]...")
-        return await self.ai.generate_summary(
-            core_text,
-            length="short",
-            preferred_locale=self._preferred_locale(self.current_item) if self.current_item else None,
-        )
+        try:
+            return await self.ai.generate_summary(
+                core_text,
+                length="short",
+                preferred_locale=self._preferred_locale(self.current_item) if self.current_item else None,
+            )
+        except QuotaExceededException:
+            raise
+        except Exception as exc:
+            self.logger.warning(
+                "⚠️ Short summary generation failed; falling back to raw text. model=%s error=%s",
+                model,
+                exc,
+            )
+            return self.current_item.content_text or self.current_item.title if self.current_item else core_text
 
     async def _auto_tagging(self, core_text: str):
         model = await self.ai.get_tagging_model_name()
         self.logger.debug(f"DEBUG - [LLM] Extracting tags with model [{model}]...")
-        return await self.ai.extract_tags(
-            core_text,
-            preferred_locale=self._preferred_locale(self.current_item) if self.current_item else None,
-        )
+        try:
+            return await self.ai.extract_tags(
+                core_text,
+                preferred_locale=self._preferred_locale(self.current_item) if self.current_item else None,
+            )
+        except QuotaExceededException:
+            raise
+        except Exception as exc:
+            self.logger.warning(
+                "⚠️ Auto-tagging failed; continuing without tags. model=%s error=%s",
+                model,
+                exc,
+            )
+            return []
 
 @broker.task(task_name="process_new_item")
 async def process_new_item_task(item_dict: dict):
