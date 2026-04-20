@@ -1,143 +1,171 @@
-## Iris Plugin Development Quickstart
+<p align="center">
+  <img src="docs/assets/pekno-logo.png" alt="Pekno logo" width="160" />
+</p>
 
-Iris uses a framework-injected plugin system. Plugin authors only need to describe source-specific behavior; common lifecycle controls are injected by the framework.
+<h1 align="center">Pekno</h1>
 
-### Required files
+<p align="center">
+  <strong>A Self-Hosted, AI-Native Knowledge Operating System.</strong>
+</p>
 
-Your plugin package must include:
-- `manifest.json`
-- `plugin.py` or `__init__.py`
+<p align="center">
+  <a href="./LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-green.svg" /></a>
+  <img alt="Version" src="https://img.shields.io/badge/version-0.1.0-blue.svg" />
+  <img alt="Docker Pulls" src="https://img.shields.io/docker/pulls/pekno/pekno?label=docker%20pulls" />
+</p>
 
-Your entry file must expose a global `plugin` instance.
+## What Is Pekno?
 
-### Minimal manifest
+Pekno is a self-hosted knowledge operating system that turns the scattered content you already care about into standardized, agent-ready knowledge.
+Think of it as a private kitchen: your followed repositories, videos, papers, feeds, bookmarks, and creator updates are the ingredients; plugins are the delivery workers that bring those ingredients in; pipelines are the chefs that clean, normalize, enrich, and prepare them for your agents or for you to read on the web.
+It is not just a feed subscription tool: it connects local LLMs through Ollama, multimedia transcription through Whisper, durable knowledge storage through PostgreSQL `pgvector`, and tool-facing automation through MCP.
 
-```json
-{
-  "id": "my_unique_plugin",
-  "name": "My Plugin",
-  "description": "Syncs data into Iris",
-  "version": "1.0.0",
-  "author": "Your Name",
-  "permissions": ["network"],
-  "framework_defaults": {
-    "retention_hours": 24,
-    "auto_short_summary": false
-  },
-  "settings_schema": {
-    "api_url": {
-      "type": "string",
-      "label": "接口地址",
-      "default": "https://example.com/api"
-    },
-    "access_token": {
-      "type": "string",
-      "label": "访问令牌",
-      "secret": true
-    }
-  }
-}
+## Core Features
+
+![Pekno Dashboard](docs/assets/dashboard-demo.png)
+
+- **Command-center dashboard**: observe sync state, scheduler health, worker activity, plugin status, and system logs from one place.
+
+![Pekno Vault Reader](docs/assets/vault-reader.png)
+
+- **Vault-style reader**: browse saved knowledge with an Obsidian-inspired reading flow designed for long-term retention and retrieval.
+- **Plugin-driven ingestion**: bring content from GitHub, Bilibili, arXiv, RSS, video platforms, paper sources, and any custom source you can model as a plugin.
+- **Pipeline-first processing**: normalize incoming items, extract readable text, enrich metadata, run OCR/transcription, generate embeddings, and prepare output for humans or agents.
+- **Local-first AI pipeline**: use Ollama, Whisper, OCR, and PostgreSQL `pgvector` without sending private content to third-party services by default.
+- **Agent-ready output**: expose clean, structured knowledge through the web UI and MCP instead of forcing agents to scrape fragmented sources again.
+
+## Plugin System & Pipelines
+
+Pekno treats every source as a plugin and every incoming item as raw material for a standardized processing pipeline. A plugin knows how to fetch source-specific data, while Pekno provides the shared runtime for scheduling, credentials, storage, manual sync, auto-sync, and UI integration.
+
+The pipeline turns heterogeneous source data into consistent knowledge objects:
+
+- **Fetch**: plugins collect content from platforms, feeds, APIs, or custom sources.
+- **Normalize**: each item becomes a stable Pekno record with source type, title, link, content, tags, metadata, and intent.
+- **Enrich**: workers run text extraction, OCR, transcription, summarization, embeddings, and source-specific hover blocks.
+- **Serve**: processed knowledge is available in the dashboard, the vault-style reader, and MCP-compatible agent workflows.
+
+To build a plugin, start with the [Pekno Plugin Development Guide](./Pekno_Plugin.md). If you use a CLI coding agent, clone this repository first and ask the agent to read `Pekno_Plugin.md` before writing code; that file documents the runtime contract, manifest format, credential rules, framework-injected settings, and worker-side pipeline expectations.
+
+## Quick Start
+
+Clone the repository, create your environment file, and start Pekno with Docker Compose:
+
+```bash
+git clone https://github.com/your-org/pekno.git && cd pekno && cp .env.example .env && docker compose up -d --build
 ```
 
-### Framework-injected settings
+Open the app at:
 
-Iris automatically injects these fields into `settings_schema`:
-- `auto_short_summary`
-- `retention_hours`
-- `sync_limit`
-- `auto_sync`
-- `auto_sync_interval`
-
-Do not define those fields manually in your plugin manifest.
-
-If your plugin needs a different default, use `framework_defaults`:
-- GitHub-like long-term content: `{"retention_hours": -1}`
-- Short-lived feeds like Bilibili/video dynamics: `{"retention_hours": 24, "auto_short_summary": false}`
-
-### Plugin contract
-
-```python
-from shared.plugins.base import BasePlugin, PluginContext
-
-
-class MyPlugin(BasePlugin):
-    async def fetch_data(self, ctx: PluginContext) -> list[dict]:
-        return []
-
-    def normalize_item(self, raw_data: dict) -> dict:
-        return {
-            "id": raw_data["id"],
-            "title": raw_data["title"],
-            "raw_link": "https://example.com/item",
-            "source_type": "my_plugin",
-            "intent": "article",
-            "content_text": raw_data.get("content", ""),
-            "metadata_extra": {},
-        }
-
-    async def extract_text_for_ai(self, ctx: PluginContext, raw_data: dict) -> str:
-        return raw_data.get("content", "")
-
-
-plugin = MyPlugin()
+```text
+http://localhost:9080
 ```
 
-### Server-Driven UI (Hover Blocks)
+The included `docker-compose.yaml` starts the full runtime stack:
 
-Iris supports dynamically rendering rich Hover UIs directly from your plugin without any Vue frontend modifications. 
+```yaml
+services:
+  nginx:
+    ports:
+      - "9080:80"
+    depends_on:
+      hub:
+        condition: service_started
 
-By providing a JSON array of predefined "Blocks" (`KVBlock`, `ProgressBlock`, `MarkdownBlock`, `QuoteBlock`), the frontend will automatically construct Native elements floating over your item's card.
+  hub:
+    command: ["uv", "run", "python", "hub/main.py"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
 
-**Method 1: Pre-computed (Recommended)**
-Compute the blocks during the background synchronization phase (for example, inside `extract_text_for_ai`) and save them into the item's metadata so they render instantly with zero network delay.
+  worker:
+    command: ["uv", "run", "taskiq", "worker", "worker.main:broker"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
 
-```python
-    async def extract_text_for_ai(self, ctx: PluginContext, raw_data: dict) -> str:
-        raw_data.setdefault("metadata_extra", {})["hover_blocks"] = [
-            {
-                "block_type": "kv",
-                "kv_data": {"Stars": 100, "Forks": 20}
-            }
-        ]
-        return raw_data.get("content", "")
+  scheduler:
+    command: ["sh", "-lc", "uv run python scripts/scheduler_bootstrap.py && uv run taskiq scheduler worker.main:scheduler"]
+
+  postgres:
+    image: ankane/pgvector:latest
+
+  redis:
+    image: redis:7-alpine
 ```
 
-**Method 2: Real-time API Loading**
-For highly dynamic data, you can implement the `get_hover_blocks` signature in your plugin. The Hub will proxy the frontend's hover request to this method if no pre-computed cache exists.
+For worker-side ML acceleration, configure the worker extension in `worker.ml.yml`. Hub stays CPU-only by design.
 
-```python
-    async def get_hover_blocks(self, item_url: str, user_config: dict) -> list[dict]:
-        return [
-            {
-                "block_type": "markdown",
-                "text": "**Real-time** fetched content from specific URL!"
-            }
-        ]
+## Architecture & Plugins
+
+```mermaid
+flowchart TB
+    subgraph Inputs["User Attention Sources"]
+        GitHub[GitHub Stars]
+        Video[Videos / Creators]
+        Papers[Papers / arXiv]
+        Feeds[RSS / Feeds]
+        Custom[Custom Sources]
+    end
+
+    subgraph Plugins["Plugin Delivery Layer"]
+        PluginRuntime[Pekno Plugin Runtime]
+        PluginGuide["Plugin Development Guide"]
+    end
+
+    subgraph Control["Hub: Lightweight Control Plane"]
+        Nginx[Nginx]
+        Hub[API / Auth / Plugin Management / MCP]
+        Web[Web Dashboard & Vault Reader]
+        Agent[MCP-Compatible Agents]
+    end
+
+    subgraph Async["Async Processing Plane"]
+        Scheduler[Scheduler]
+        Redis[(Redis Queue)]
+        Worker[Worker Pipelines]
+        Normalize[Normalize Items]
+        Enrich[OCR / Whisper / Metadata]
+        Embed[Embeddings / Summaries]
+    end
+
+    subgraph Storage["Knowledge Storage"]
+        Postgres[(PostgreSQL + pgvector)]
+        Data[(Data Volume)]
+    end
+
+    subgraph AI["Local AI Services"]
+        Ollama[Ollama / Local LLM]
+        Whisper[Whisper Runtime]
+    end
+
+    GitHub --> PluginRuntime
+    Video --> PluginRuntime
+    Papers --> PluginRuntime
+    Feeds --> PluginRuntime
+    Custom --> PluginRuntime
+    PluginGuide -. extends .-> PluginRuntime
+
+    Nginx --> Hub
+    Hub --> Web
+    Hub --> Agent
+    Hub --> Postgres
+    Hub --> Redis
+    Scheduler --> Redis
+
+    Redis --> Worker
+    PluginRuntime --> Worker
+    Worker --> Normalize --> Enrich --> Embed --> Postgres
+    Worker --> Data
+    Enrich --> Whisper
+    Embed --> Ollama
+
+    Postgres --> Web
+    Postgres --> Agent
 ```
 
-### Runtime architecture
-
-- `worker` executes queued tasks.
-- `scheduler` triggers cron-based maintenance and heartbeat jobs.
-- `system_heartbeat_task` checks auto-sync plugins every 5 minutes and only dispatches when due.
-- `system_ttl_cleanup_task` clears expired data every 5 minutes.
-- Embeddings are stored inline in PostgreSQL via `pgvector`, so deleting an `items` row also removes its vector payload.
-
-### Environment
-
-Recommended local `.env` keys:
-
-```env
-APP_ENV=dev
-APP_TIMEZONE=Asia/Shanghai
-LOG_LEVEL=DEBUG
-```
-
-- `APP_ENV=dev` enables debug-friendly defaults.
-- `APP_ENV=prod` falls back to info-level logs unless `LOG_LEVEL` overrides it.
-
-If `ZoneInfo("Asia/Shanghai")` fails on Windows/uv, install tzdata:
-
-```powershell
-uv add tzdata
-```
+Pekno keeps lightweight control-plane work in Hub and moves expensive knowledge processing to workers. Plugin authors should start with the [Pekno Plugin Development Guide](./Pekno_Plugin.md).
