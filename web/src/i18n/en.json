@@ -94,7 +94,7 @@
     "registerFailed": "Registration failed. Please check the invitation code or try again later.",
     "initFailed": "Initialization failed. Please try again later.",
     "usernamePlaceholder": "admin",
-    "inviteCodePlaceholder": "IRIS-AB12-CD34",
+    "inviteCodePlaceholder": "PEKNO-AB12-CD34",
     "initialAdminPlaceholder": "super-admin"
   },
   "dashboard": {
@@ -140,7 +140,7 @@
     "watchLaterTitle": "Watch Later",
     "loadingData": "Loading data...",
     "watchLaterCount": "{username} currently has {count} saved watch-later items",
-    "updatesReady": "Iris has refreshed and organized {count} items",
+    "updatesReady": "Pekno has refreshed and organized {count} items",
     "pluginUpdates": "{pluginName} has {count} updates",
     "aiSummaryMissing": "No AI summary yet. Click the button to generate one.",
     "source": "Source",
@@ -183,7 +183,7 @@
     "uploadAndFavorite": "Upload & Favorite",
     "parsePlugin": "Parser plugin",
     "linkAddress": "Link address",
-    "autoPluginHint": "If the link has a clear signature, Iris will switch to the matching plugin automatically.",
+    "autoPluginHint": "If the link has a clear signature, Pekno will switch to the matching plugin automatically.",
     "parseAndAdd": "Parse and add to feed",
     "saveScreenshot": "Save screenshot"
     ,
@@ -287,7 +287,7 @@
     "install": {
       "title": "Install New Plugin",
       "safeReview": "Security Review",
-      "uploadDesc": "Upload a plugin ZIP to extend Iris's capabilities",
+      "uploadDesc": "Upload a plugin ZIP to extend Pekno's capabilities",
       "reviewDesc": "Please review the plugin code and permissions carefully",
       "clickToUpload": "Click to upload plugin package",
       "zipOnly": "Only standard .zip format is supported",
@@ -362,7 +362,7 @@
       "confirmUninstall": "Confirm uninstall"
     },
     "pluginsHeading": "Plugin Management",
-    "pluginsDesc": "Connect and configure third-party services so Iris can sync and analyze your digital content automatically.",
+    "pluginsDesc": "Connect and configure third-party services so Pekno can sync and analyze your digital content automatically.",
     "installPlugin": "Install Plugin",
     "modelsHeading": "Model Settings",
     "modelsDesc": "Manage model providers and the model assignments used for tagging, summarization, and vector retrieval.",

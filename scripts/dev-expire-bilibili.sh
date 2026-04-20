@@ -8,7 +8,7 @@ fi
 
 container_name="pekno-postgres"
 db_user="pekno"
-db_name="pekno_iris"
+db_name="pekno"
 
 read -r -d '' sql <<'EOF' || true
 WITH updated AS (

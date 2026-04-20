@@ -154,7 +154,7 @@ class PluginManager:
                         # 实例化插件
                         plugin_instance = obj()
                         
-                        # ✨ 核心：Iris 框架执行依赖注入
+                        # ✨ 核心：Pekno 框架执行依赖注入
                         import json
                         from pathlib import Path
                         

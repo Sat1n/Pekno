@@ -11,7 +11,7 @@ class Base(DeclarativeBase):
     pass
 
 class ItemORM(Base):
-    """这是 Iris 的物理存储结构"""
+    """这是 Pekno 的物理存储结构"""
     __tablename__ = "items"
 
     # 基础字段

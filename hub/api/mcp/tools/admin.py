@@ -9,7 +9,7 @@ from hub.api.mcp.context import get_is_admin, get_scopes
 from shared.config import ConfigManager
 from shared.plugins.manager import plugin_manager
 
-logger = logging.getLogger("iris-mcp")
+logger = logging.getLogger("Pekno-mcp")
 
 ADMIN_DENIED_MESSAGE = (
     "Permission Denied: [⚠️ 严重警告] 您正在尝试越权操作。"

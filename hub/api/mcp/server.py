@@ -13,9 +13,9 @@ from starlette.requests import Request
 from hub.api.mcp.context import get_user_id
 from hub.api.mcp.tools import TOOL_DEFINITIONS, TOOL_HANDLERS
 
-logger = logging.getLogger("iris-mcp")
+logger = logging.getLogger("Pekno-mcp")
 sse_transport = SseServerTransport("/messages")
-server = Server("iris-hub")
+server = Server("pekno")
 
 
 @server.list_tools()

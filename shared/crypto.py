@@ -12,10 +12,10 @@ from shared.secret_store import load_or_create_secret
 _log = logging.getLogger(__name__)
 
 ENCRYPTION_KEY = load_or_create_secret(
-    env_key="IRIS_ENCRYPTION_KEY",
-    filename="iris_encryption_key",
+    env_key="PEKNO_ENCRYPTION_KEY",
+    filename="pekno_encryption_key",
     generator=lambda: Fernet.generate_key().decode(),
-    announce_label="Iris 配置加密密钥",
+    announce_label="Pekno 配置加密密钥",
 )
 
 
@@ -82,4 +82,4 @@ def generate_encryption_key() -> str:
 if __name__ == "__main__":
     new_key = generate_encryption_key()
     print(f"🔑 新生成的加密密钥: {new_key}")
-    print("请将此密钥设置到环境变量 IRIS_ENCRYPTION_KEY 中")
+    print("请将此密钥设置到环境变量 PEKNO_ENCRYPTION_KEY 中")

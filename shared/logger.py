@@ -14,9 +14,9 @@ LOG_DIR = Path("data/logs")
 LOG_MAX_BYTES = int(os.getenv("LOG_MAX_BYTES", str(10 * 1024 * 1024)))
 LOG_BACKUP_COUNT = int(os.getenv("LOG_BACKUP_COUNT", "5"))
 SERVICE_DISPLAY_NAMES = {
-    "hub": "Iris-Hub",
-    "worker": "Iris-Worker",
-    "scheduler": "Iris-Scheduler",
+    "hub": "Pekno-Hub",
+    "worker": "Pekno-Worker",
+    "scheduler": "Pekno-Scheduler",
 }
 
 # ---------------------------------------------------------------------------
@@ -130,7 +130,7 @@ def _get_log_level() -> int:
 
 
 def detect_service_name() -> str:
-    explicit = os.getenv("IRIS_SERVICE", "").strip().lower()
+    explicit = os.getenv("PEKNO_SERVICE", "").strip().lower()
     if explicit in {"hub", "worker", "scheduler"}:
         return explicit
 
@@ -151,7 +151,7 @@ def get_log_file_path(service_name: str) -> Path:
 def _build_console_handler() -> logging.Handler:
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(ColorFormatter())
-    handler._iris_owned = True  # type: ignore[attr-defined]
+    handler._pekno_owned = True  # type: ignore[attr-defined]
     return handler
 
 
@@ -169,7 +169,7 @@ def _build_file_handler(service_name: str) -> logging.Handler:
             datefmt="%Y-%m-%d %H:%M:%S",
         )
     )
-    handler._iris_owned = True  # type: ignore[attr-defined]
+    handler._pekno_owned = True  # type: ignore[attr-defined]
     return handler
 
 
@@ -178,7 +178,7 @@ def _configure_named_logger(logger_name: str, handlers: list[logging.Handler], l
     logger.setLevel(level)
     logger.propagate = False
     for handler in list(logger.handlers):
-        if getattr(handler, "_iris_owned", False):
+        if getattr(handler, "_pekno_owned", False):
             logger.removeHandler(handler)
             handler.close()
     for handler in handlers:
@@ -194,10 +194,10 @@ def _logger_level_overrides(service: str, root_level: int) -> dict[str, int]:
 
 
 def configure_logging(service_name: str | None = None) -> str:
-    explicit_service = os.getenv("IRIS_SERVICE", "").strip().lower()
+    explicit_service = os.getenv("PEKNO_SERVICE", "").strip().lower()
     service = explicit_service if explicit_service in SERVICE_DISPLAY_NAMES else (service_name or detect_service_name())
     root = logging.getLogger()
-    configured_service = getattr(root, "_iris_service_name", None)
+    configured_service = getattr(root, "_pekno_service_name", None)
     if configured_service == service:
         return service
 
@@ -226,7 +226,7 @@ def configure_logging(service_name: str | None = None) -> str:
     for handler in owned_handlers:
         root.addHandler(handler)
     for handler in root.handlers:
-        if getattr(handler, "_iris_owned", False):
+        if getattr(handler, "_pekno_owned", False):
             handler.addFilter(ServiceNameFilter(service))
             handler.addFilter(sensitive_filter)
     logger_names = (
@@ -249,10 +249,10 @@ def configure_logging(service_name: str | None = None) -> str:
     overrides = _logger_level_overrides(service, root.level)
     for logger_name in logger_names:
         _configure_named_logger(logger_name, owned_handlers, overrides.get(logger_name, root.level))
-    root._iris_service_name = service  # type: ignore[attr-defined]
+    root._pekno_service_name = service  # type: ignore[attr-defined]
     return service
 
-hub_log = logging.getLogger("Iris-Hub")
-worker_log = logging.getLogger("Iris-Worker")
-scheduler_log = logging.getLogger("Iris-Scheduler")
+hub_log = logging.getLogger("Pekno-Hub")
+worker_log = logging.getLogger("Pekno-Worker")
+scheduler_log = logging.getLogger("Pekno-Scheduler")
 app_log = logging.getLogger(SERVICE_DISPLAY_NAMES.get(detect_service_name(), SERVICE_DISPLAY_NAMES["hub"]))

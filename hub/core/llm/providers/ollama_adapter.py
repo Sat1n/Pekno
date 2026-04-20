@@ -42,7 +42,7 @@ def _is_ollama_model_not_found(exc: Exception) -> bool:
 
 
 def _lock_path_for_model(host: str, model: str) -> Path:
-    lock_root = Path(os.getenv("IRIS_LOCK_DIR", "/app/data/locks"))
+    lock_root = Path(os.getenv("PEKNO_LOCK_DIR", "/app/data/locks"))
     try:
         lock_root.mkdir(parents=True, exist_ok=True)
     except Exception:
@@ -72,8 +72,8 @@ async def _ollama_model_exists(host: str, model: str) -> bool:
 async def ensure_ollama_model(host: str, model: str) -> None:
     """Pull an Ollama model if it is missing.
 
-    The call is idempotent from Iris' perspective. Ollama will return quickly
-    when the model is already present, and concurrent Iris tasks share a
+    The call is idempotent from Pekno' perspective. Ollama will return quickly
+    when the model is already present, and concurrent Pekno tasks share a
     per-process lock to avoid duplicate pulls for the same model.
     """
     model_name = (model or "").strip()

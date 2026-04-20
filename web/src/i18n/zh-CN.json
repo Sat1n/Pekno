@@ -94,7 +94,7 @@
     "registerFailed": "注册失败，请检查邀请码或稍后重试。",
     "initFailed": "初始化失败，请稍后重试。",
     "usernamePlaceholder": "admin",
-    "inviteCodePlaceholder": "IRIS-AB12-CD34",
+    "inviteCodePlaceholder": "PEKNO-AB12-CD34",
     "initialAdminPlaceholder": "super-admin"
   },
   "dashboard": {
@@ -140,7 +140,7 @@
     "watchLaterTitle": "稍后再看",
     "loadingData": "正在加载数据...",
     "watchLaterCount": "{username} 当前暂存了 {count} 条稍后再看",
-    "updatesReady": "iris 更新并整理了 {count} 条资料",
+    "updatesReady": "Pekno 更新并整理了 {count} 条资料",
     "pluginUpdates": "{pluginName} 有 {count} 条更新",
     "aiSummaryMissing": "暂无 AI 总结，点击生成按钮开始总结...",
     "source": "来源",
@@ -286,7 +286,7 @@
     "install": {
       "title": "安装新插件",
       "safeReview": "安全审查",
-      "uploadDesc": "上传插件 ZIP 包以扩展 Iris 的能力",
+      "uploadDesc": "上传插件 ZIP 包以扩展 Pekno 的能力",
       "reviewDesc": "请仔细审查插件代码与权限",
       "clickToUpload": "点击上传插件包",
       "zipOnly": "仅支持标准的 .zip 格式插件包",
@@ -361,7 +361,7 @@
       "confirmUninstall": "确认卸载"
     },
     "pluginsHeading": "插件管理",
-    "pluginsDesc": "连接并配置第三方服务，让 Iris 自动同步并分析你的数字内容。",
+    "pluginsDesc": "连接并配置第三方服务，让 Pekno 自动同步并分析你的数字内容。",
     "installPlugin": "安装插件",
     "modelsHeading": "模型设置",
     "modelsDesc": "统一管理服务器的模型提供商，以及标签、总结、向量检索等用途所使用的模型。",

@@ -1,0 +1,135 @@
+# Pekno production compose file for prebuilt GHCR images.
+#
+# Quick start:
+#   PEKNO_IMAGE_OWNER=sat1n docker compose -f docker-compose.prod.yml up -d
+#
+# Published images follow this repository-owner pattern:
+#   ghcr.io/${{ github.repository_owner }}/pekno-xxx:latest
+#
+# Docker image names must be lowercase, so use a lowercase owner in PEKNO_IMAGE_OWNER.
+
+x-app-env: &app-env
+  POSTGRES_USER: ${POSTGRES_USER:-pekno}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pekno_password}
+  POSTGRES_HOST: postgres
+  POSTGRES_PORT: 5432
+  POSTGRES_DB: ${POSTGRES_DB:-pekno}
+  REDIS_URL: redis://redis:6379
+  USE_REDIS: "True"
+  APP_ENV: ${APP_ENV:-prod}
+  APP_TIMEZONE: ${APP_TIMEZONE:-Asia/Shanghai}
+  TZ: ${APP_TIMEZONE:-Asia/Shanghai}
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
+
+x-app-volumes: &app-volumes
+  - ${DATA_DIR:-./data}:/app/data
+  - ${DATA_DIR:-./data}/plugins/third_party:/app/worker/plugins/third_party
+
+services:
+  nginx:
+    image: ghcr.io/${PEKNO_IMAGE_OWNER:-sat1n}/pekno-nginx:${PEKNO_IMAGE_TAG:-latest}
+    container_name: pekno-nginx
+    depends_on:
+      hub:
+        condition: service_started
+    ports:
+      - "${PEKNO_HTTP_PORT:-9080}:80"
+
+  hub:
+    image: ghcr.io/${PEKNO_IMAGE_OWNER:-sat1n}/pekno-hub:${PEKNO_IMAGE_TAG:-latest}
+    container_name: pekno-hub
+    environment:
+      <<: *app-env
+      RUN_DB_MIGRATIONS: "1"
+    command: ["uv", "run", "python", "hub/main.py"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes: *app-volumes
+
+  scheduler:
+    image: ghcr.io/${PEKNO_IMAGE_OWNER:-sat1n}/pekno-scheduler:${PEKNO_IMAGE_TAG:-latest}
+    container_name: pekno-scheduler
+    environment:
+      <<: *app-env
+      RUN_DB_MIGRATIONS: "0"
+    command: ["sh", "-lc", "uv run python scripts/scheduler_bootstrap.py && uv run taskiq scheduler worker.main:scheduler"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes: *app-volumes
+
+  # CPU worker is enabled by default and works on machines without NVIDIA GPUs.
+  worker-cpu:
+    image: ghcr.io/${PEKNO_IMAGE_OWNER:-sat1n}/pekno-worker-cpu:${PEKNO_IMAGE_TAG:-latest}
+    container_name: pekno-worker-cpu
+    environment:
+      <<: *app-env
+      WORKER_EXECUTION_MODE: cpu
+      RUN_DB_MIGRATIONS: "0"
+    command: ["uv", "run", "taskiq", "worker", "worker.main:broker"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes: *app-volumes
+
+  # CUDA worker is opt-in. Start it with:
+  #   docker compose -f docker-compose.prod.yml --profile cuda up -d
+  # To avoid running both workers, stop the CPU worker first:
+  #   docker compose -f docker-compose.prod.yml stop worker-cpu
+  # This requires NVIDIA Container Toolkit on the host.
+  worker-cuda12:
+    image: ghcr.io/${PEKNO_IMAGE_OWNER:-sat1n}/pekno-worker-cuda12:${PEKNO_IMAGE_TAG:-latest}
+    container_name: pekno-worker-cuda12
+    profiles:
+      - cuda
+    environment:
+      <<: *app-env
+      WORKER_EXECUTION_MODE: cuda
+      RUN_DB_MIGRATIONS: "0"
+      NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-all}
+      NVIDIA_DRIVER_CAPABILITIES: ${NVIDIA_DRIVER_CAPABILITIES:-compute,utility}
+    command: ["uv", "run", "taskiq", "worker", "worker.main:broker"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes: *app-volumes
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: ${NVIDIA_GPU_COUNT:-all}
+              capabilities: [gpu]
+
+  redis:
+    image: redis:7-alpine
+    container_name: pekno-redis
+
+  postgres:
+    image: ankane/pgvector:latest
+    container_name: pekno-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-pekno}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pekno_password}
+      POSTGRES_DB: ${POSTGRES_DB:-pekno}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-pekno} -d ${POSTGRES_DB:-pekno}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    volumes:
+      - ${DATA_DIR:-./data}/postgres:/var/lib/postgresql/data
+
+networks:
+  default:
+    name: pekno-network

@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1.7
+
 ARG NODE_IMAGE=node:20-bookworm-slim
 ARG BASE_IMAGE=python:3.13-slim
 
@@ -6,7 +8,7 @@ WORKDIR /app/web
 
 COPY web/package.json ./
 COPY web/package-lock.json ./
-RUN npm ci
+RUN --mount=type=cache,target=/root/.npm npm ci
 
 COPY web ./
 RUN npm run build
@@ -38,7 +40,7 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 COPY pyproject.toml ./pyproject.toml
 COPY uv.lock ./uv.lock
 COPY .python-version ./.python-version
-RUN uv sync --frozen --no-dev
+RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-dev
 
 COPY . .
 COPY --from=web-builder /app/web/dist /app/web/dist

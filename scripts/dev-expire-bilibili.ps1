@@ -9,7 +9,7 @@ if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
 
 $containerName = "pekno-postgres"
 $dbUser = "pekno"
-$dbName = "pekno_iris"
+$dbName = "pekno"
 
 $sql = @"
 WITH updated AS (

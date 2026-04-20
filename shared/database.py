@@ -5,7 +5,7 @@ DB_USER = os.getenv("POSTGRES_USER", "pekno")
 DB_PASS = os.getenv("POSTGRES_PASSWORD", "pekno_password")
 DB_HOST = os.getenv("POSTGRES_HOST", "127.0.0.1")
 DB_PORT = os.getenv("POSTGRES_PORT", "5432")
-DB_NAME = os.getenv("POSTGRES_DB", "pekno_iris")
+DB_NAME = os.getenv("POSTGRES_DB", "pekno")
 
 def build_database_url(*, sync: bool = False, database_name: str | None = None) -> str:
     driver = "postgresql+psycopg" if sync else "postgresql+asyncpg"

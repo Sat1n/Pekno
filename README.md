@@ -45,9 +45,16 @@ The pipeline turns heterogeneous source data into consistent knowledge objects:
 - **Enrich**: workers run text extraction, OCR, transcription, summarization, embeddings, and source-specific hover blocks.
 - **Serve**: processed knowledge is available in the dashboard, the vault-style reader, and MCP-compatible agent workflows.
 
-To build a plugin, start with the [Pekno Plugin Development Guide](./Pekno_Plugin.md). If you use a CLI coding agent, clone this repository first and ask the agent to read `Pekno_Plugin.md` before writing code; that file documents the runtime contract, manifest format, credential rules, framework-injected settings, and worker-side pipeline expectations.
+To build a plugin, start with the [Pekno Plugin Development Guide](./PEKNO_PLUGIN_GUIDE.md). If you use a CLI coding agent, clone this repository first and ask the agent to read `PEKNO_PLUGIN_GUIDE.md` before writing code; that file documents the runtime contract, manifest format, credential rules, framework-injected settings, and worker-side pipeline expectations.
 
 ## Quick Start
+
+Use the prebuilt GHCR images if you only want to run Pekno:
+
+```bash
+wget -O docker-compose.prod.yml https://raw.githubusercontent.com/Sat1n/Pekno/main/docker-compose.prod.yml
+PEKNO_IMAGE_OWNER=sat1n docker compose -f docker-compose.prod.yml up -d
+```
 
 Clone the repository, create your environment file, and start Pekno with Docker Compose:
 
@@ -98,7 +105,7 @@ services:
     image: redis:7-alpine
 ```
 
-For worker-side ML acceleration, configure the worker extension in `worker.ml.yml`. Hub stays CPU-only by design.
+For worker-side ML acceleration in local builds, configure the worker extension in `worker.ml.yml`. For prebuilt images, the production compose file runs `pekno-worker-cpu` by default and provides an opt-in `cuda` profile for `pekno-worker-cuda12`. Hub stays CPU-only by design.
 
 ## Architecture & Plugins
 
@@ -168,4 +175,4 @@ flowchart TB
     Postgres --> Agent
 ```
 
-Pekno keeps lightweight control-plane work in Hub and moves expensive knowledge processing to workers. Plugin authors should start with the [Pekno Plugin Development Guide](./Pekno_Plugin.md).
+Pekno keeps lightweight control-plane work in Hub and moves expensive knowledge processing to workers. Plugin authors should start with the [Pekno Plugin Development Guide](./PEKNO_PLUGIN_GUIDE.md).

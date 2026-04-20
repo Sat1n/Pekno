@@ -135,7 +135,7 @@ async def test_mcp_streamable_http_can_initialize_and_call_search(monkeypatch):
         ).encode("utf-8"),
     )
     assert _message_status(initialize_messages) == 200
-    assert _message_json(initialize_messages)["result"]["serverInfo"]["name"] == "iris-hub"
+    assert _message_json(initialize_messages)["result"]["serverInfo"]["name"] == "pekno"
 
     initialized_notification_messages = await _invoke_http_app(
         app,

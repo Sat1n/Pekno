@@ -1,7 +1,7 @@
 """Ingestion subpackage for worker component.
 
 Contains the pipeline implementation and the task broker configuration
-used by Iris workers when they pull items from plugins and process
+used by Pekno workers when they pull items from plugins and process
 them (tagging, summarization, vector storage, etc.).
 
 Typical usage::

@@ -28,7 +28,7 @@ def test_bilibili_ingestion():
             metadata_extra={"up": raw_bili_data['owner']['name']}
         )
         print("\n✅ 数据契约校验通过！")
-        print(f"Iris 识别到的标题: {item.title}")
+        print(f"Pekno 识别到的标题: {item.title}")
         print(f"自动转换的时间: {item.created_at}")
     except Exception as e:
         pytest.fail(f"❌ 数据契约校验失败: {e}")

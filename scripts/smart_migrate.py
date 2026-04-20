@@ -10,7 +10,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 os.environ.setdefault("PYTHONPATH", str(PROJECT_ROOT))
-os.environ.setdefault("IRIS_SERVICE", "hub")
+os.environ.setdefault("PEKNO_SERVICE", "hub")
 
 from shared.logger import configure_logging  # noqa: E402
 from hub.core.migrations import run_migrations  # noqa: E402

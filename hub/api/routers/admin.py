@@ -19,7 +19,7 @@ router = APIRouter(prefix="/api/admin", tags=["Admin"])
 
 
 def _generate_invite_code() -> str:
-    return f"IRIS-{secrets.token_hex(2).upper()}-{secrets.token_hex(2).upper()}"
+    return f"PEKNO-{secrets.token_hex(2).upper()}-{secrets.token_hex(2).upper()}"
 
 
 @router.post("/invitations", response_model=InvitationCreateResponse)

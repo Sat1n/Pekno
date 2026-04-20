@@ -43,7 +43,7 @@ class MCPStreamableClient:
                 "params": {
                     "protocolVersion": "2025-03-26",
                     "capabilities": {},
-                    "clientInfo": {"name": "iris-mcp-streamable-smoke", "version": "1.0.0"},
+                    "clientInfo": {"name": "Pekno-mcp-streamable-smoke", "version": "1.0.0"},
                 },
             }
         )
@@ -84,14 +84,14 @@ def _extract_tool_text(response_payload: dict) -> str:
 async def main() -> None:
     parser = argparse.ArgumentParser(description="Smoke-test the MCP Streamable HTTP endpoint.")
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL, help="Streamable MCP endpoint")
-    parser.add_argument("--token", default=os.getenv("IRIS_MCP_TOKEN"), help="Bearer token, or set IRIS_MCP_TOKEN")
+    parser.add_argument("--token", default=os.getenv("PEKNO_MCP_TOKEN"), help="Bearer token, or set PEKNO_MCP_TOKEN")
     parser.add_argument("--query", default="bilibili", help="Search query for search_knowledge_base")
     parser.add_argument("--limit", type=int, default=3, help="Search result limit")
     parser.add_argument("--source-type", default=None, help="Optional source_type filter")
     args = parser.parse_args()
 
     if not args.token:
-        raise SystemExit("Missing token. Pass --token or set IRIS_MCP_TOKEN.")
+        raise SystemExit("Missing token. Pass --token or set PEKNO_MCP_TOKEN.")
 
     async with MCPStreamableClient(args.base_url, args.token) as client:
         initialize_response = await client.initialize()

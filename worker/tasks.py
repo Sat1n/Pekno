@@ -144,7 +144,7 @@ async def _download_github_readme(
     github_token = await _get_github_access_token(user_id)
     headers = {
         "Accept": "application/vnd.github+json",
-        "User-Agent": "Iris-Hub/1.0",
+        "User-Agent": "Pekno-Hub/1.0",
     }
     if github_token:
         headers["Authorization"] = f"Bearer {github_token}"
@@ -157,7 +157,7 @@ async def _download_github_readme(
         readme_path = str(payload.get("path") or "README.md")
         download_url = payload.get("download_url")
         if download_url:
-            raw_headers = {"User-Agent": "Iris-Hub/1.0"}
+            raw_headers = {"User-Agent": "Pekno-Hub/1.0"}
             if github_token:
                 raw_headers["Authorization"] = f"Bearer {github_token}"
             raw_response = await client.get(download_url, headers=raw_headers)
@@ -238,7 +238,7 @@ async def _download_github_asset(
 ) -> bool:
     asset_url = _build_github_raw_asset_url(owner, repo, repo_relative_path)
     try:
-        response = await client.get(asset_url, headers={"User-Agent": "Iris-Hub/1.0"})
+        response = await client.get(asset_url, headers={"User-Agent": "Pekno-Hub/1.0"})
         response.raise_for_status()
     except Exception:
         return False

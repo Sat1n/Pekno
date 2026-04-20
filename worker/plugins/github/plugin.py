@@ -141,7 +141,7 @@ class GitHubStarsPlugin(BasePlugin):
         api_url = f"https://api.github.com/repos/{owner}/{repo}"
         headers = {
             "Accept": "application/vnd.github.v3+json",
-            "User-Agent": "Iris-Hub/1.0",
+            "User-Agent": "Pekno-Hub/1.0",
         }
         if ctx and ctx.config.get("token"):
             headers["Authorization"] = f"Bearer {ctx.config['token']}"
@@ -219,7 +219,7 @@ class GitHubStarsPlugin(BasePlugin):
         
         headers = {
             'Accept': 'application/vnd.github.v3+json',
-            'User-Agent': 'Iris-Hub/1.0'
+            'User-Agent': 'Pekno-Hub/1.0'
         }
         token = user_config.get('token')
         if token:

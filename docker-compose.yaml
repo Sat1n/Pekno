@@ -25,7 +25,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pekno_password}
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
-      POSTGRES_DB: ${POSTGRES_DB:-pekno_iris}
+      POSTGRES_DB: ${POSTGRES_DB:-pekno}
       REDIS_URL: redis://redis:6379
       USE_REDIS: "True"
       APP_ENV: ${APP_ENV:-prod}
@@ -54,14 +54,14 @@ services:
         EXECUTION_MODE: ${WORKER_EXECUTION_MODE:-cpu}
     extends:
       file: worker.ml.yml
-      service: cuda # set to one of [cpu, cuda, rocm] for worker-side ML acceleration
+      service: cpu # set to one of [cpu, cuda, rocm] for worker-side ML acceleration
     container_name: pekno-worker
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-pekno}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pekno_password}
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
-      POSTGRES_DB: ${POSTGRES_DB:-pekno_iris}
+      POSTGRES_DB: ${POSTGRES_DB:-pekno}
       REDIS_URL: redis://redis:6379
       USE_REDIS: "True"
       APP_ENV: ${APP_ENV:-prod}
@@ -95,7 +95,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pekno_password}
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
-      POSTGRES_DB: ${POSTGRES_DB:-pekno_iris}
+      POSTGRES_DB: ${POSTGRES_DB:-pekno}
       REDIS_URL: redis://redis:6379
       USE_REDIS: "True"
       APP_ENV: ${APP_ENV:-prod}
@@ -124,11 +124,15 @@ services:
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-pekno}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pekno_password}
-      POSTGRES_DB: ${POSTGRES_DB:-pekno_iris}
+      POSTGRES_DB: ${POSTGRES_DB:-pekno}
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-pekno} -d ${POSTGRES_DB:-pekno_iris}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-pekno} -d ${POSTGRES_DB:-pekno}"]
       interval: 5s
       timeout: 5s
       retries: 20
     volumes:
       - ${DATA_DIR:-./data}/postgres:/var/lib/postgresql/data
+
+networks:
+  default:
+    name: pekno-network

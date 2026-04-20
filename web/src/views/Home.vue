@@ -637,7 +637,7 @@ async function downloadKeyframe(frameUrl: string, index: number) {
     const objectUrl = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = objectUrl
-    link.download = `iris-keyframe-${selectedItem.value?.id || 'frame'}-${index + 1}.jpg`
+    link.download = `Pekno-keyframe-${selectedItem.value?.id || 'frame'}-${index + 1}.jpg`
     document.body.appendChild(link)
     link.click()
     link.remove()

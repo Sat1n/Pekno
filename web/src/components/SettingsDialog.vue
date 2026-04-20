@@ -527,7 +527,7 @@ const mcpJsonConfig = computed(() => {
   const baseUrl = getRuntimeOrigin()
   return JSON.stringify({
     "mcpServers": {
-      "iris-hub": {
+      "pekno": {
         "url": `${baseUrl}/api/mcp/sse`,
         "headers": {
           "Authorization": `Bearer ${token || '<your-token>'}`

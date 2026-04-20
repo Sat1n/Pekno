@@ -6,7 +6,7 @@ from shared.logger import app_log
 
 
 def _secret_dir() -> Path:
-    raw_dir = os.getenv("IRIS_SECRET_DIR", "./data/secrets")
+    raw_dir = os.getenv("PEKNO_SECRET_DIR", "./data/secrets")
     return Path(raw_dir).expanduser().resolve()
 
 

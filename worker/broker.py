@@ -6,7 +6,7 @@ from shared.logger import configure_logging, worker_log
 from shared.plugins.manager import plugin_manager
 from shared.database import AsyncSessionLocal 
 
-os.environ.setdefault("IRIS_SERVICE", "worker")
+os.environ.setdefault("PEKNO_SERVICE", "worker")
 configure_logging()
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://127.0.0.1:6379")

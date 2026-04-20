@@ -23,7 +23,7 @@ router = APIRouter(prefix="/api/plugins", tags=["Plugins"])
 
 # Plugin installation paths
 PLUGIN_INSTALL_DIR = Path("worker/plugins/third_party").resolve()
-TEMP_PREVIEW_DIR = Path(tempfile.gettempdir()) / "iris_plugins"
+TEMP_PREVIEW_DIR = Path(tempfile.gettempdir()) / "pekno_plugins"
 
 
 def _ensure_plugin_install_dir() -> None:

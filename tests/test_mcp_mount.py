@@ -278,7 +278,7 @@ async def test_mcp_sse_valid_token_can_call_search_tool_and_disconnect_cleanly(m
     initialize_payload = next(payload for payload in message_payloads if payload.get("id") == 1)
     tool_payload_message = next(payload for payload in message_payloads if payload.get("id") == 2)
 
-    assert initialize_payload["result"]["serverInfo"]["name"] == "iris-hub"
+    assert initialize_payload["result"]["serverInfo"]["name"] == "pekno"
 
     tool_payload = json.loads(tool_payload_message["result"]["content"][0]["text"])
     assert tool_payload == [

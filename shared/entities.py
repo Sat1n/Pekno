@@ -23,7 +23,7 @@ class ItemRetention(str, Enum):
 
 class UniversalItem(BaseModel):
     """
-    Pekno 万能信息实体类 - Iris 的核心数据结构
+    Pekno 万能信息实体类 - Pekno 的核心数据结构
     直接对应 schemas/item_schema.json
     """
     model_config = ConfigDict(from_attributes=True)

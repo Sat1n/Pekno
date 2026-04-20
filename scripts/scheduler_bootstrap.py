@@ -1,7 +1,7 @@
 import asyncio
 import os
 
-os.environ.setdefault("IRIS_SERVICE", "scheduler")
+os.environ.setdefault("PEKNO_SERVICE", "scheduler")
 
 from shared.logger import configure_logging, scheduler_log  # noqa: E402
 from worker.maintenance import system_heartbeat_task, system_ttl_cleanup_task  # noqa: E402

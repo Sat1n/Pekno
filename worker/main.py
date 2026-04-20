@@ -2,7 +2,7 @@ import os
 import sys
 
 service_name = "scheduler" if "scheduler" in " ".join(sys.argv).lower() else "worker"
-os.environ["IRIS_SERVICE"] = service_name
+os.environ["PEKNO_SERVICE"] = service_name
 
 from shared.logger import configure_logging, detect_service_name, scheduler_log, worker_log
 from taskiq.schedule_sources import LabelScheduleSource
@@ -19,9 +19,9 @@ scheduler = TaskiqScheduler(broker, sources=[LabelScheduleSource(broker)])
 @broker.on_event("startup")
 async def startup():
     if detect_service_name() == "scheduler":
-        scheduler_log.info("⏰ Iris-Scheduler is ready and waiting for scheduled jobs.")
+        scheduler_log.info("⏰ Pekno-Scheduler is ready and waiting for scheduled jobs.")
     else:
-        worker_log.info("🚀 Iris-Worker is starting and connecting to the processing core...")
+        worker_log.info("🚀 Pekno-Worker is starting and connecting to the processing core...")
     
     # 动态加载插件
     from shared.database import AsyncSessionLocal
@@ -32,6 +32,6 @@ async def startup():
 @broker.on_event("shutdown")
 async def shutdown():
     if detect_service_name() == "scheduler":
-        scheduler_log.info("⏰ Iris-Scheduler is shutting down gracefully...")
+        scheduler_log.info("⏰ Pekno-Scheduler is shutting down gracefully...")
     else:
-        worker_log.info("🛑 Iris-Worker is shutting down gracefully...")
+        worker_log.info("🛑 Pekno-Worker is shutting down gracefully...")

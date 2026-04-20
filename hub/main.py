@@ -10,7 +10,7 @@ from shared.logger import configure_logging
 import logging
 from fastapi.responses import JSONResponse
 
-os.environ.setdefault("IRIS_SERVICE", "hub")
+os.environ.setdefault("PEKNO_SERVICE", "hub")
 configure_logging()
 
 from hub.core.search import SearchService
@@ -26,7 +26,7 @@ from shared.api_errors import ApiError
 from shared.error_codes import ERR_INTERNAL_SERVER_ERROR, ERR_VALIDATION_FAILED, resolve_error_code_and_detail
 
 from hub.core.media.checker import check_media_dependencies
-logger = logging.getLogger("Iris-Hub")
+logger = logging.getLogger("Pekno-Hub")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -37,7 +37,7 @@ async def lifespan(app: FastAPI):
         await plugin_manager.load_enabled_plugins(session)
     yield
 
-app = FastAPI(title="Iris Intelligence Hub", lifespan=lifespan)
+app = FastAPI(title="Pekno", lifespan=lifespan)
 
 # 跨域配置（开发前端 Vue/React 时必开）
 app.add_middleware(

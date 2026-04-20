@@ -1,0 +1,11 @@
+.git
+.github
+.pytest_cache
+.venv
+__pycache__
+*.pyc
+data
+web/node_modules
+web/dist
+*.log
+docker-compose.prod.yml

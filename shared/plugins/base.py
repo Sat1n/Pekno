@@ -12,13 +12,13 @@ class PluginContext:
 
 class BasePlugin(ABC):
     def __init__(self):
-        self._manifest = {} # 留空，等待 Iris 框架注入
+        self._manifest = {} # 留空，等待 Pekno 框架注入
 
     @property
     def manifest(self) -> dict:
         """返回插件的 UI 配置清单 (包含 id, name, settings_schema 等)。
 
-        注意：Iris 会在加载时向 settings_schema 自动注入通用字段：
+        注意：Pekno 会在加载时向 settings_schema 自动注入通用字段：
         - auto_short_summary
         - retention_hours
         - sync_limit
