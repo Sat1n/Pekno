@@ -52,7 +52,7 @@ To build a plugin, start with the [Pekno Plugin Development Guide](./Pekno_Plugi
 Clone the repository, create your environment file, and start Pekno with Docker Compose:
 
 ```bash
-git clone https://github.com/your-org/pekno.git && cd pekno && cp .env.example .env && docker compose up -d --build
+git clone https://github.com/Sat1n/Pekno.git && cd pekno && cp .env.example .env && docker compose up -d --build
 ```
 
 Open the app at:
