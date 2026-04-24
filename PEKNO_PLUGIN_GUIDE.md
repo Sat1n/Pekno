@@ -14,6 +14,7 @@ Pekno plugins are Python packages that run inside the worker process. The Hub pr
 - Hub and worker both load plugin manifests, but worker executes plugin logic.
 - Manual sync calls `run_plugin_pipeline_task(plugin_id, limit, user_id)`.
 - Single URL parsing calls `parse_single_plugin_item_task(plugin_id, url, user_id, ...)`.
+- AI ingestion runs through `process_new_item_task`; scheduled incremental batches are fanned out by `trigger_ai_sweep_task`.
 
 ## Minimal File Layout
 
@@ -123,6 +124,7 @@ Do not manually define these keys in `settings_schema`; the framework injects th
 - `sync_limit`
 - `auto_sync`
 - `auto_sync_interval`
+- `enable_incremental_ai_sync`
 
 To change defaults, use `framework_defaults`:
 
@@ -133,7 +135,8 @@ To change defaults, use `framework_defaults`:
     "auto_short_summary": false,
     "auto_sync": true,
     "auto_sync_interval": 30,
-    "sync_limit": 50
+    "sync_limit": 50,
+    "enable_incremental_ai_sync": false
   }
 }
 ```
@@ -142,6 +145,8 @@ Setting scopes:
 
 - `system`: Saved under the system scope; non-admin users cannot update system-scoped framework settings.
 - `user`: Saved per user.
+
+`enable_incremental_ai_sync` is system-scoped and defaults to `false`. Plugin authors should not branch on this setting inside plugin code; the Pekno pipeline decides whether to run AI extraction during sync or defer it to the background sweeper.
 
 Supported schema types:
 
@@ -188,8 +193,8 @@ class ExampleBookmarksPlugin(BasePlugin):
             "metadata_extra": {},
         }
 
-    async def extract_text_for_ai(self, ctx: PluginContext, raw_data: dict[str, Any]) -> str:
-        return raw_data.get("description", "")
+async def extract_text_for_ai(self, ctx: PluginContext, raw_data: dict[str, Any]) -> str:
+    return raw_data.get("description", "")
 
     async def parse_single_item(self, url: str, ctx: PluginContext | None = None) -> dict[str, Any]:
         return {
@@ -271,6 +276,7 @@ Rules:
 - Return an empty string if there is nothing useful to summarize.
 - You may enrich `raw_data["metadata_extra"]` here; the pipeline merges it into the final item metadata.
 - Keep network calls bounded and logged.
+- Treat this as the authoritative source-specific extraction hook. Pekno calls it during normal sync, single-item parsing, long summaries, and deferred incremental AI processing.
 
 ### `parse_single_item(url, ctx=None)`
 
@@ -313,6 +319,7 @@ tags: list[str]
 metadata_extra: dict
 auto_short_summary: bool
 source_user_id: str | None
+ai_processing_status: "pending_ai" | "processing" | "completed"
 ```
 
 Pipeline behavior:
@@ -320,7 +327,9 @@ Pipeline behavior:
 - Existing item IDs are skipped during sync.
 - For a syncing user, an existing item is linked to that user via `UserItemStateORM`.
 - After three consecutive existing items, sync exits early as an incremental circuit breaker.
-- Items with text are dispatched to `worker.ingestion.pipeline.process_new_item_task`.
+- With `enable_incremental_ai_sync=false`, new items call `extract_text_for_ai()` during sync, then dispatch to `worker.ingestion.pipeline.process_new_item_task`.
+- With `enable_incremental_ai_sync=true`, sync stores lightweight records as `pending_ai`; the scheduled AI sweeper marks up to 20 records as `processing` and dispatches one `process_new_item_task` per item.
+- Successful ingestion writes `ai_processing_status=completed`; failed AI processing returns the item to `pending_ai` for retry.
 - `metadata_extra["has_long_summary"]` is initialized as `False`.
 
 ## Auto-Sync

@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="./LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-green.svg" /></a>
-  <img alt="Version" src="https://img.shields.io/badge/version-0.1.0-blue.svg" />
+  <img alt="Version" src="https://img.shields.io/badge/version-0.2.0-blue.svg" />
   <img alt="Phase" src="https://img.shields.io/badge/phase-0%20Genesis-8A2BE2.svg" />
   <img alt="Python" src="https://img.shields.io/badge/python-3.13-3776AB.svg" />
   <img alt="Vue" src="https://img.shields.io/badge/frontend-Vue%203%20%2B%20Vite-42b883.svg" />
@@ -37,6 +37,7 @@ It is not just a feed subscription tool: it connects local LLMs through Ollama, 
 - **Vault-style reader**: browse saved knowledge with an Obsidian-inspired reading flow designed for long-term retention and retrieval.
 - **Plugin-driven ingestion**: bring content from GitHub, Bilibili, arXiv, RSS, video platforms, paper sources, and any custom source you can model as a plugin.
 - **Pipeline-first processing**: normalize incoming items, extract readable text, enrich metadata, run OCR/transcription, generate embeddings, and prepare output for humans or agents.
+- **Incremental AI processing**: plugin sync can save lightweight items first and let workers fan out AI extraction, summarization, tagging, and embedding in the background.
 - **Local-first AI pipeline**: use Ollama, Whisper, OCR, and PostgreSQL `pgvector` without sending private content to third-party services by default.
 - **Agent-ready output**: expose clean, structured knowledge through the web UI and MCP instead of forcing agents to scrape fragmented sources again.
 
@@ -48,8 +49,11 @@ The pipeline turns heterogeneous source data into consistent knowledge objects:
 
 - **Fetch**: plugins collect content from platforms, feeds, APIs, or custom sources.
 - **Normalize**: each item becomes a stable Pekno record with source type, title, link, content, tags, metadata, and intent.
-- **Enrich**: workers run text extraction, OCR, transcription, summarization, embeddings, and source-specific hover blocks.
+- **Extract**: plugins provide source-aware `extract_text_for_ai()` logic so Pekno can summarize the real content rather than only the list-card metadata.
+- **Enrich**: workers run OCR, transcription, summarization, tagging, embeddings, and source-specific hover blocks.
 - **Serve**: processed knowledge is available in the dashboard, the vault-style reader, and MCP-compatible agent workflows.
+
+In `0.2.0`, plugin sync supports an administrator-controlled incremental AI mode. When disabled, sync keeps the classic behavior: fetch, extract text, and dispatch AI processing immediately. When enabled, sync stores lightweight records as `pending_ai`; a scheduled sweeper marks batches as `processing` and fans them out as independent worker jobs. This keeps slow plugin content extraction from blocking polling and avoids one long sync task monopolizing the queue.
 
 To build a plugin, start with the [Pekno Plugin Development Guide](./PEKNO_PLUGIN_GUIDE.md). If you use a CLI coding agent, clone this repository first and ask the agent to read `PEKNO_PLUGIN_GUIDE.md` before writing code; that file documents the runtime contract, manifest format, credential rules, framework-injected settings, and worker-side pipeline expectations.
 
@@ -189,7 +193,8 @@ flowchart TB
         Redis[(Redis Queue)]
         Worker[Worker Pipelines]
         Normalize[Normalize Items]
-        Enrich[OCR / Whisper / Metadata]
+        Sweep[AI Sweep / Fan-out]
+        Enrich[Plugin Text Extraction / OCR / Whisper]
         Embed[Embeddings / Summaries]
     end
 
@@ -219,7 +224,7 @@ flowchart TB
 
     Redis --> Worker
     PluginRuntime --> Worker
-    Worker --> Normalize --> Enrich --> Embed --> Postgres
+    Worker --> Normalize --> Sweep --> Enrich --> Embed --> Postgres
     Worker --> Data
     Enrich --> Whisper
     Embed --> Ollama
