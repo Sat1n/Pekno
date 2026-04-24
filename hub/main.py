@@ -179,7 +179,7 @@ async def hybrid_search_api(
     返回格式匹配前端需求：
     - title: 项目标题
     - summary: 项目描述
-    - score: 匹配度分数
+    - score: 搜索时返回 0..1 相关性分数；默认时间线为空
     - source: 来源
     - tags: 标签列表
     - time: 时间描述
@@ -198,7 +198,7 @@ async def hybrid_search_api(
             state_map = await _get_user_item_state_map(current_user["id"], [item.id for item in items])
             # 转换为前端格式
             search_results = []
-            for idx, item in enumerate(items):
+            for item in items:
                 state = state_map.get(item.id)
                 metadata = item.metadata_extra or {}
                 lang = metadata.get("lang")
@@ -229,9 +229,6 @@ async def hybrid_search_api(
                 }
                 source = source_map.get(item.source_type, item.source_type)
                 
-                # 默认分数基于排序位置
-                score = max(0.5, 1.0 - (idx * 0.05))
-                
                 search_results.append(FrontendSearchItem(
                     id=item.id,
                     title=item.title,
@@ -245,7 +242,7 @@ async def hybrid_search_api(
                     source_type=item.source_type,
                     intent=item.intent,
                     metadata_extra=metadata,
-                    score=round(score, 2),
+                    score=None,
                     source=source,
                     tags=tags[:5],
                     time=time_str,
@@ -306,8 +303,8 @@ async def hybrid_search_api(
         }
         source = source_map.get(item.source_type, item.source_type)
         
-        # score：向量分数 + 文本分数
-        score = round(float(score), 4)
+        # score：RRF 只用于排序；接口返回给前端的是 0..1 相关性分数
+        relevance_score = max(0.0, min(1.0, float(score)))
         
         search_results.append(FrontendSearchItem(
             id=item.id,
@@ -322,7 +319,7 @@ async def hybrid_search_api(
             source_type=item.source_type,
             intent=item.intent,
             metadata_extra=metadata,
-            score=round(score, 2),
+            score=round(relevance_score, 4),
             source=source,
             tags=tags[:5],
             time=time_str,

@@ -1,8 +1,5 @@
-from shared.plugins.base import PluginContext
 from shared.plugins.manager import plugin_manager
-from shared.entities import UniversalItem
-from shared.constants import PLATFORM_WHITELIST
-from shared.credentials import get_user_credential, validate_required_credentials
+from shared.entities import AIProcessingStatus, UniversalItem
 from hub.core.notifications import create_notification_for_user
 from hub.core.billing import QuotaExceededException
 from worker.ingestion.pipeline import process_new_item_task
@@ -13,80 +10,66 @@ from shared.database import AsyncSessionLocal
 from shared.models import ItemORM, UserItemStateORM
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
-import datetime
-import re
 import inspect
 from shared.time_utils import now_in_app_timezone_naive
+from worker.plugins.runtime import (
+    MissingPluginCredentialError,
+    build_item_raw_data,
+    build_plugin_context_for_user,
+    close_plugin_context,
+    fallback_text_for_summary,
+    find_plugin_by_source_type,
+)
 
 
-class MissingPluginCredentialError(RuntimeError):
-    pass
+async def _store_lightweight_item(
+    normalized: dict,
+    metadata_extra: dict,
+    *,
+    user_id: str | None,
+    retention_hours: int,
+) -> None:
+    item_id = normalized["id"]
+    now = now_in_app_timezone_naive()
+    metadata = dict(metadata_extra or {})
+    metadata.setdefault("has_long_summary", False)
+    metadata["processing_status"] = AIProcessingStatus.pending_ai.value
 
+    data = {
+        "id": item_id,
+        "title": normalized.get("title", ""),
+        "source_type": normalized["source_type"],
+        "created_at": now,
+        "raw_link": normalized.get("raw_link", "#"),
+        "intent": normalized.get("intent", "article"),
+        "retention_days": retention_hours,
+        "content_text": normalized.get("content_text", ""),
+        "summary": normalized.get("summary") or normalized.get("content_text") or normalized.get("title", ""),
+        "tags": normalized.get("tags") or [],
+        "metadata_extra": metadata,
+        "ai_processing_status": AIProcessingStatus.pending_ai.value,
+        "updated_at": now,
+    }
 
-async def _build_plugin_context_for_user(plugin_id: str, plugin, user_id: str | None):
-    config_dict = {}
-    for key, schema in plugin.manifest.get("settings_schema", {}).items():
-        val = await ConfigManager.get_config(plugin_id, key, user_id=user_id)
-        if val is not None:
-            config_dict[key] = int(val) if schema.get("type") == "integer" else (val == "true" if schema.get("type") == "boolean" else val)
-        else:
-            config_dict[key] = schema.get("default")
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            stmt = insert(ItemORM).values(**data).on_conflict_do_update(
+                index_elements=["id"],
+                set_={k: v for k, v in data.items() if k not in {"id", "created_at"}},
+            )
+            await session.execute(stmt)
 
-    runtime_credentials = {}
-    runtime_env = {}
-    required_credentials = validate_required_credentials(plugin.manifest.get("required_credentials"))
-    for platform in required_credentials:
-        binding_enabled = await ConfigManager.get_config(
-            plugin_id,
-            ConfigKeys.credential_binding(platform),
-            user_id=user_id,
-        )
-        credential = None
-        if binding_enabled == "true" and user_id:
-            credential = await get_user_credential(user_id, platform)
-            if credential is None:
-                raise MissingPluginCredentialError(
-                    f"[{plugin_id}] Missing required global credential for platform '{platform}'"
+            if user_id:
+                link_stmt = insert(UserItemStateORM).values(
+                    user_id=user_id,
+                    item_id=item_id,
+                    is_read=False,
+                    is_watch_later=False,
+                    is_favorited=False,
+                ).on_conflict_do_nothing(
+                    index_elements=["user_id", "item_id"]
                 )
-
-        if credential is None:
-            legacy_key = PLATFORM_WHITELIST[platform].get("legacy_config_key")
-            if legacy_key:
-                legacy_value = await ConfigManager.get_config(plugin_id, legacy_key, user_id=user_id)
-                if legacy_value:
-                    runtime_credentials[platform] = legacy_value
-                    config_key = PLATFORM_WHITELIST[platform].get("config_key")
-                    if config_key and not config_dict.get(config_key):
-                        config_dict[config_key] = legacy_value
-                    continue
-
-        if credential is not None:
-            runtime_credentials[platform] = credential.token_value
-            config_key = PLATFORM_WHITELIST[platform].get("config_key")
-            env_var = PLATFORM_WHITELIST[platform].get("env_var")
-            if config_key and not config_dict.get(config_key):
-                config_dict[config_key] = credential.token_value
-            if env_var:
-                runtime_env[env_var] = credential.token_value
-
-    import httpx
-    http_client = None
-    if plugin_id == "github_stars":
-        from worker.plugins.github.client import GitHubClient
-        token = config_dict.get("token")
-        if not token:
-            raise ValueError(f"[{plugin_id}] Token is not configured and link parsing cannot continue")
-        http_client = GitHubClient(token)
-    else:
-        http_client = httpx.AsyncClient(timeout=15.0)
-
-    return PluginContext(
-        config=config_dict,
-        http_client=http_client,
-        logger=worker_log,
-        credentials=runtime_credentials,
-        env=runtime_env,
-    )
+                await session.execute(link_stmt)
 
 @broker.task(task_name="run_plugin_pipeline")
 async def run_plugin_pipeline_task(plugin_id: str, limit: int = None, user_id: str | None = None):
@@ -113,12 +96,14 @@ async def run_plugin_pipeline_task(plugin_id: str, limit: int = None, user_id: s
     await ConfigManager.set_config(plugin_id, ConfigKeys.LAST_SYNC_RESULT, "running", user_id=user_id)
     await ConfigManager.set_config(plugin_id, ConfigKeys.LAST_SYNC_ERROR, "", user_id=user_id)
 
+    ctx = None
     try:
-        ctx = await _build_plugin_context_for_user(plugin_id, plugin, user_id)
+        ctx = await build_plugin_context_for_user(plugin_id, plugin, user_id)
         config_dict = dict(ctx.config)
 
         if limit is not None:
             config_dict["sync_limit"] = limit
+        incremental_ai_sync = bool(config_dict.get(ConfigKeys.ENABLE_INCREMENTAL_AI_SYNC, False))
 
         raw_items = await plugin.fetch_data(ctx)
         if not raw_items:
@@ -173,24 +158,38 @@ async def run_plugin_pipeline_task(plugin_id: str, limit: int = None, user_id: s
 
                 cache_hit_count = 0
 
-                ai_text = await plugin.extract_text_for_ai(ctx, raw_item)
                 metadata_extra = raw_item.get('metadata_extra', {})
                 final_metadata = normalized.get("metadata_extra", {})
                 final_metadata.update(metadata_extra)
                 final_metadata["has_long_summary"] = False
+
+                if incremental_ai_sync:
+                    await _store_lightweight_item(
+                        normalized,
+                        final_metadata,
+                        user_id=user_id,
+                        retention_hours=int(config_dict.get("retention_hours", normalized.get("retention_hours", 168))),
+                    )
+                    worker_log.info(f"📥 [{plugin_id}] Stored lightweight item for AI sweep: {normalized['title']}")
+                    continue
+
+                ai_text = await plugin.extract_text_for_ai(ctx, raw_item)
+                if ai_text and ai_text.strip():
+                    final_metadata["ai_text_extracted"] = True
 
                 item = UniversalItem(
                     id=normalized["id"],
                     title=normalized["title"],
                     source_type=normalized["source_type"],
                     raw_link=normalized["raw_link"],
-                    content_text=normalized.get("content_text", ""),
+                    content_text=ai_text.strip() if ai_text and ai_text.strip() else normalized.get("content_text", ""),
                     intent=normalized.get("intent", "article"),
                     retention_hours=int(config_dict.get("retention_hours", normalized.get("retention_hours", 168))),
                     capabilities=["summarize"] if normalized.get("content_text") or ai_text else [],
                     metadata_extra=final_metadata,
                     auto_short_summary=bool(config_dict.get("auto_short_summary", normalized.get("auto_short_summary", False))),
                     source_user_id=user_id,
+                    ai_processing_status=AIProcessingStatus.processing,
                 )
 
                 worker_log.info(f"📤 [{plugin_id}] Dispatching item to ingestion pipeline: {item.title}")
@@ -229,6 +228,8 @@ async def run_plugin_pipeline_task(plugin_id: str, limit: int = None, user_id: s
                 related_plugin_id=plugin_id,
             )
     finally:
+        if ctx is not None:
+            await close_plugin_context(ctx)
         now_iso = now_in_app_timezone_naive().isoformat()
         await ConfigManager.set_config(plugin_id, ConfigKeys.SYNC_STATUS, "idle", user_id=user_id)
         await ConfigManager.set_config(plugin_id, ConfigKeys.LAST_SYNC_TIME, now_iso, user_id=user_id)
@@ -254,7 +255,7 @@ async def parse_single_plugin_item_task(
         return
 
     try:
-        ctx = await _build_plugin_context_for_user(plugin_id, plugin, user_id)
+        ctx = await build_plugin_context_for_user(plugin_id, plugin, user_id)
     except MissingPluginCredentialError as e:
         worker_log.warning(f"Skipping single-item parsing due to missing credential: {e}")
         raise ValueError(str(e))
@@ -279,6 +280,8 @@ async def parse_single_plugin_item_task(
         final_metadata = dict(normalized.get("metadata_extra") or {})
         final_metadata.update(raw_metadata)
         final_metadata["has_long_summary"] = False
+        if ai_text and ai_text.strip():
+            final_metadata["ai_text_extracted"] = True
         if preferred_locale:
             final_metadata["preferred_locale"] = preferred_locale
 
@@ -291,13 +294,14 @@ async def parse_single_plugin_item_task(
             title=normalized["title"],
             source_type=normalized["source_type"],
             raw_link=normalized["raw_link"],
-            content_text=normalized.get("content_text", ""),
+            content_text=ai_text.strip() if ai_text and ai_text.strip() else normalized.get("content_text", ""),
             intent=normalized.get("intent", "article"),
             retention_hours=retention_value,
             capabilities=["summarize"] if normalized.get("content_text") or ai_text else [],
             metadata_extra=final_metadata,
             auto_short_summary=bool(ctx.config.get("auto_short_summary", normalized.get("auto_short_summary", False))),
             source_user_id=user_id,
+            ai_processing_status=AIProcessingStatus.processing,
         )
 
         worker_log.info(f"📤 [{plugin_id}] Dispatching single parsed item to ingestion pipeline: {item.title}")
@@ -306,9 +310,7 @@ async def parse_single_plugin_item_task(
         worker_log.error(f"❌ [{plugin_id}] Single-item parsing task failed: {e}")
         raise
     finally:
-        close_method = getattr(ctx.http, "aclose", None)
-        if close_method:
-            await close_method()
+        await close_plugin_context(ctx)
 
 
 @broker.task(task_name="summarize_repo")
@@ -319,9 +321,8 @@ async def summarize_repo_task(
     preferred_locale: str | None = None,
 ):
     """
-    Backward-compatible AI summary task entrypoint kept for frontend compatibility.
+    Backward-compatible task entrypoint for long-form item summaries.
     """
-    plugin_id = "github_stars"
     worker_log.info(f"🚀 Starting AI summary task: {task_id} for item {item_id}")
     
     try:
@@ -329,39 +330,33 @@ async def summarize_repo_task(
             result = await session.execute(ItemORM.__table__.select().where(ItemORM.id == item_id))
             item = result.fetchone()
             if not item: return
-                
-        plugin = plugin_manager.get_plugin(plugin_id)
-        if not plugin: return
 
-        token = await ConfigManager.get_config(plugin_id, ConfigKeys.TOKEN)
-        from worker.plugins.github.client import GitHubClient
-        ctx = PluginContext(
-            config={},
-            http_client=GitHubClient(token) if token else None,
-            logger=worker_log
-        )
-        
-        repo_match = re.search(r'github\.com/([^/]+)/([^/]+)', item.raw_link or "")
-        raw_data = {
-            "name": repo_match.group(2) if repo_match else item.title,
-            "owner": {"login": repo_match.group(1) if repo_match else ""},
-            "description": item.content_text,
-            "metadata_extra": item.metadata_extra or {}
-        }
+        plugin_id, plugin = await find_plugin_by_source_type(item.source_type)
+        raw_data = build_item_raw_data(item)
+        text_to_summarize = ""
 
-        if item.source_type == "github_star" and repo_match:
-            text_to_summarize = await plugin.extract_text_for_ai(ctx, raw_data)
-        else:
-            text_to_summarize = "\n\n".join(
-                part for part in [
-                    f"标题：{item.title}" if item.title else "",
-                    f"简介：{item.content_text or item.summary}" if (item.content_text or item.summary) else "",
-                ]
-                if part
-            )
-            if not text_to_summarize.strip():
-                worker_log.info(f"⏭️ Skipping AI summary because the item has no summarizable text: {item_id}")
-                return
+        if plugin_id and plugin:
+            ctx = None
+            try:
+                ctx = await build_plugin_context_for_user(plugin_id, plugin, user_id)
+                text_to_summarize = await plugin.extract_text_for_ai(ctx, raw_data)
+            except Exception as exc:
+                worker_log.warning(
+                    "⚠️ Plugin AI text extraction failed; falling back to stored content. "
+                    "item_id=%s plugin=%s error=%s",
+                    item_id,
+                    plugin_id,
+                    exc,
+                )
+            finally:
+                if ctx is not None:
+                    await close_plugin_context(ctx)
+
+        if not text_to_summarize.strip():
+            text_to_summarize = fallback_text_for_summary(item)
+        if not text_to_summarize.strip():
+            worker_log.info(f"⏭️ Skipping AI summary because the item has no summarizable text: {item_id}")
+            return
         
         from hub.core.llm.service import LLMManager
         ai = LLMManager()
@@ -374,6 +369,8 @@ async def summarize_repo_task(
             new_metadata_extra.update(raw_data.get("metadata_extra", {}))
             new_metadata_extra["has_long_summary"] = True
             new_metadata_extra["long_summary"] = summary
+            if plugin_id:
+                new_metadata_extra["summary_plugin_id"] = plugin_id
             
             await session.execute(
                 ItemORM.__table__.update()

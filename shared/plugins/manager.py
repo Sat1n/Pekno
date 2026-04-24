@@ -44,6 +44,7 @@ class PluginManager:
             "auto_sync",
             "auto_sync_interval",
             "auto_short_summary",
+            "enable_incremental_ai_sync",
         ):
             settings_schema.pop(legacy_key, None)
 
@@ -83,6 +84,13 @@ class PluginManager:
             "scope": "system",
             "default": self._get_framework_default(normalized, "auto_sync_interval", 60),
             "description": "自动同步开启后，按此分钟间隔巡检",
+        }
+        settings_schema["enable_incremental_ai_sync"] = {
+            "type": "boolean",
+            "label": "启用增量 AI 处理",
+            "scope": "system",
+            "default": self._get_framework_default(normalized, "enable_incremental_ai_sync", False),
+            "description": "开启后同步阶段只保存轻量信息，AI 分析由后台扫街任务分批处理。",
         }
 
         normalized["settings_schema"] = settings_schema

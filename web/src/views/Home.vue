@@ -24,7 +24,7 @@ import {
   SheetHeader,
   SheetTitle
 } from '@/components/ui/sheet'
-import { Github, Tv, FileText, MoreVertical, Sparkles, Clock3, Clock4, ExternalLink, Trash2, Star, Loader2, Download, X, Upload, Link2, Heart, HeartOff } from 'lucide-vue-next'
+import { Github, Tv, FileText, MoreVertical, Sparkles, Clock3, Clock4, ExternalLink, Trash2, Star, Loader2, Download, X, Upload, Link2, Heart, HeartOff, UserRound, ArrowUp } from 'lucide-vue-next'
 import { API_BASE_URL, getItems, search, summarizeItem, getItemSummaryStatus, getStoredAuthUser, toggleItemWatchLater, toggleItemFavorite, markItemsReadBatch, getActivePlugins, getParsePlugins, getHoverBlocks, uploadItem, parseItemUrl, resolveApiErrorMessage, type RawItem, type SearchResult, type ActivePlugin, type HoverResponse, type UploadDedupResponse } from '@/lib/api'
 import HoverPreview from '@/components/HoverPreview.vue'
 import { useToast } from '@/components/ui/toast/use-toast'
@@ -186,12 +186,50 @@ const selectedTranscriptSegments = computed(() =>
 const hoverTimers = new Map<string, number>()
 const hoverDataMap = ref<Record<string, HoverResponse>>({})
 const activeHoverItemId = ref<string | null>(null)
+const hoverSuppressedItemId = ref<string | null>(null)
+const showBackToTop = ref(false)
+let scrollContainer: HTMLElement | null = null
+
+function extractAuthorName(source: string, metadata: Record<string, any>, item: Record<string, any>) {
+  const candidates = source === 'bilibili'
+    ? [
+        metadata.up_name,
+        metadata.author,
+        item.author,
+      ]
+    : [
+        item.author,
+        metadata.author,
+        metadata.owner,
+        metadata.creator,
+        metadata.uploader,
+        metadata.user_name,
+        metadata.username,
+        metadata.channel,
+      ]
+
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.trim()) {
+      return candidate.trim()
+    }
+  }
+
+  return undefined
+}
+
+function updateBackToTopVisibility() {
+  const currentScrollTop = scrollContainer?.scrollTop ?? 0
+  const viewportHeight = scrollContainer?.clientHeight ?? window.innerHeight
+  showBackToTop.value = currentScrollTop > viewportHeight
+}
 
 function handleCardMouseEnter(item: LocalSearchResult) {
   // 只在 list/grid 模式下，或者你有空间才显示，compact 先不用管
+  if (hoverSuppressedItemId.value === item.id) return
   if (activeHoverItemId.value === item.id) return
   
   const timer = window.setTimeout(async () => {
+    if (hoverSuppressedItemId.value === item.id) return
     activeHoverItemId.value = item.id
     if (!hoverDataMap.value[item.id]) {
       try {
@@ -220,6 +258,36 @@ function handleCardMouseLeave(item: LocalSearchResult) {
   if (activeHoverItemId.value === item.id) {
     activeHoverItemId.value = null
   }
+}
+
+function suppressCardHover(itemId: string) {
+  hoverSuppressedItemId.value = itemId
+  clearHoverTimer(itemId)
+  if (activeHoverItemId.value === itemId) {
+    activeHoverItemId.value = null
+  }
+}
+
+function releaseCardHover(itemId: string) {
+  if (hoverSuppressedItemId.value === itemId) {
+    hoverSuppressedItemId.value = null
+  }
+}
+
+function clearHoverTimer(itemId: string) {
+  const timer = hoverTimers.get(itemId)
+  if (timer) {
+    window.clearTimeout(timer)
+    hoverTimers.delete(itemId)
+  }
+}
+
+function scrollToTop() {
+  if (scrollContainer) {
+    scrollContainer.scrollTo({ top: 0, behavior: 'smooth' })
+    return
+  }
+  window.scrollTo({ top: 0, behavior: 'smooth' })
 }
 
 const { toast } = useToast()
@@ -351,7 +419,7 @@ function toPlainTextSnippet(input?: string | null, fallback: string = '', maxLen
   return `${plainText.slice(0, maxLength).trimEnd()}...`
 }
 
-function normalizeRawItem(item: RawItem, index: number): LocalSearchResult {
+function normalizeRawItem(item: RawItem): LocalSearchResult {
   const metadata = item.metadata_extra || {}
   const source = mapSourceType(item.source_type)
   const tags = Array.isArray(item.tags) && item.tags.length > 0 ? [...item.tags] : []
@@ -362,9 +430,7 @@ function normalizeRawItem(item: RawItem, index: number): LocalSearchResult {
   }
 
   const hasLongSummary = Boolean(metadata.has_long_summary)
-  const authorName = source === 'bilibili'
-    ? (typeof metadata.up_name === 'string' ? metadata.up_name : typeof metadata.author === 'string' ? metadata.author : undefined)
-    : undefined
+  const authorName = extractAuthorName(source, metadata, item)
   const time = source === 'github' && typeof metadata.pushed_at === 'string'
     ? formatRelativeTime(metadata.pushed_at)
     : formatRelativeTime(item.created_at)
@@ -376,7 +442,7 @@ function normalizeRawItem(item: RawItem, index: number): LocalSearchResult {
     long_summary: hasLongSummary ? (typeof metadata.long_summary === 'string' ? metadata.long_summary : item.summary || undefined) : undefined,
     has_long_summary: hasLongSummary,
     cover_url: typeof metadata.cover_url === 'string' ? metadata.cover_url : undefined,
-    score: Math.max(0.5, 1 - index * 0.03),
+    score: null,
     source,
     tags: tags.slice(0, 5).length > 0 ? tags.slice(0, 5) : [t('common.uncategorized')],
     authorName,
@@ -395,8 +461,8 @@ function normalizeRawItem(item: RawItem, index: number): LocalSearchResult {
 }
 
 function normalizeSearchResult(item: SearchResult): LocalSearchResult {
-  const authorName = item.source === 'bilibili' ? item.author : undefined
   const metadataExtra = (item as any).metadata_extra || {}
+  const authorName = extractAuthorName(item.source, metadataExtra, item)
   const hasLongSummary = Boolean(item.has_long_summary)
   const displaySummary = toPlainTextSnippet(item.summary || ((item as any).content_text as string | undefined), t('common.noDescription'))
 
@@ -423,6 +489,12 @@ function getDisplayTags(item: LocalSearchResult) {
   return item.displayTags && item.displayTags.length > 0 ? item.displayTags : item.tags
 }
 
+function formatRelevanceScore(score?: number | null) {
+  if (score === null || score === undefined || Number.isNaN(score)) return ''
+  const normalized = Math.max(0, Math.min(1, score))
+  return `${Math.round(normalized * 100)}%`
+}
+
 function syncSelectedItemFromRoute() {
   const targetItemId = typeof route.query.item === 'string' ? route.query.item : ''
   if (!targetItemId) return
@@ -440,7 +512,7 @@ async function loadData(query: string = '') {
 
     if (isWatchLaterPage.value) {
       const items = await getItems(undefined, 0, { watchLaterOnly: true, source_type: sourceFilter })
-      const normalized = items.map((item, index) => normalizeRawItem(item, index))
+      const normalized = items.map((item) => normalizeRawItem(item))
       initialAnchorItemId.value = null
       if (query.trim()) {
         const keyword = query.trim().toLowerCase()
@@ -465,7 +537,7 @@ async function loadData(query: string = '') {
     }
 
     const items = await getItems(undefined, 0, { source_type: sourceFilter })
-    const normalized = items.map((item, index) => normalizeRawItem(item, index))
+    const normalized = items.map((item) => normalizeRawItem(item))
     initialAnchorItemId.value = normalized.find((item) => item.isRead)?.id ?? null
     searchResults.value = normalized
     syncSelectedItemFromRoute()
@@ -500,6 +572,9 @@ onMounted(async () => {
   flushReadsInterval = window.setInterval(() => {
     void flushPendingReads()
   }, 5000)
+  scrollContainer = document.querySelector('main.custom-scrollbar')
+  scrollContainer?.addEventListener('scroll', updateBackToTopVisibility, { passive: true })
+  updateBackToTopVisibility()
 })
 
 onBeforeUnmount(() => {
@@ -516,6 +591,8 @@ onBeforeUnmount(() => {
     flushReadsInterval = undefined
   }
 
+  scrollContainer?.removeEventListener('scroll', updateBackToTopVisibility)
+  scrollContainer = null
   void flushPendingReads()
 })
 
@@ -808,7 +885,7 @@ async function handleSubmitUpload(autoFavorite: boolean = false) {
       retention_days: retentionDays.value,
       auto_favorite: autoFavorite,
     })
-    const normalized = normalizeRawItem(createdItem, 0)
+    const normalized = normalizeRawItem(createdItem)
     isAddDialogOpen.value = false
     resetAddContentDialog()
     await loadData(searchQuery.value)
@@ -821,7 +898,7 @@ async function handleSubmitUpload(autoFavorite: boolean = false) {
   } catch (error: any) {
     if (error?.response?.status === 409 && error?.response?.data?.deduplicated) {
       const dedup = error.response.data as UploadDedupResponse
-      const normalized = normalizeRawItem(dedup.item, 0)
+      const normalized = normalizeRawItem(dedup.item)
       isAddDialogOpen.value = false
       resetAddContentDialog()
       await loadData(searchQuery.value)
@@ -1150,13 +1227,19 @@ watch(isAddDialogOpen, (isOpen) => {
           </div>
         </div>
 
-        <div class="absolute top-2 right-2 z-10" @click.stop>
+        <div
+          class="absolute top-2 right-2 z-20"
+          @click.stop
+          @mouseenter.stop="suppressCardHover(item.id)"
+          @mouseleave.stop="releaseCardHover(item.id)"
+        >
           <DropdownMenu>
             <DropdownMenuTrigger as-child>
               <Button
                 variant="ghost"
                 size="icon"
                 class="h-8 w-8 bg-background/80 backdrop-blur-sm hover:bg-background"
+                @click.stop
               >
                 <MoreVertical class="h-4 w-4" />
               </Button>
@@ -1213,11 +1296,6 @@ watch(isAddDialogOpen, (isOpen) => {
               {{ item.title }}
             </CardTitle>
 
-            <div v-if="item.source === 'bilibili' && item.authorName && layoutMode !== 'compact'" class="mt-2 flex items-center gap-2 text-sm text-sky-700 dark:text-sky-300">
-              <Tv class="w-3.5 h-3.5 shrink-0" />
-              <span class="truncate font-medium">{{ item.authorName }}</span>
-            </div>
-
             <p v-if="layoutMode === 'list'" class="text-muted-foreground leading-relaxed text-base mt-3 line-clamp-3">
               {{ item.summary }}
             </p>
@@ -1228,24 +1306,39 @@ watch(isAddDialogOpen, (isOpen) => {
         </CardHeader>
 
         <CardContent v-if="layoutMode !== 'compact'" class="px-5 pb-5 pt-0 mt-auto">
-          <div class="flex items-center justify-between border-t border-border/40 pt-4 gap-3">
-            <div class="flex gap-2 flex-wrap flex-1">
+          <div class="flex items-center justify-between border-t border-border/40 pt-4 gap-3 min-w-0">
+            <div class="flex min-w-0 flex-1 gap-2 flex-wrap">
               <Badge
                 v-for="tag in getDisplayTags(item)"
                 :key="tag"
                 variant="secondary"
-                class="bg-muted hover:bg-muted/80 text-xs font-normal"
+                class="min-w-0 max-w-[8.5rem] justify-start bg-muted hover:bg-muted/80 text-xs font-normal"
+                :title="tag"
               >
-                {{ tag }}
+                <span class="min-w-0 truncate">{{ tag }}</span>
               </Badge>
             </div>
 
-            <div class="flex items-center gap-2 text-muted-foreground flex-shrink-0">
-              <Badge variant="outline" class="font-mono px-1.5 py-0 text-[10px] h-5 border-primary/20 bg-primary/5 text-primary">
-                {{ Math.floor(item.score * 100) }}%
-              </Badge>
-              <component :is="getSourceIcon(item.source)" class="w-4 h-4" :title="t('home.source')" />
-              <span class="text-xs font-medium whitespace-nowrap">{{ item.time }}</span>
+            <div class="flex min-w-0 max-w-[48%] flex-shrink-0 flex-col items-end gap-1 text-muted-foreground">
+              <div
+                v-if="item.authorName"
+                class="inline-flex min-w-0 max-w-full items-center gap-1.5"
+                :title="item.authorName"
+              >
+                <UserRound class="h-3.5 w-3.5 shrink-0" />
+                <span class="truncate text-xs font-medium">{{ item.authorName }}</span>
+              </div>
+              <div class="flex min-w-0 items-center justify-end gap-2">
+                <Badge
+                  v-if="item.score !== null && item.score !== undefined"
+                  variant="outline"
+                  class="h-5 px-1.5 py-0 font-mono text-[10px] border-primary/20 bg-primary/5 text-primary"
+                >
+                  {{ formatRelevanceScore(item.score) }}
+                </Badge>
+                <component :is="getSourceIcon(item.source)" class="h-4 w-4 shrink-0" :title="t('home.source')" />
+                <span class="truncate text-xs font-medium">{{ item.time }}</span>
+              </div>
             </div>
           </div>
         </CardContent>
@@ -1257,6 +1350,25 @@ watch(isAddDialogOpen, (isOpen) => {
       <div class="text-muted-foreground text-lg">{{ t('home.emptyTitle') }}</div>
       <p class="text-muted-foreground/60 text-sm mt-2">{{ t('home.emptyDescription') }}</p>
     </div>
+
+    <transition
+      enter-active-class="transition-all duration-300 ease-out"
+      enter-from-class="translate-y-3 opacity-0"
+      enter-to-class="translate-y-0 opacity-100"
+      leave-active-class="transition-all duration-200 ease-in"
+      leave-from-class="translate-y-0 opacity-100"
+      leave-to-class="translate-y-3 opacity-0"
+    >
+      <Button
+        v-if="showBackToTop"
+        size="icon"
+        class="fixed bottom-6 right-6 z-40 h-11 w-11 rounded-full shadow-lg"
+        :title="t('home.backToTop')"
+        @click="scrollToTop"
+      >
+        <ArrowUp class="h-4 w-4" />
+      </Button>
+    </transition>
   </MainLayout>
 
   <Sheet v-model:open="isSheetOpen">

@@ -137,7 +137,7 @@ export interface SearchResult {
   source_type?: string
   intent?: string
   metadata_extra?: Record<string, any>
-  score: number
+  score?: number | null
   source: string
   tags: string[]
   time: string

@@ -126,6 +126,18 @@ The production Docker entrypoint uses `docker-entrypoint.sh` and `scripts/smart_
 uv run alembic revision --autogenerate -m "describe your schema change"
 ```
 
+- **Architecture Boundaries**
+  - Hub is the FastAPI control plane: API routing, authorization, database state changes, and queue dispatch.
+  - Worker owns heavy processing: plugin execution, `extract_text_for_ai()`, OCR/transcription, summaries, tags, embeddings, and media/document AI work.
+  - Scheduler should stay lightweight. It triggers auto-sync, heartbeat/cleanup, and AI sweep/fan-out jobs, but it should not fetch remote content or run model workloads.
+  - Redis/Taskiq is the async boundary. Long-running work should be decomposed into worker tasks when practical instead of blocking a single scheduler trigger.
+
+- **Plugin and AI Processing**
+  - Plugin authors should implement source-aware `extract_text_for_ai()`; Pekno uses that hook for normal sync, single-item parsing, long summaries, and incremental AI processing.
+  - `enable_incremental_ai_sync` is a system-scoped framework setting. Plugin code should not branch on it directly.
+  - Items use `ai_processing_status` values `pending_ai`, `processing`, and `completed`. Schema changes around this state must include Alembic migrations.
+  - Keep user-uploaded document/media processing separate from plugin sync unless a shared worker helper explicitly supports both paths.
+
 - **Code Style**
   - Keep code readable, typed where practical, and boring in the best way.
   - Use Black/Ruff-compatible formatting for Python code.
@@ -139,6 +151,21 @@ pre-commit run --all-files
 - **Frontend Text**
   - Do not hardcode user-facing UI strings directly in Vue components.
   - Use i18n keys and update both `web/src/i18n/en.json` and `web/src/i18n/zh-CN.json`.
+
+## Testing Notes
+
+For focused backend changes, prefer running the smallest meaningful pytest set first, then expand if the change crosses subsystem boundaries:
+
+```bash
+uv run pytest tests/test_plugin_summary_pipeline.py tests/test_search_relevance.py
+```
+
+For schema, plugin, worker, or scheduler changes, include migration checks and at least one worker-facing test or compile check:
+
+```bash
+uv run python -m compileall shared hub worker
+git diff --check
+```
 
 ## GitHub Flow
 

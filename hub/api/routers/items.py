@@ -20,6 +20,7 @@ from hub.core.security import get_current_user
 from shared.database import AsyncSessionLocal
 from shared.logger import hub_log
 from shared.locale import normalize_preferred_locale
+from shared.entities import AIProcessingStatus
 from shared.models import ItemORM, UserItemStateORM, VaultCategoryORM
 from shared.plugins.base import BasePlugin
 from shared.plugins.manager import plugin_manager
@@ -335,6 +336,7 @@ async def _store_user_item(item_data: Dict[str, Any], user_id: str, *, retention
                 metadata_extra=metadata_extra,
                 file_hash=item_data.get("file_hash"),
                 local_asset_path=item_data.get("local_asset_path"),
+                ai_processing_status=AIProcessingStatus.completed.value,
             ).on_conflict_do_update(
                 index_elements=["id"],
                 set_={
@@ -350,6 +352,7 @@ async def _store_user_item(item_data: Dict[str, Any], user_id: str, *, retention
                     "metadata_extra": metadata_extra,
                     "file_hash": item_data.get("file_hash"),
                     "local_asset_path": item_data.get("local_asset_path"),
+                    "ai_processing_status": AIProcessingStatus.completed.value,
                 },
             )
             await session.execute(item_stmt)

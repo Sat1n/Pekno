@@ -12,13 +12,18 @@
 - **Hub:** `FastAPI` service for API routing, database state changes, and authorization checks.
   - Do not run heavy ML workloads here.
   - Do not perform blocking I/O in request handlers.
+  - User uploads and supported document/media entrypoints may create records and enqueue worker jobs, but Hub should not perform OCR, transcription, embeddings, or long summaries inline.
 - **Worker:** `Taskiq` workflow node for async processing.
   - Owns multimodal model execution such as `Whisper` / `ctranslate2`.
   - Owns plugin execution and plugin sandbox boundaries.
   - CPU and CUDA execution modes are selected and adapted here.
+  - Owns plugin `fetch_data`, `normalize_item`, `extract_text_for_ai`, single-item parsing, ingestion, tagging, summarization, embeddings, and long summary tasks.
 - **Scheduler:** `Taskiq Beat` node.
-  - Only triggers scheduled polling jobs such as plugin `Auto-sync`.
+  - Only triggers scheduled polling jobs such as plugin `Auto-sync`, TTL cleanup, heartbeat checks, and AI sweep/fan-out.
   - Do not put processing, network-heavy ingestion, or ML work here.
+- **Redis / Taskiq Queue:** async work boundary between Hub, Scheduler, and Worker.
+  - A long-running worker task occupies one worker slot; later scheduled tasks remain queued until a worker can consume them.
+  - Scheduler should enqueue lightweight trigger tasks only. Worker tasks may fan out additional per-item jobs when needed.
 - **Nginx:** unified traffic gateway.
   - Serves frontend static files.
   - Reverse proxies `/api`.
@@ -26,6 +31,15 @@
 - **Frontend:** `Vue 3` + `Vite`.
   - Fully separated from backend runtime concerns.
   - Communicates with Hub through HTTP APIs and MCP-facing endpoints.
+
+## 0.2.0 Processing Notes
+
+- `ItemORM.ai_processing_status` tracks AI processing state: `pending_ai`, `processing`, `completed`.
+- Plugin sync has an admin-controlled system setting `enable_incremental_ai_sync`:
+  - `false`: preserve classic behavior; sync fetches data, calls the plugin's `extract_text_for_ai`, then dispatches ingestion.
+  - `true`: sync stores lightweight item data first and marks items `pending_ai`; a scheduled sweeper later marks batches `processing` and fans out one `process_new_item_task` per item.
+- For third-party plugins, always use the plugin's own `extract_text_for_ai` for source-specific AI text. Do not replace it with generic title/URL extraction unless no plugin can be resolved.
+- User-uploaded documents and media may use separate document/media ingestion paths. Keep those paths distinct from plugin sync unless a shared helper is explicitly designed for both.
 
 ## Core Development Conventions
 

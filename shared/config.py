@@ -24,6 +24,7 @@ class ConfigKeys:
     SYNC_STATUS = "sync_status"
     AUTO_SHORT_SUMMARY = "auto_short_summary"
     RETENTION_HOURS = "retention_hours"
+    ENABLE_INCREMENTAL_AI_SYNC = "enable_incremental_ai_sync"
 
     @staticmethod
     def credential_binding(platform: str) -> str:
@@ -43,6 +44,7 @@ SYSTEM_SCOPED_CONFIG_KEYS = {
     ConfigKeys.SYNC_STATUS,
     ConfigKeys.AUTO_SHORT_SUMMARY,
     ConfigKeys.RETENTION_HOURS,
+    ConfigKeys.ENABLE_INCREMENTAL_AI_SYNC,
 }
 def is_running_in_container() -> bool:
     return os.getenv("DOTNET_RUNNING_IN_CONTAINER") == "true" or os.path.exists("/.dockerenv")

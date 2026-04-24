@@ -1,11 +1,14 @@
 from sqlalchemy import delete, select
 from shared.database import AsyncSessionLocal
+from shared.entities import AIProcessingStatus, UniversalItem
 from shared.models import ConfigORM, ItemORM, PluginRegistryORM, UserItemStateORM
 from datetime import datetime, timedelta
 from worker.broker import broker
 from shared.logger import worker_log
 from shared.config import ConfigManager, ConfigKeys
 from worker.plugins.pipeline import run_plugin_pipeline_task
+from worker.ingestion.pipeline import process_new_item_task
+from worker.plugins.runtime import find_plugin_by_source_type
 from shared.credentials import get_user_credential, validate_required_credentials
 from shared.plugins.manager import plugin_manager
 from shared.time_utils import get_app_timezone, now_in_app_timezone_naive
@@ -244,3 +247,82 @@ async def system_ttl_cleanup_task():
         f"🧹 [TTL Cleanup] Scan started. Next update at {next_cleanup_at.strftime('%Y-%m-%d %H:%M:%S')}"
     )
     await cleanup_expired_items()
+
+
+@broker.task(
+    task_name="trigger_ai_sweep",
+    schedule=[{"cron": "*/5 * * * *"}],
+)
+async def trigger_ai_sweep_task(limit: int = 20):
+    worker_log.info("🧠 AI sweep started. Looking for pending lightweight items.")
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(ItemORM)
+            .where(ItemORM.ai_processing_status == AIProcessingStatus.pending_ai.value)
+            .order_by(ItemORM.created_at.asc())
+            .limit(limit)
+        )
+        items = result.scalars().all()
+
+        if not items:
+            worker_log.info("🧠 AI sweep finished. No pending items found.")
+            return
+
+        item_ids = [item.id for item in items]
+        await session.execute(
+            ItemORM.__table__.update()
+            .where(ItemORM.id.in_(item_ids))
+            .values(
+                ai_processing_status=AIProcessingStatus.processing.value,
+                updated_at=now_in_app_timezone_naive(),
+            )
+        )
+        await session.commit()
+
+    dispatched_count = 0
+    for item in items:
+        user_id = await _resolve_item_user_id(item.id)
+        plugin_id, plugin = await find_plugin_by_source_type(item.source_type)
+        auto_short_summary = True
+        if plugin_id and plugin:
+            auto_short_summary = (
+                await _get_plugin_setting(
+                    plugin_id,
+                    ConfigKeys.AUTO_SHORT_SUMMARY,
+                    "true",
+                    user_id=user_id,
+                )
+            ) == "true"
+
+        universal_item = UniversalItem(
+            id=item.id,
+            title=item.title,
+            source_type=item.source_type,
+            created_at=item.created_at,
+            raw_link=item.raw_link,
+            intent=item.intent,
+            retention_hours=item.retention_days,
+            capabilities=["summarize"],
+            content_text=item.content_text,
+            summary=item.summary,
+            tags=list(item.tags or []),
+            metadata_extra=dict(item.metadata_extra or {}),
+            auto_short_summary=auto_short_summary,
+            source_user_id=user_id,
+            ai_processing_status=AIProcessingStatus.processing,
+        )
+        await process_new_item_task.kiq(universal_item.model_dump(mode="json"))
+        dispatched_count += 1
+
+    worker_log.info("🧠 AI sweep finished. Dispatched %s processing tasks.", dispatched_count)
+
+
+async def _resolve_item_user_id(item_id: str) -> str | None:
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(UserItemStateORM.user_id)
+            .where(UserItemStateORM.item_id == item_id)
+            .order_by(UserItemStateORM.updated_at.asc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()

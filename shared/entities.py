@@ -17,6 +17,11 @@ class ItemStatus(str, Enum):
     watch_later = "watch_later"
     archived = "archived"
 
+class AIProcessingStatus(str, Enum):
+    pending_ai = "pending_ai"
+    processing = "processing"
+    completed = "completed"
+
 class ItemRetention(str, Enum):
     PERMANENT = "permanent"
     TRANSIENT = "transient" # 临时
@@ -44,3 +49,4 @@ class UniversalItem(BaseModel):
     metadata_extra: Dict[str, Any] = Field(default_factory=dict)
     auto_short_summary: bool = False
     source_user_id: Optional[str] = None
+    ai_processing_status: AIProcessingStatus = AIProcessingStatus.completed
