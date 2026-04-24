@@ -88,6 +88,53 @@ async def _build_plugin_context_for_user(plugin_id: str, plugin, user_id: str | 
         env=runtime_env,
     )
 
+
+async def _find_plugin_by_source_type(source_type: str):
+    if not plugin_manager.plugins:
+        async with AsyncSessionLocal() as session:
+            await plugin_manager.load_enabled_plugins(session)
+
+    for plugin_id, plugin in plugin_manager.plugins.items():
+        manifest = getattr(plugin, "_manifest", {}) or plugin.manifest or {}
+        if manifest.get("source_type") == source_type or plugin_id == source_type:
+            return plugin_id, plugin
+
+    return None, None
+
+
+def _build_summary_raw_data(item) -> dict:
+    metadata = dict(item.metadata_extra or {})
+    raw_data = {
+        "id": item.id,
+        "title": item.title,
+        "name": item.title,
+        "raw_link": item.raw_link,
+        "url": item.raw_link,
+        "source_type": item.source_type,
+        "intent": item.intent,
+        "description": item.content_text or item.summary or "",
+        "content_text": item.content_text or "",
+        "summary": item.summary or "",
+        "metadata_extra": metadata,
+    }
+
+    repo_match = re.search(r'github\.com/([^/]+)/([^/]+)', item.raw_link or "")
+    if repo_match:
+        raw_data["owner"] = {"login": repo_match.group(1)}
+        raw_data["name"] = repo_match.group(2)
+
+    return raw_data
+
+
+def _fallback_text_for_summary(item) -> str:
+    return "\n\n".join(
+        part for part in [
+            f"标题：{item.title}" if item.title else "",
+            f"简介：{item.content_text or item.summary}" if (item.content_text or item.summary) else "",
+        ]
+        if part
+    ).strip()
+
 @broker.task(task_name="run_plugin_pipeline")
 async def run_plugin_pipeline_task(plugin_id: str, limit: int = None, user_id: str | None = None):
     """
@@ -319,9 +366,8 @@ async def summarize_repo_task(
     preferred_locale: str | None = None,
 ):
     """
-    Backward-compatible AI summary task entrypoint kept for frontend compatibility.
+    Backward-compatible task entrypoint for long-form item summaries.
     """
-    plugin_id = "github_stars"
     worker_log.info(f"🚀 Starting AI summary task: {task_id} for item {item_id}")
     
     try:
@@ -329,39 +375,35 @@ async def summarize_repo_task(
             result = await session.execute(ItemORM.__table__.select().where(ItemORM.id == item_id))
             item = result.fetchone()
             if not item: return
-                
-        plugin = plugin_manager.get_plugin(plugin_id)
-        if not plugin: return
 
-        token = await ConfigManager.get_config(plugin_id, ConfigKeys.TOKEN)
-        from worker.plugins.github.client import GitHubClient
-        ctx = PluginContext(
-            config={},
-            http_client=GitHubClient(token) if token else None,
-            logger=worker_log
-        )
-        
-        repo_match = re.search(r'github\.com/([^/]+)/([^/]+)', item.raw_link or "")
-        raw_data = {
-            "name": repo_match.group(2) if repo_match else item.title,
-            "owner": {"login": repo_match.group(1) if repo_match else ""},
-            "description": item.content_text,
-            "metadata_extra": item.metadata_extra or {}
-        }
+        plugin_id, plugin = await _find_plugin_by_source_type(item.source_type)
+        raw_data = _build_summary_raw_data(item)
+        text_to_summarize = ""
 
-        if item.source_type == "github_star" and repo_match:
-            text_to_summarize = await plugin.extract_text_for_ai(ctx, raw_data)
-        else:
-            text_to_summarize = "\n\n".join(
-                part for part in [
-                    f"标题：{item.title}" if item.title else "",
-                    f"简介：{item.content_text or item.summary}" if (item.content_text or item.summary) else "",
-                ]
-                if part
-            )
-            if not text_to_summarize.strip():
-                worker_log.info(f"⏭️ Skipping AI summary because the item has no summarizable text: {item_id}")
-                return
+        if plugin_id and plugin:
+            ctx = None
+            try:
+                ctx = await _build_plugin_context_for_user(plugin_id, plugin, user_id)
+                text_to_summarize = await plugin.extract_text_for_ai(ctx, raw_data)
+            except Exception as exc:
+                worker_log.warning(
+                    "⚠️ Plugin AI text extraction failed; falling back to stored content. "
+                    "item_id=%s plugin=%s error=%s",
+                    item_id,
+                    plugin_id,
+                    exc,
+                )
+            finally:
+                if ctx is not None:
+                    close_method = getattr(ctx.http, "aclose", None)
+                    if close_method:
+                        await close_method()
+
+        if not text_to_summarize.strip():
+            text_to_summarize = _fallback_text_for_summary(item)
+        if not text_to_summarize.strip():
+            worker_log.info(f"⏭️ Skipping AI summary because the item has no summarizable text: {item_id}")
+            return
         
         from hub.core.llm.service import LLMManager
         ai = LLMManager()
@@ -374,6 +416,8 @@ async def summarize_repo_task(
             new_metadata_extra.update(raw_data.get("metadata_extra", {}))
             new_metadata_extra["has_long_summary"] = True
             new_metadata_extra["long_summary"] = summary
+            if plugin_id:
+                new_metadata_extra["summary_plugin_id"] = plugin_id
             
             await session.execute(
                 ItemORM.__table__.update()
