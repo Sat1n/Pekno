@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from worker.plugins.pipeline import _build_summary_raw_data, _fallback_text_for_summary
+from worker.plugins.runtime import build_item_raw_data, fallback_text_for_summary
 
 
 def test_build_summary_raw_data_preserves_generic_item_fields():
@@ -15,7 +15,7 @@ def test_build_summary_raw_data_preserves_generic_item_fields():
         metadata_extra={"foo": "bar"},
     )
 
-    raw_data = _build_summary_raw_data(item)
+    raw_data = build_item_raw_data(item)
 
     assert raw_data["id"] == "item-1"
     assert raw_data["title"] == "Example"
@@ -38,7 +38,7 @@ def test_build_summary_raw_data_adds_github_owner_shape():
         metadata_extra={},
     )
 
-    raw_data = _build_summary_raw_data(item)
+    raw_data = build_item_raw_data(item)
 
     assert raw_data["owner"] == {"login": "openai"}
     assert raw_data["name"] == "example"
@@ -47,4 +47,4 @@ def test_build_summary_raw_data_adds_github_owner_shape():
 def test_fallback_text_for_summary_uses_stored_content():
     item = SimpleNamespace(title="Example", content_text="Body", summary="Summary")
 
-    assert _fallback_text_for_summary(item) == "标题：Example\n\n简介：Body"
+    assert fallback_text_for_summary(item) == "标题：Example\n\n简介：Body"

@@ -23,6 +23,7 @@ class ItemORM(Base):
     raw_link: Mapped[str] = mapped_column(String)
     intent: Mapped[str] = mapped_column(String)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=now_in_app_timezone_naive, onupdate=now_in_app_timezone_naive)
+    ai_processing_status: Mapped[str] = mapped_column(String, default="completed", server_default="completed", index=True)
     file_hash: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     local_asset_path: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 

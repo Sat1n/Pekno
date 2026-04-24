@@ -1,4 +1,4 @@
-from shared.entities import UniversalItem
+from shared.entities import AIProcessingStatus, UniversalItem
 from shared.logger import worker_log
 from worker.broker import broker
 from shared.database import AsyncSessionLocal  # 导入会话工厂
@@ -6,6 +6,13 @@ from shared.models import ItemORM, UserItemStateORM     # 导入数据库模型
 from sqlalchemy.dialects.postgresql import insert
 from hub.core.billing import QuotaExceededException
 from hub.core.llm.service import LLMManager
+from worker.plugins.runtime import (
+    build_item_raw_data,
+    build_plugin_context_for_user,
+    close_plugin_context,
+    fallback_text_for_summary,
+    find_plugin_by_source_type,
+)
 
 class IngestionPipeline:
     def __init__(self):
@@ -22,6 +29,7 @@ class IngestionPipeline:
 
         try:
             core_text = self._build_core_text(item)
+            core_text = await self._prepare_core_text(item, core_text)
 
             if item.auto_short_summary and item.capabilities and "summarize" in item.capabilities:
                 item.summary = await self._generate_summary(core_text)
@@ -71,7 +79,8 @@ class IngestionPipeline:
                     "summary": item.summary,
                     "tags": item.tags,
                     "metadata_extra": item.metadata_extra,
-                    "embedding": vector # <--- 核心：存入向量！
+                    "embedding": vector, # <--- 核心：存入向量！
+                    "ai_processing_status": AIProcessingStatus.completed.value,
                 }
 
                 stmt = insert(ItemORM).values(**data)
@@ -93,6 +102,38 @@ class IngestionPipeline:
                     )
                     await session.execute(link_stmt)
         self.logger.info(f"✨ Vector data persisted successfully: {item.id} (Vector Dim: {len(vector)})")
+
+    async def _prepare_core_text(self, item: UniversalItem, core_text: str) -> str:
+        if (item.metadata_extra or {}).get("ai_text_extracted"):
+            return core_text
+
+        plugin_id, plugin = await find_plugin_by_source_type(item.source_type)
+        if not plugin_id or not plugin:
+            return core_text
+
+        ctx = None
+        try:
+            ctx = await build_plugin_context_for_user(plugin_id, plugin, item.source_user_id)
+            raw_data = build_item_raw_data(item)
+            ai_text = await plugin.extract_text_for_ai(ctx, raw_data)
+            if raw_data.get("metadata_extra"):
+                item.metadata_extra.update(raw_data["metadata_extra"])
+            if ai_text and ai_text.strip():
+                item.content_text = ai_text.strip()
+                return self._build_core_text(item)
+        except Exception as exc:
+            self.logger.warning(
+                "⚠️ Plugin AI extraction failed during ingestion; falling back to stored content. "
+                "item=%s plugin=%s error=%s",
+                item.id,
+                plugin_id,
+                exc,
+            )
+        finally:
+            if ctx is not None:
+                await close_plugin_context(ctx)
+
+        return fallback_text_for_summary(item) or core_text
 
     async def _generate_summary(self, core_text: str):
         model = await self.ai.get_summary_model_name("short")
@@ -149,6 +190,27 @@ async def process_new_item_task(item_dict: dict):
                     await session.execute(
                         ItemORM.__table__.update()
                         .where(ItemORM.id == item.id)
-                        .values(metadata_extra=metadata)
+                        .values(
+                            metadata_extra=metadata,
+                            ai_processing_status=AIProcessingStatus.pending_ai.value,
+                        )
+                    )
+        return None
+    except Exception as exc:
+        worker_log.error(f"❌ Ingestion analysis failed: {item.id} | {exc}")
+        async with AsyncSessionLocal() as session:
+            async with session.begin():
+                existing_item = await session.get(ItemORM, item.id)
+                if existing_item:
+                    metadata = dict(existing_item.metadata_extra or {})
+                    metadata["processing_status"] = "failed"
+                    metadata["processing_error"] = str(exc)
+                    await session.execute(
+                        ItemORM.__table__.update()
+                        .where(ItemORM.id == item.id)
+                        .values(
+                            metadata_extra=metadata,
+                            ai_processing_status=AIProcessingStatus.pending_ai.value,
+                        )
                     )
         return None
