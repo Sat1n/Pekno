@@ -419,7 +419,7 @@ function toPlainTextSnippet(input?: string | null, fallback: string = '', maxLen
   return `${plainText.slice(0, maxLength).trimEnd()}...`
 }
 
-function normalizeRawItem(item: RawItem, index: number): LocalSearchResult {
+function normalizeRawItem(item: RawItem): LocalSearchResult {
   const metadata = item.metadata_extra || {}
   const source = mapSourceType(item.source_type)
   const tags = Array.isArray(item.tags) && item.tags.length > 0 ? [...item.tags] : []
@@ -442,7 +442,7 @@ function normalizeRawItem(item: RawItem, index: number): LocalSearchResult {
     long_summary: hasLongSummary ? (typeof metadata.long_summary === 'string' ? metadata.long_summary : item.summary || undefined) : undefined,
     has_long_summary: hasLongSummary,
     cover_url: typeof metadata.cover_url === 'string' ? metadata.cover_url : undefined,
-    score: Math.max(0.5, 1 - index * 0.03),
+    score: null,
     source,
     tags: tags.slice(0, 5).length > 0 ? tags.slice(0, 5) : [t('common.uncategorized')],
     authorName,
@@ -489,6 +489,12 @@ function getDisplayTags(item: LocalSearchResult) {
   return item.displayTags && item.displayTags.length > 0 ? item.displayTags : item.tags
 }
 
+function formatRelevanceScore(score?: number | null) {
+  if (score === null || score === undefined || Number.isNaN(score)) return ''
+  const normalized = Math.max(0, Math.min(1, score))
+  return `${Math.round(normalized * 100)}%`
+}
+
 function syncSelectedItemFromRoute() {
   const targetItemId = typeof route.query.item === 'string' ? route.query.item : ''
   if (!targetItemId) return
@@ -506,7 +512,7 @@ async function loadData(query: string = '') {
 
     if (isWatchLaterPage.value) {
       const items = await getItems(undefined, 0, { watchLaterOnly: true, source_type: sourceFilter })
-      const normalized = items.map((item, index) => normalizeRawItem(item, index))
+      const normalized = items.map((item) => normalizeRawItem(item))
       initialAnchorItemId.value = null
       if (query.trim()) {
         const keyword = query.trim().toLowerCase()
@@ -531,7 +537,7 @@ async function loadData(query: string = '') {
     }
 
     const items = await getItems(undefined, 0, { source_type: sourceFilter })
-    const normalized = items.map((item, index) => normalizeRawItem(item, index))
+    const normalized = items.map((item) => normalizeRawItem(item))
     initialAnchorItemId.value = normalized.find((item) => item.isRead)?.id ?? null
     searchResults.value = normalized
     syncSelectedItemFromRoute()
@@ -879,7 +885,7 @@ async function handleSubmitUpload(autoFavorite: boolean = false) {
       retention_days: retentionDays.value,
       auto_favorite: autoFavorite,
     })
-    const normalized = normalizeRawItem(createdItem, 0)
+    const normalized = normalizeRawItem(createdItem)
     isAddDialogOpen.value = false
     resetAddContentDialog()
     await loadData(searchQuery.value)
@@ -892,7 +898,7 @@ async function handleSubmitUpload(autoFavorite: boolean = false) {
   } catch (error: any) {
     if (error?.response?.status === 409 && error?.response?.data?.deduplicated) {
       const dedup = error.response.data as UploadDedupResponse
-      const normalized = normalizeRawItem(dedup.item, 0)
+      const normalized = normalizeRawItem(dedup.item)
       isAddDialogOpen.value = false
       resetAddContentDialog()
       await loadData(searchQuery.value)
@@ -1323,8 +1329,12 @@ watch(isAddDialogOpen, (isOpen) => {
                 <span class="truncate text-xs font-medium">{{ item.authorName }}</span>
               </div>
               <div class="flex min-w-0 items-center justify-end gap-2">
-                <Badge variant="outline" class="h-5 px-1.5 py-0 font-mono text-[10px] border-primary/20 bg-primary/5 text-primary">
-                  {{ Math.floor(item.score * 100) }}%
+                <Badge
+                  v-if="item.score !== null && item.score !== undefined"
+                  variant="outline"
+                  class="h-5 px-1.5 py-0 font-mono text-[10px] border-primary/20 bg-primary/5 text-primary"
+                >
+                  {{ formatRelevanceScore(item.score) }}
                 </Badge>
                 <component :is="getSourceIcon(item.source)" class="h-4 w-4 shrink-0" :title="t('home.source')" />
                 <span class="truncate text-xs font-medium">{{ item.time }}</span>

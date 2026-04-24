@@ -26,7 +26,7 @@ class ItemResponse(BaseModel):
 
 class SearchResponse(ItemResponse):
     """带得分的搜索响应"""
-    score: float
+    score: Optional[float] = None
 
 
 class SyncRequest(BaseModel):
@@ -56,7 +56,7 @@ class FrontendSearchItem(BaseModel):
     source_type: Optional[str] = None
     intent: Optional[str] = None
     metadata_extra: Optional[dict] = None
-    score: float
+    score: Optional[float] = None
     source: str
     tags: List[str] = []
     time: str
