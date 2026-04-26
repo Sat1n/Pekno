@@ -362,6 +362,22 @@
       "uninstalling": "Uninstalling...",
       "confirmUninstall": "Confirm uninstall"
     },
+    "cookieFileUpload": {
+      "uploadCookie": "Upload Cookie File",
+      "selectFile": "Select file",
+      "uploadSuccess": "Cookie file uploaded",
+      "fileDate": "File date",
+      "cookieStatus": "Cookie status",
+      "requiredKeys": "Required cookies",
+      "keyFound": "{key} found",
+      "keyMissing": "{key} missing",
+      "allKeysFound": "All required cookies present",
+      "someKeysMissing": "{count} required cookie(s) missing",
+      "noFile": "No cookie file uploaded yet",
+      "onlyTxtAccepted": "Only .txt Netscape cookie files are accepted",
+      "uploadFailed": "Cookie file upload failed",
+      "currentFile": "Currently uploaded"
+    },
     "pluginsHeading": "Plugin Management",
     "pluginsDesc": "Connect and configure third-party services so Pekno can sync and analyze your digital content automatically.",
     "installPlugin": "Install Plugin",

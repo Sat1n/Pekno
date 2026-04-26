@@ -25,8 +25,16 @@ import re
 from pathlib import Path
 from urllib.parse import quote, unquote, urlparse
 from shared.config import ConfigManager, ConfigKeys
-from shared.credentials import get_user_credential
+from shared.credentials import get_user_credential, resolve_cookie_file_path
 from shared.locale import normalize_preferred_locale
+
+
+def _resolve_bilibili_cookiefile(url: str, user_id: str | None) -> str | None:
+    if not url or "bilibili" not in url:
+        return None
+    if not user_id:
+        return None
+    return resolve_cookie_file_path(user_id, "bilibili")
 
 
 async def _mark_item_failed_with_circuit_breaker(
@@ -514,11 +522,14 @@ async def process_multimedia_task(
                 audio_path = str(requested_audio_path)
                 worker_log.info(f"🎧 Extracted audio track from local video: {audio_path}")
         else:
-            stream_info = await asyncio.to_thread(YTDlpService.extract_info, url, {})
+            cookiefile = _resolve_bilibili_cookiefile(url, user_id)
+            if cookiefile:
+                worker_log.info(f"🍪 Using cookie file for {url}: {cookiefile}")
+            stream_info = await asyncio.to_thread(YTDlpService.extract_info, url, {}, cookiefile=cookiefile)
             duration_seconds = stream_info.get("duration")
 
             worker_log.info(f"📥 Downloading and localizing best-quality media stream with YTDlp... cache_dir={task_cache_dir}")
-            audio_path = await asyncio.to_thread(YTDlpService.download_audio, url, str(requested_audio_path))
+            audio_path = await asyncio.to_thread(YTDlpService.download_audio, url, str(requested_audio_path), cookiefile=cookiefile)
             worker_log.info(f"🎧 Audio track stored locally: {audio_path}")
             
         # 定位底层 Whisper 挂载型号
@@ -590,6 +601,8 @@ async def process_multimedia_task(
                         YTDlpService.download_video_1080p,
                         url,
                         str(requested_video_path),
+                        None,
+                        cookiefile,
                     )
                     worker_log.info(f"🎞️ Video cached locally: {video_path}")
 
@@ -751,10 +764,11 @@ async def _download_vault_asset_impl(item_id: str, user_id: str | None = None):
         if item.intent in {"video", "audio"}:
             suffix = ".mp4" if item.intent == "video" else ".mp3"
             output_path = item_dir / f"source{suffix}"
+            cookiefile = _resolve_bilibili_cookiefile(source_url, user_id)
             if item.intent == "video":
-                local_path = await asyncio.to_thread(YTDlpService.download_video_1080p, source_url, str(output_path))
+                local_path = await asyncio.to_thread(YTDlpService.download_video_1080p, source_url, str(output_path), None, cookiefile)
             else:
-                local_path = await asyncio.to_thread(YTDlpService.download_audio, source_url, str(output_path))
+                local_path = await asyncio.to_thread(YTDlpService.download_audio, source_url, str(output_path), None, cookiefile)
         else:
             if item.source_type == "github_star":
                 local_path, readme_text, readme_repo_path = await _download_github_readme(item, item_dir, user_id)

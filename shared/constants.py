@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from typing import Final
+from typing import Final, Any
 
 
-PLATFORM_WHITELIST: Final[dict[str, dict[str, str]]] = {
+PLATFORM_WHITELIST: Final[dict[str, dict[str, Any]]] = {
     "github": {
         "label": "GitHub Token",
         "config_key": "token",
@@ -11,10 +11,18 @@ PLATFORM_WHITELIST: Final[dict[str, dict[str, str]]] = {
         "legacy_config_key": "token",
     },
     "bilibili": {
-        "label": "Bilibili SESSDATA",
+        "label": "Bilibili Cookie",
         "config_key": "cookie",
-        "env_var": "PEKNO_BILIBILI_SESSDATA",
+        "credential_kind": "cookie_file",
+        "env_var": "PEKNO_BILIBILI_COOKIE_FILE",
         "legacy_config_key": "cookie",
+        "cookie_dir": "bilibili",
+        "required_cookie_keys": [
+            "SESSDATA",
+            "buvid3",
+            "bili_jct",
+            "DedeUserID",
+        ],
     },
     "arxiv": {
         "label": "arXiv API Key",
