@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from worker.plugins.runtime import build_item_raw_data, fallback_text_for_summary
+from worker.plugins.runtime import build_item_raw_data, fallback_text_for_summary, resolve_sync_fetch_mode
 
 
 def test_build_summary_raw_data_preserves_generic_item_fields():
@@ -48,3 +48,36 @@ def test_fallback_text_for_summary_uses_stored_content():
     item = SimpleNamespace(title="Example", content_text="Body", summary="Summary")
 
     assert fallback_text_for_summary(item) == "标题：Example\n\n简介：Body"
+
+
+def test_manual_incremental_sync_uses_full_fetch_and_disables_breaker():
+    fetch_mode, breaker_disabled = resolve_sync_fetch_mode(
+        incremental_ai_sync=True,
+        sync_mode="manual",
+        has_existing_items=True,
+    )
+
+    assert fetch_mode == "full"
+    assert breaker_disabled is True
+
+
+def test_auto_incremental_first_sync_uses_full_fetch_and_disables_breaker():
+    fetch_mode, breaker_disabled = resolve_sync_fetch_mode(
+        incremental_ai_sync=True,
+        sync_mode="auto",
+        has_existing_items=False,
+    )
+
+    assert fetch_mode == "full"
+    assert breaker_disabled is True
+
+
+def test_auto_incremental_existing_sync_uses_latest_fetch_and_keeps_breaker():
+    fetch_mode, breaker_disabled = resolve_sync_fetch_mode(
+        incremental_ai_sync=True,
+        sync_mode="auto",
+        has_existing_items=True,
+    )
+
+    assert fetch_mode == "latest"
+    assert breaker_disabled is False

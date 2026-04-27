@@ -15,15 +15,15 @@ class GitHubClient:
     async def test_connection(self) -> Dict[str, Any]:
         """
         测试 Token 是否有效（轻量级，只获取用户信息）
-        
+
         Returns:
             包含用户信息的字典
         """
         if not self.token:
             return {"valid": False, "error": "No token provided"}
-        
+
         url = f"{self.base_url}/user"
-        
+
         async with httpx.AsyncClient() as client:
             try:
                 response = await client.get(url, headers=self.headers)
@@ -40,20 +40,32 @@ class GitHubClient:
             except Exception as e:
                 return {"valid": False, "error": str(e)}
 
-    async def get_starred_repos(self, limit: int = 30) -> List[Dict[str, Any]]:
-        """获取最近 Star 的仓库"""
+    async def get_starred_repos(self, mode: str = "latest") -> List[Dict[str, Any]]:
+        """Fetch starred repositories.
+
+        mode=latest fetches only the first page. mode=full follows GitHub
+        pagination until the star list is exhausted.
+        """
         if not self.token:
             worker_log.warning("⚠️ 无 Token，无法获取 Star 仓库")
             return []
-            
+
         url = f"{self.base_url}/user/starred"
-        params = {"per_page": limit, "sort": "created", "direction": "desc"}
-        
+        params = {"per_page": 100, "sort": "created", "direction": "desc"}
+        full_fetch = mode == "full"
+        repos: List[Dict[str, Any]] = []
+
         async with httpx.AsyncClient() as client:
             try:
-                response = await client.get(url, headers=self.headers, params=params)
-                response.raise_for_status()
-                return response.json()
+                while url:
+                    response = await client.get(url, headers=self.headers, params=params)
+                    response.raise_for_status()
+                    repos.extend(response.json())
+                    if not full_fetch:
+                        break
+                    url = response.links.get("next", {}).get("url")
+                    params = None
+                return repos
             except Exception as e:
                 worker_log.error(f"❌ GitHub API 请求失败: {e}")
                 return []
@@ -61,26 +73,26 @@ class GitHubClient:
     async def get_repo_readme(self, owner: str, repo: str) -> tuple[str, str]:
         """
         获取仓库的 README 内容
-        
+
         Args:
             owner: 仓库所有者
             repo: 仓库名称
-            
+
         Returns:
             (README 内容, SHA 值)
         """
         url = f"{self.base_url}/repos/{owner}/{repo}/readme"
-        
+
         async with httpx.AsyncClient() as client:
             try:
                 response = await client.get(url, headers=self.headers)
                 response.raise_for_status()
-                
+
                 import base64
                 data = response.json()
                 content = data.get("content", "")
                 sha = data.get("sha", "")
-                
+
                 if content:
                     # 解码 base64 内容
                     return base64.b64decode(content).decode('utf-8'), sha
@@ -92,7 +104,7 @@ class GitHubClient:
     async def get_repo_languages(self, owner: str, repo: str) -> Dict[str, int]:
         """获取仓库语言分布"""
         url = f"{self.base_url}/repos/{owner}/{repo}/languages"
-        
+
         async with httpx.AsyncClient() as client:
             try:
                 response = await client.get(url, headers=self.headers)
@@ -100,4 +112,4 @@ class GitHubClient:
                 return response.json()
             except Exception as e:
                 worker_log.warning(f"❌ 获取 Languages 失败: {e}")
-                return {}
+                return {}

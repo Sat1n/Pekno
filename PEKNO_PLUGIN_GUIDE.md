@@ -12,7 +12,8 @@ Pekno plugins are Python packages that run inside the worker process. The Hub pr
 - Plugin metadata is persisted in the `plugins` database table via `PluginRegistryORM`.
 - Enabled plugins are imported dynamically by `shared.plugins.manager.PluginManager`.
 - Hub and worker both load plugin manifests, but worker executes plugin logic.
-- Manual sync calls `run_plugin_pipeline_task(plugin_id, limit, user_id)`.
+- Manual sync calls `run_plugin_pipeline_task(plugin_id, limit, user_id, "manual")`.
+- Auto-sync calls `run_plugin_pipeline_task(plugin_id, limit, user_id, "auto")`.
 - Single URL parsing calls `parse_single_plugin_item_task(plugin_id, url, user_id, ...)`.
 - AI ingestion runs through `process_new_item_task`; scheduled incremental batches are fanned out by `trigger_ai_sweep_task`.
 

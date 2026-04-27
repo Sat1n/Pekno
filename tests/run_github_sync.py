@@ -10,7 +10,7 @@ async def test_sync():
         raise RuntimeError("Set GITHUB_TOKEN in your shell before running this smoke test.")
 
     client = GitHubClient(token)
-    repos = await client.get_starred_repos(limit=5)
+    repos = await client.get_starred_repos(mode="latest")
     for repo in repos:
         owner = (repo.get("owner") or {}).get("login", "unknown")
         print(f"{owner}/{repo.get('name', 'unknown')}")
