@@ -92,6 +92,18 @@ You can also use the combined helper:
 ./scripts/start-all.sh
 ```
 
+For Docker Compose development, switch the worker runtime in `.env`:
+
+```env
+WORKER_EXECUTION_MODE=cpu
+```
+
+Use `WORKER_EXECUTION_MODE=cuda` when you want the development worker to use CUDA 12. The host must have an NVIDIA driver and NVIDIA Container Toolkit installed. After changing the value, rebuild the worker:
+
+```bash
+docker compose up -d --build worker
+```
+
 ### Frontend Setup
 
 Install frontend dependencies:

@@ -49,12 +49,9 @@ services:
       context: .
       dockerfile: Dockerfile
       target: app-runtime
-      args:
-        BASE_IMAGE: ${WORKER_BASE_IMAGE:-python:3.13-slim}
-        EXECUTION_MODE: ${WORKER_EXECUTION_MODE:-cpu}
     extends:
       file: worker.ml.yml
-      service: cpu # set to one of [cpu, cuda, rocm] for worker-side ML acceleration
+      service: ${WORKER_EXECUTION_MODE:-cpu} # set to one of [cpu, cuda, rocm] for worker-side ML acceleration
     container_name: pekno-worker
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-pekno}
@@ -68,7 +65,6 @@ services:
       APP_TIMEZONE: ${APP_TIMEZONE:-Asia/Shanghai}
       TZ: ${APP_TIMEZONE:-Asia/Shanghai}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      WORKER_EXECUTION_MODE: ${WORKER_EXECUTION_MODE:-cpu}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
       RUN_DB_MIGRATIONS: "0"
     command: ["uv", "run", "taskiq", "worker", "worker.main:broker"]
