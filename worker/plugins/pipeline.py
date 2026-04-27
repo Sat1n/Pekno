@@ -142,7 +142,7 @@ async def run_plugin_pipeline_task(
             sync_mode=sync_mode,
             has_existing_items=has_existing_items,
         )
-        config_dict["_sync_fetch_mode"] = fetch_mode
+        config_dict["_pekno_sync_mode"] = fetch_mode
         ctx.config = config_dict
         worker_log.info(
             f"🔁 [{plugin_id}] Sync mode resolved: trigger={sync_mode}, "

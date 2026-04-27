@@ -233,6 +233,25 @@ The GitHub built-in plugin currently receives a specialized `GitHubClient`. Othe
 
 If your plugin receives a generic `httpx.AsyncClient`, close long-lived clients only if you created them yourself. The pipeline closes the context HTTP client after single-item parsing when it exposes `aclose()`.
 
+### Sync Modes
+
+Pekno injects `ctx.config["_pekno_sync_mode"]` before calling `fetch_data(ctx)`:
+
+- `latest`: fetch only the newest page or batch. Auto-sync uses this after a plugin already has local history.
+- `full`: fetch historical pages until the source is exhausted. Manual sync and initial incremental backfill use this mode.
+
+Plugins should keep one `fetch_data(ctx)` entrypoint and branch inside it:
+
+```python
+async def fetch_data(self, ctx: PluginContext) -> list[dict]:
+    sync_mode = ctx.config.get("_pekno_sync_mode", "latest")
+    if sync_mode == "full":
+        return await self._fetch_all_pages(ctx)
+    return await self._fetch_latest_page(ctx)
+```
+
+Pagination, cursors, offsets, and platform-specific limits belong inside the plugin. If a source cannot support historical sync, fall back to `latest` and log a warning.
+
 ## Required Methods
 
 ### `fetch_data(ctx)`
@@ -241,7 +260,8 @@ Fetch raw records for sync.
 
 Rules:
 
-- Respect `ctx.config["sync_limit"]`.
+- Use `ctx.config["_pekno_sync_mode"]` to decide whether to fetch latest data or historical pages.
+- Treat `ctx.config["sync_limit"]` as a processing/batch preference, not as an API page-size requirement.
 - Return a list of raw dictionaries.
 - Do not write to the database.
 - Do not enqueue downstream tasks directly.

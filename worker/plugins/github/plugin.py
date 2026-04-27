@@ -29,7 +29,7 @@ class GitHubStarsPlugin(BasePlugin):
 
     async def fetch_data(self, ctx: PluginContext) -> List[Dict[str, Any]]:
         """Fetch starred repositories from the GitHub API."""
-        fetch_mode = ctx.config.get("_sync_fetch_mode", "latest")
+        fetch_mode = ctx.config.get("_pekno_sync_mode", "latest")
 
         ctx.log.info(f"📥 [GitHub] Fetching starred repositories (mode: {fetch_mode})")
         

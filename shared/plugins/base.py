@@ -4,7 +4,7 @@ from typing import List, Dict, Any
 class PluginContext:
     """插件运行的安全上下文"""
     def __init__(self, config: dict, http_client, logger, credentials: dict | None = None, env: dict | None = None):
-        self.config = config  # 该插件的配置字典 (已从数据库加载，如 sync_limit)
+        self.config = config  # 该插件的配置字典；Pekno 也会注入 _pekno_sync_mode 等运行时字段
         self.http = http_client  # TODO: 封装的受限 HTTP 客户端
         self.log = logger
         self.credentials = credentials or {}
@@ -32,7 +32,12 @@ class BasePlugin(ABC):
 
     @abstractmethod
     async def fetch_data(self, ctx: PluginContext) -> List[Dict[str, Any]]:
-        """使用 ctx.http 抓取原始数据"""
+        """使用 ctx.http 抓取原始数据。
+
+        Pekno may inject ctx.config["_pekno_sync_mode"]:
+        - "latest": fetch only the newest page/batch for auto-sync.
+        - "full": fetch historical pages for manual sync or initial backfill.
+        """
         pass
 
     @abstractmethod
