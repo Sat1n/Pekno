@@ -126,7 +126,10 @@ async def upsert_user_credential(user_id: str, platform: str, token_value: str) 
 
 def build_credential_response_payload(credential: UserCredentialORM) -> dict[str, Any]:
     meta = PLATFORM_WHITELIST[credential.platform]
-    token_value = _resolve_token_value(credential.token_value)
+    if meta.get("credential_kind") == "cookie_file":
+        token_value = None
+    else:
+        token_value = _resolve_token_value(credential.token_value)
     return {
         "id": credential.id,
         "platform": credential.platform,

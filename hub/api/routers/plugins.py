@@ -97,6 +97,7 @@ async def _resolve_plugin_credential_state(
                     "platform": platform,
                     "label": PLATFORM_WHITELIST[platform]["label"],
                     "status": status,
+                    "masked_value": None,
                     "is_bound": is_bound,
                     "has_global": file_exists,
                     "credential_kind": "cookie_file",
@@ -154,7 +155,7 @@ async def _resolve_plugin_credential_state(
         if not token_preview:
             first_applied = next((state for state in credential_states if state["status"] == "applied"), None)
             if first_applied:
-                token_preview = first_applied["masked_value"]
+                token_preview = first_applied.get("masked_value")
     else:
         is_configured = base_configured
 
