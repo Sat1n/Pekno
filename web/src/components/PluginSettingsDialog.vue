@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Settings, Save, RefreshCw, Loader2, AlertCircle, Check, Trash2 } from 'lucide-vue-next'
+import { Settings, Save, RefreshCw, Loader2, AlertCircle, Check, Trash2, Upload, FileText } from 'lucide-vue-next'
 
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { Badge } from '@/components/ui/badge'
@@ -12,7 +12,7 @@ import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
 import { Switch } from '@/components/ui/switch'
 import { useToast } from '@/components/ui/toast/use-toast'
-import { getStoredAuthUser, getUserCredentials, resolveApiErrorMessage, uninstallPluginApi, type PluginCredentialState, type PluginSettingSchema, type UserCredentialItem } from '@/lib/api'
+import { getStoredAuthUser, getUserCredentials, resolveApiErrorMessage, uninstallPluginApi, uploadCookieFile, type CookieFileUploadResult, type PluginCredentialState, type PluginSettingSchema, type UserCredentialItem } from '@/lib/api'
 import { usePluginStore } from '@/store/usePluginStore'
 
 const props = defineProps<{
@@ -38,6 +38,9 @@ const formData = ref<Record<string, any>>({})
 const userCredentials = ref<UserCredentialItem[]>([])
 const applyGlobalCredentials = ref<Record<string, boolean>>({})
 const globalCredentialInputs = ref<Record<string, string>>({})
+const cookieFileResults = ref<Record<string, CookieFileUploadResult | null>>({})
+const cookieUploading = ref<Record<string, boolean>>({})
+const cookieFileInputRefs = ref<Record<string, HTMLInputElement | null>>({})
 
 const currentPlugin = computed(() => pluginStore.pluginsManifests.value.find((plugin) => plugin.manifest.id === props.pluginId))
 const schema = computed<Record<string, PluginSettingSchema>>(() => currentPlugin.value?.manifest.settings_schema || {})
@@ -58,15 +61,35 @@ function resolveCredentialState(platform: string): PluginCredentialState | undef
   return currentPlugin.value?.credential_states?.find((state) => state.platform === platform)
 }
 
+function isCookieFilePlatform(platform: string): boolean {
+  return resolveCredentialState(platform)?.credential_kind === 'cookie_file'
+}
+
 function credentialDotClass(platform: string) {
-  const status = resolveCredentialState(platform)?.status
+  const state = resolveCredentialState(platform)
+  if (!state) return 'bg-slate-400'
+  if (isCookieFilePlatform(platform)) {
+    if (state.status === 'applied' && state.cookie_valid) return 'bg-emerald-500'
+    if (state.status === 'applied' && !state.cookie_valid) return 'bg-amber-500'
+    if (state.status === 'available' && state.cookie_valid) return 'bg-sky-500'
+    if (state.status === 'available' && !state.cookie_valid) return 'bg-amber-500'
+    return 'bg-slate-400'
+  }
+  const status = state.status
   if (status === 'applied') return 'bg-emerald-500'
   if (status === 'available') return 'bg-sky-500'
   return 'bg-slate-400'
 }
 
 function credentialStatusText(platform: string) {
-  const status = resolveCredentialState(platform)?.status
+  const state = resolveCredentialState(platform)
+  if (isCookieFilePlatform(platform)) {
+    if (!state?.has_global) return t('settings.cookieFileUpload.noFile')
+    if (state.cookie_valid) return t('settings.cookieFileUpload.allKeysFound')
+    const missing = state.missing_keys?.length || 0
+    return t('settings.cookieFileUpload.someKeysMissing', { count: missing })
+  }
+  const status = state?.status
   if (status === 'applied') return t('settings.pluginCredentials.statusApplied')
   if (status === 'available') return t('settings.pluginCredentials.statusAvailable')
   return t('settings.pluginCredentials.statusMissing')
@@ -97,9 +120,12 @@ function initForm() {
 
   applyGlobalCredentials.value = {}
   globalCredentialInputs.value = {}
+  cookieFileResults.value = {}
+  cookieUploading.value = {}
   for (const platform of requiredCredentials.value) {
     applyGlobalCredentials.value[platform] = (currentPlugin.value.credential_bindings || []).includes(platform)
     globalCredentialInputs.value[platform] = ''
+    cookieUploading.value[platform] = false
   }
 }
 
@@ -127,6 +153,48 @@ function isRequired(field: PluginSettingSchema) {
 function applyExistingCredential(platform: string) {
   if (!findUserCredential(platform)) return
   applyGlobalCredentials.value[platform] = true
+}
+
+function triggerCookieFileInput(platform: string) {
+  cookieFileInputRefs.value[platform]?.click()
+}
+
+async function handleCookieUpload(platform: string, event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+
+  if (!file.name.endsWith('.txt')) {
+    toast({
+      title: t('settings.cookieFileUpload.uploadFailed'),
+      description: t('settings.cookieFileUpload.onlyTxtAccepted'),
+      variant: 'destructive',
+    })
+    input.value = ''
+    return
+  }
+
+  cookieUploading.value[platform] = true
+  try {
+    const result = await uploadCookieFile(platform, file)
+    cookieFileResults.value[platform] = result
+    await pluginStore.loadAllPlugins()
+    await loadUserCredentials()
+    initForm()
+    toast({
+      title: t('settings.cookieFileUpload.uploadSuccess'),
+      description: t('settings.cookieFileUpload.uploadSuccess'),
+    })
+  } catch (error: any) {
+    toast({
+      title: t('settings.cookieFileUpload.uploadFailed'),
+      description: resolveApiErrorMessage(error),
+      variant: 'destructive',
+    })
+  } finally {
+    cookieUploading.value[platform] = false
+    input.value = ''
+  }
 }
 
 async function handleUninstall() {
@@ -186,9 +254,13 @@ async function handleSave() {
       savePayload[key] = val
     }
 
-    const applyList = requiredCredentials.value.filter((platform) => applyGlobalCredentials.value[platform])
+    const applyList = requiredCredentials.value.filter((platform) => {
+      if (isCookieFilePlatform(platform)) return false
+      return applyGlobalCredentials.value[platform]
+    })
     const credentialPayload: Record<string, string> = {}
     for (const platform of requiredCredentials.value) {
+      if (isCookieFilePlatform(platform)) continue
       const value = (globalCredentialInputs.value[platform] || '').trim()
       if (value) {
         credentialPayload[platform] = value
@@ -282,14 +354,14 @@ async function handleSync() {
                 <Label class="text-base">{{ resolveCredentialState(platform)?.label || platform }}</Label>
               </div>
               <p class="text-xs text-muted-foreground">{{ credentialStatusText(platform) }}</p>
-              <p v-if="findUserCredential(platform)" class="text-xs text-muted-foreground">
+              <p v-if="!isCookieFilePlatform(platform) && findUserCredential(platform)" class="text-xs text-muted-foreground">
                 {{ t('settings.pluginCredentials.currentGlobalCredential') }}
                 <code class="bg-muted px-1.5 py-0.5 rounded text-[10px]">{{ findUserCredential(platform)?.masked_value }}</code>
               </p>
             </div>
 
             <Button
-              v-if="resolveCredentialState(platform)?.status === 'available'"
+              v-if="!isCookieFilePlatform(platform) && resolveCredentialState(platform)?.status === 'available'"
               type="button"
               size="sm"
               variant="outline"
@@ -299,7 +371,51 @@ async function handleSync() {
             </Button>
           </div>
 
-          <div class="space-y-2">
+          <!-- Cookie file upload UI -->
+          <div v-if="isCookieFilePlatform(platform)" class="space-y-3">
+            <input
+              :ref="(el) => { cookieFileInputRefs[platform] = el as HTMLInputElement }"
+              type="file"
+              accept=".txt"
+              class="hidden"
+              @change="(e) => handleCookieUpload(platform, e)"
+            />
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              :disabled="cookieUploading[platform]"
+              @click="triggerCookieFileInput(platform)"
+            >
+              <Loader2 v-if="cookieUploading[platform]" class="w-4 h-4 mr-2 animate-spin" />
+              <Upload v-else class="w-4 h-4 mr-2" />
+              {{ t('settings.cookieFileUpload.selectFile') }}
+            </Button>
+
+            <div v-if="resolveCredentialState(platform)?.has_global" class="space-y-2 text-xs">
+              <div class="flex items-center gap-2 text-muted-foreground">
+                <FileText class="w-3.5 h-3.5" />
+                <span>{{ t('settings.cookieFileUpload.fileDate') }}:</span>
+                <code class="bg-muted px-1.5 py-0.5 rounded text-[10px]">{{ resolveCredentialState(platform)?.cookie_file_date || '—' }}</code>
+              </div>
+
+              <div class="flex flex-wrap gap-1.5 pt-1">
+                <span
+                  v-for="key in resolveCredentialState(platform)?.required_keys"
+                  :key="key"
+                  class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium"
+                  :class="resolveCredentialState(platform)?.found_keys?.includes(key) ? 'bg-emerald-500/10 text-emerald-600' : 'bg-red-500/10 text-red-500'"
+                >
+                  <Check v-if="resolveCredentialState(platform)?.found_keys?.includes(key)" class="w-3 h-3" />
+                  <AlertCircle v-else class="w-3 h-3" />
+                  {{ key }}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Token input UI (existing, for non-cookie platforms) -->
+          <div v-else class="space-y-2">
             <Label>{{ t('settings.pluginCredentials.overrideGlobalCredential') }}</Label>
             <Input
               v-model="globalCredentialInputs[platform]"

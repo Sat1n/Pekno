@@ -126,7 +126,10 @@ async def upsert_user_credential(user_id: str, platform: str, token_value: str) 
 
 def build_credential_response_payload(credential: UserCredentialORM) -> dict[str, Any]:
     meta = PLATFORM_WHITELIST[credential.platform]
-    token_value = _resolve_token_value(credential.token_value)
+    if meta.get("credential_kind") == "cookie_file":
+        token_value = None
+    else:
+        token_value = _resolve_token_value(credential.token_value)
     return {
         "id": credential.id,
         "platform": credential.platform,
@@ -135,3 +138,95 @@ def build_credential_response_payload(credential: UserCredentialORM) -> dict[str
         "created_at": credential.created_at,
         "updated_at": credential.updated_at,
     }
+
+
+def _is_cookie_file_platform(platform: str) -> bool:
+    meta = PLATFORM_WHITELIST.get(platform, {})
+    return meta.get("credential_kind") == "cookie_file"
+
+
+def get_cookie_storage_dir(user_id: str, platform: str) -> "Path":
+    from pathlib import Path
+    validated = validate_platform(platform)
+    meta = PLATFORM_WHITELIST[validated]
+    cookie_dir = meta.get("cookie_dir", validated)
+    return Path("data") / "cookies" / user_id / cookie_dir
+
+
+def get_cookie_file_path(user_id: str, platform: str) -> "Path":
+    return get_cookie_storage_dir(user_id, platform) / "cookies.txt"
+
+
+def parse_netscape_cookie_file(file_path: "Path") -> dict[str, str]:
+    cookies: dict[str, str] = {}
+    with open(file_path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split("\t")
+            if len(parts) >= 7:
+                name, value = parts[5], parts[6]
+                cookies[name] = value
+    return cookies
+
+
+def validate_cookie_file(platform: str, file_path: "Path") -> dict[str, Any]:
+    import os
+    from datetime import datetime
+
+    validated = validate_platform(platform)
+    meta = PLATFORM_WHITELIST[validated]
+    required_keys = list(meta.get("required_cookie_keys", []))
+
+    result = {
+        "platform": validated,
+        "file_exists": False,
+        "file_date": None,
+        "found_keys": [],
+        "missing_keys": [],
+        "valid": False,
+    }
+
+    if not file_path.exists():
+        return result
+
+    result["file_exists"] = True
+    try:
+        mtime = os.path.getmtime(str(file_path))
+        result["file_date"] = datetime.fromtimestamp(mtime).isoformat()
+    except OSError:
+        pass
+
+    try:
+        cookies = parse_netscape_cookie_file(file_path)
+    except Exception:
+        result["missing_keys"] = required_keys
+        return result
+
+    for key in required_keys:
+        if key in cookies :
+            result["found_keys"].append(key)
+        else:
+            result["missing_keys"].append(key)
+
+    result["valid"] = len(result["missing_keys"]) == 0
+    return result
+
+
+def resolve_cookie_file_path(user_id: str, platform: str) -> str | None:
+    import os
+    validated = validate_platform(platform)
+    meta = PLATFORM_WHITELIST[validated]
+
+    env_var = meta.get("env_var")
+    if env_var:
+        env_path = os.environ.get(env_var)
+        if env_path:
+            return env_path
+
+    user_path = get_cookie_file_path(user_id, platform)
+    if user_path.exists():
+        return str(user_path)
+
+    return None

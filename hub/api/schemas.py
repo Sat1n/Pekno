@@ -172,7 +172,7 @@ class UserCredentialResponse(BaseModel):
     id: str
     platform: str
     label: str
-    masked_value: str
+    masked_value: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 

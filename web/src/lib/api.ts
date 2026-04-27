@@ -781,6 +781,12 @@ export interface PluginCredentialState {
   masked_value?: string | null
   is_bound: boolean
   has_global: boolean
+  credential_kind?: 'cookie_file'
+  cookie_file_date?: string | null
+  cookie_valid?: boolean
+  found_keys?: string[]
+  missing_keys?: string[]
+  required_keys?: string[]
 }
 
 export interface PluginInfo {
@@ -790,6 +796,16 @@ export interface PluginInfo {
   token_preview: string | null
   credential_bindings: string[]
   credential_states: PluginCredentialState[]
+}
+
+export interface CookieFileUploadResult {
+  platform: string
+  label: string
+  file_date: string | null
+  found_keys: string[]
+  missing_keys: string[]
+  valid: boolean
+  required_keys: string[]
 }
 
 export interface ActivePlugin {
@@ -823,6 +839,16 @@ export async function getUserCredentials(): Promise<UserCredentialItem[]> {
 
 export async function saveUserCredential(payload: { platform: string; token_value: string }): Promise<UserCredentialItem> {
   const response = await apiClient.put<UserCredentialItem>('/api/user/credentials', payload)
+  return response.data
+}
+
+export async function uploadCookieFile(platform: string, file: File): Promise<CookieFileUploadResult> {
+  const formData = new FormData()
+  formData.append('platform', platform)
+  formData.append('file', file)
+  const response = await apiClient.post<CookieFileUploadResult>('/api/user/credentials/cookie-file', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
   return response.data
 }
 

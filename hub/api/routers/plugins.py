@@ -9,7 +9,7 @@ from pathlib import Path
 from shared.plugins.manager import plugin_manager
 from shared.config import ConfigManager, SYSTEM_SCOPED_CONFIG_KEYS, ConfigKeys
 from shared.constants import PLATFORM_WHITELIST
-from shared.credentials import get_user_credential, mask_credential, validate_required_credentials, upsert_user_credential
+from shared.credentials import get_user_credential, mask_credential, validate_required_credentials, upsert_user_credential, _is_cookie_file_platform, get_cookie_file_path, validate_cookie_file
 from shared.models import ConfigORM, PluginRegistryORM
 from shared.database import AsyncSessionLocal
 from shared.utils.zip_utils import safe_extract_zip
@@ -77,6 +77,39 @@ async def _resolve_plugin_credential_state(
     credential_states: list[dict[str, Any]] = []
     has_required_credentials = True
     for platform in required_credentials:
+        if _is_cookie_file_platform(platform):
+            cookie_path = get_cookie_file_path(user_id, platform)
+            cookie_validation = validate_cookie_file(platform, cookie_path)
+            is_bound = platform in bound_credentials
+            file_exists = cookie_validation.get("file_exists", False)
+            is_valid = cookie_validation.get("valid", False)
+            status = "missing"
+            if is_bound and file_exists:
+                status = "applied"
+            elif file_exists:
+                status = "available"
+            if not is_valid:
+                has_required_credentials = False
+            elif not is_bound and file_exists:
+                has_required_credentials = False
+            credential_states.append(
+                {
+                    "platform": platform,
+                    "label": PLATFORM_WHITELIST[platform]["label"],
+                    "status": status,
+                    "masked_value": None,
+                    "is_bound": is_bound,
+                    "has_global": file_exists,
+                    "credential_kind": "cookie_file",
+                    "cookie_file_date": cookie_validation.get("file_date"),
+                    "cookie_valid": is_valid,
+                    "found_keys": cookie_validation.get("found_keys", []),
+                    "missing_keys": cookie_validation.get("missing_keys", []),
+                    "required_keys": list(PLATFORM_WHITELIST[platform].get("required_cookie_keys", [])),
+                }
+            )
+            continue
+
         global_credential = await get_user_credential(user_id, platform)
         has_global = global_credential is not None
         is_bound = platform in bound_credentials
@@ -122,7 +155,7 @@ async def _resolve_plugin_credential_state(
         if not token_preview:
             first_applied = next((state for state in credential_states if state["status"] == "applied"), None)
             if first_applied:
-                token_preview = first_applied["masked_value"]
+                token_preview = first_applied.get("masked_value")
     else:
         is_configured = base_configured
 
