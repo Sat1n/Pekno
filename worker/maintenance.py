@@ -144,10 +144,10 @@ async def system_heartbeat_task():
                 worker_log.info(
                     f"💓 [{plugin_id}] Auto-sync conditions met. Dispatching incremental sync task for user {user_id}."
                 )
-                await run_plugin_pipeline_task.kiq(plugin_id, None, user_id)
+                await run_plugin_pipeline_task.kiq(plugin_id, None, user_id, "auto")
             else:
                 worker_log.info(f"💓 [{plugin_id}] Auto-sync conditions met. Dispatching incremental sync task.")
-                await run_plugin_pipeline_task.kiq(plugin_id)
+                await run_plugin_pipeline_task.kiq(plugin_id, None, None, "auto")
             triggered_count += 1
         else:
             worker_log.info(

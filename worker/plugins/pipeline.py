@@ -19,6 +19,7 @@ from worker.plugins.runtime import (
     close_plugin_context,
     fallback_text_for_summary,
     find_plugin_by_source_type,
+    resolve_sync_fetch_mode,
 )
 
 
@@ -71,8 +72,38 @@ async def _store_lightweight_item(
                 )
                 await session.execute(link_stmt)
 
+
+async def _has_existing_plugin_items(source_type: str | None, user_id: str | None) -> bool:
+    if not source_type:
+        return False
+
+    async with AsyncSessionLocal() as session:
+        if user_id:
+            result = await session.execute(
+                select(ItemORM.id)
+                .join(UserItemStateORM, UserItemStateORM.item_id == ItemORM.id)
+                .where(
+                    ItemORM.source_type == source_type,
+                    UserItemStateORM.user_id == user_id,
+                )
+                .limit(1)
+            )
+        else:
+            result = await session.execute(
+                select(ItemORM.id)
+                .where(ItemORM.source_type == source_type)
+                .limit(1)
+            )
+        return result.scalar_one_or_none() is not None
+
+
 @broker.task(task_name="run_plugin_pipeline")
-async def run_plugin_pipeline_task(plugin_id: str, limit: int = None, user_id: str | None = None):
+async def run_plugin_pipeline_task(
+    plugin_id: str,
+    limit: int = None,
+    user_id: str | None = None,
+    sync_mode: str = "manual",
+):
     """
     Run the generic sync pipeline for a specific plugin.
     """
@@ -104,6 +135,19 @@ async def run_plugin_pipeline_task(plugin_id: str, limit: int = None, user_id: s
         if limit is not None:
             config_dict["sync_limit"] = limit
         incremental_ai_sync = bool(config_dict.get(ConfigKeys.ENABLE_INCREMENTAL_AI_SYNC, False))
+        source_type = plugin.manifest.get("source_type")
+        has_existing_items = await _has_existing_plugin_items(source_type, user_id)
+        fetch_mode, disable_cache_hit_breaker = resolve_sync_fetch_mode(
+            incremental_ai_sync=incremental_ai_sync,
+            sync_mode=sync_mode,
+            has_existing_items=has_existing_items,
+        )
+        config_dict["_pekno_sync_mode"] = fetch_mode
+        ctx.config = config_dict
+        worker_log.info(
+            f"🔁 [{plugin_id}] Sync mode resolved: trigger={sync_mode}, "
+            f"fetch={fetch_mode}, breaker_disabled={disable_cache_hit_breaker}"
+        )
 
         raw_items = await plugin.fetch_data(ctx)
         if not raw_items:
@@ -151,7 +195,7 @@ async def run_plugin_pipeline_task(plugin_id: str, limit: int = None, user_id: s
                         f"⏭️ [{plugin_id}] Existing item hit, skipping: {normalized['title']} "
                         f"(consecutive hits: {cache_hit_count})"
                     )
-                    if cache_hit_count >= 3:
+                    if not disable_cache_hit_breaker and cache_hit_count >= 3:
                         worker_log.info(f"🛑 [{plugin_id}] Incremental circuit triggered after consecutive cache hits. Ending sync early.")
                         break
                     continue
@@ -194,6 +238,8 @@ async def run_plugin_pipeline_task(plugin_id: str, limit: int = None, user_id: s
 
                 worker_log.info(f"📤 [{plugin_id}] Dispatching item to ingestion pipeline: {item.title}")
                 await process_new_item_task.kiq(item.model_dump())
+
+            await session.commit()
 
         worker_log.info(f"✅ [{plugin_id}] Sync dispatch completed. Processed {len(raw_items)} records.")
         now_iso = now_in_app_timezone_naive().isoformat()

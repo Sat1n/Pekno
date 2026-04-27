@@ -92,6 +92,16 @@ async def find_plugin_by_source_type(source_type: str):
     return None, None
 
 
+def resolve_sync_fetch_mode(
+    *,
+    incremental_ai_sync: bool,
+    sync_mode: str,
+    has_existing_items: bool,
+) -> tuple[str, bool]:
+    should_backfill = incremental_ai_sync and (sync_mode == "manual" or not has_existing_items)
+    return ("full" if should_backfill else "latest", should_backfill)
+
+
 def build_item_raw_data(item) -> dict:
     metadata = dict(item.metadata_extra or {})
     raw_data = {

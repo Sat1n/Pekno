@@ -477,7 +477,7 @@ async def trigger_plugin_sync(plugin_id: str, current_user=Depends(get_current_u
         raise HTTPException(status_code=404, detail=f"Plugin was not found: {plugin_id}")
         
     # 异步触发，取代之前的 sync_github_stars_task
-    task = await run_plugin_pipeline_task.kiq(plugin_id, None, current_user["id"])
+    task = await run_plugin_pipeline_task.kiq(plugin_id, None, current_user["id"], "manual")
     
     return {
         "status": "accepted",

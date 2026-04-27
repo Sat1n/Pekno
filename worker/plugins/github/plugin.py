@@ -29,13 +29,13 @@ class GitHubStarsPlugin(BasePlugin):
 
     async def fetch_data(self, ctx: PluginContext) -> List[Dict[str, Any]]:
         """Fetch starred repositories from the GitHub API."""
-        limit = ctx.config.get('sync_limit', 100)
-        
-        ctx.log.info(f"📥 [GitHub] Fetching starred repositories (limit: {limit})")
+        fetch_mode = ctx.config.get("_pekno_sync_mode", "latest")
+
+        ctx.log.info(f"📥 [GitHub] Fetching starred repositories (mode: {fetch_mode})")
         
         # ctx.http 目前是我们在外部初始化好传进来的 GitHubClient
         # 对应 ctx.http = GitHubClient(token)
-        repos = await ctx.http.get_starred_repos(limit)
+        repos = await ctx.http.get_starred_repos(mode=fetch_mode)
         
         if not repos:
             ctx.log.warning("⚠️ No starred repositories were returned. Please verify the token permissions.")

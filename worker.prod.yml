@@ -1,17 +1,13 @@
 services:
   cpu:
-    build:
-      args:
-        BASE_IMAGE: python:3.13-slim
-        EXECUTION_MODE: cpu
+    image: ghcr.io/${PEKNO_IMAGE_OWNER:-sat1n}/pekno-worker-cpu:${PEKNO_IMAGE_TAG:-latest}
+    container_name: pekno-worker
     environment:
       WORKER_EXECUTION_MODE: cpu
 
   cuda:
-    build:
-      args:
-        BASE_IMAGE: nvidia/cuda:12.2.2-cudnn8-runtime-ubuntu22.04
-        EXECUTION_MODE: cuda
+    image: ghcr.io/${PEKNO_IMAGE_OWNER:-sat1n}/pekno-worker-cuda12:${PEKNO_IMAGE_TAG:-latest}
+    container_name: pekno-worker
     environment:
       WORKER_EXECUTION_MODE: cuda
       NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-all}
@@ -24,16 +20,3 @@ services:
               count: ${NVIDIA_GPU_COUNT:-all}
               capabilities:
                 - gpu
-
-  rocm:
-    build:
-      args:
-        BASE_IMAGE: python:3.13-slim
-        EXECUTION_MODE: rocm
-    environment:
-      WORKER_EXECUTION_MODE: rocm
-    group_add:
-      - video
-    devices:
-      - /dev/dri:/dev/dri
-      - /dev/kfd:/dev/kfd

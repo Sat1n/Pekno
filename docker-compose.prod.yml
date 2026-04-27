@@ -3,6 +3,7 @@
 # Quick start:
 #   cp .env.example .env
 #   docker compose -f docker-compose.prod.yml up -d
+# Keep worker.prod.yml next to this file; it selects the CPU/CUDA worker image.
 #
 # Published images follow this repository-owner pattern:
 #   ghcr.io/${{ github.repository_owner }}/pekno-xxx:latest
@@ -65,13 +66,12 @@ services:
         condition: service_started
     volumes: *app-volumes
 
-  # CPU worker is enabled by default and works on machines without NVIDIA GPUs.
-  worker-cpu:
-    image: ghcr.io/${PEKNO_IMAGE_OWNER:-sat1n}/pekno-worker-cpu:${PEKNO_IMAGE_TAG:-latest}
-    container_name: pekno-worker-cpu
+  worker:
+    extends:
+      file: worker.prod.yml
+      service: ${WORKER_EXECUTION_MODE:-cpu}
     environment:
       <<: *app-env
-      WORKER_EXECUTION_MODE: cpu
       RUN_DB_MIGRATIONS: "0"
     command: ["uv", "run", "taskiq", "worker", "worker.main:broker"]
     depends_on:

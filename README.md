@@ -72,41 +72,56 @@ Use the prebuilt GHCR images if you only want to run Pekno:
 ```bash
 PEKNO_REPO=Sat1n/Pekno
 wget -O docker-compose.prod.yml "https://raw.githubusercontent.com/${PEKNO_REPO}/main/docker-compose.prod.yml"
+wget -O worker.prod.yml "https://raw.githubusercontent.com/${PEKNO_REPO}/main/worker.prod.yml"
 wget -O .env.example "https://raw.githubusercontent.com/${PEKNO_REPO}/main/.env.example"
 cp .env.example .env
 docker compose -f docker-compose.prod.yml up -d
 ```
 
-Edit `.env` before starting if you need to change the HTTP port, database password, image owner, image tag, timezone, or `OLLAMA_BASE_URL`.
+Edit `.env` before starting if you need to change the HTTP port, database password, image owner, image tag, timezone, `OLLAMA_BASE_URL`, or worker runtime.
 
 ### CUDA Worker Deployment
 
-To use the prebuilt CUDA worker image on a NAS or Linux host, use `docker-compose.prod.cuda.yml` instead of the default CPU compose file. Make sure the host has an NVIDIA GPU, a working NVIDIA driver, and NVIDIA Container Toolkit installed. A quick host check should succeed before you start the CUDA stack:
+Production CPU and CUDA workers are selected through `.env`:
+
+```env
+WORKER_EXECUTION_MODE=cpu
+```
+
+Set `WORKER_EXECUTION_MODE=cuda` to use the prebuilt CUDA 12 worker image with the same `docker-compose.prod.yml` file:
+
+```bash
+docker compose -f docker-compose.prod.yml up -d
+```
+
+CUDA mode requires an NVIDIA GPU, a working NVIDIA driver, and NVIDIA Container Toolkit installed on the host. A quick host check should succeed before you start the CUDA stack:
 
 ```bash
 nvidia-smi
 docker run --rm --gpus all nvidia/cuda:12.2.2-cudnn8-runtime-ubuntu22.04 nvidia-smi
 ```
 
-Download the CUDA production compose file:
-
-```bash
-wget -O docker-compose.prod.cuda.yml "https://raw.githubusercontent.com/${PEKNO_REPO}/main/docker-compose.prod.cuda.yml"
-```
-
-Then start the CUDA stack directly:
-
-```bash
-docker compose -f docker-compose.prod.cuda.yml up -d
-```
-
-Use either `docker-compose.prod.yml` for CPU or `docker-compose.prod.cuda.yml` for CUDA. Avoid running both stacks at the same time unless you intentionally want both workers consuming jobs from the same Redis queue. ROCm and other accelerators do not have official production compose files yet.
+Switch back by setting `WORKER_EXECUTION_MODE=cpu` and recreating the worker. ROCm and other accelerators do not have official production images yet.
 
 Clone the repository, create your environment file, and start Pekno with Docker Compose:
 
 ```bash
 git clone https://github.com/Sat1n/Pekno.git && cd Pekno && cp .env.example .env && docker compose up -d --build
 ```
+
+For local development, the worker runtime is selected through `.env`:
+
+```env
+WORKER_EXECUTION_MODE=cpu
+```
+
+Set `WORKER_EXECUTION_MODE=cuda` to build and run the development worker on CUDA 12, then recreate it:
+
+```bash
+docker compose up -d --build worker
+```
+
+CUDA mode requires a working NVIDIA driver and NVIDIA Container Toolkit on the host. Switch back by setting `WORKER_EXECUTION_MODE=cpu` and rebuilding the worker.
 
 Open the app at:
 
@@ -151,14 +166,14 @@ services:
     image: redis:7-alpine
 ```
 
-For worker-side ML acceleration in local builds, configure the worker extension in `worker.ml.yml`. For prebuilt images, use `docker-compose.prod.yml` for CPU or `docker-compose.prod.cuda.yml` for CUDA. Hub stays CPU-only by design.
+For worker-side ML acceleration, use `WORKER_EXECUTION_MODE` to select the matching worker runtime. Local builds use `worker.ml.yml`; production deployments use `worker.prod.yml`. Hub stays CPU-only by design.
 
 ### ML Runtime Roadmap
 
 Hardware acceleration support is tracked explicitly:
 
-- [x] **CPU**: default worker runtime, available through `docker-compose.prod.yml`.
-- [x] **NVIDIA CUDA 12**: prebuilt `pekno-worker-cuda12` image, available through `docker-compose.prod.cuda.yml`.
+- [x] **CPU**: default worker runtime, available through `WORKER_EXECUTION_MODE=cpu`.
+- [x] **NVIDIA CUDA 12**: prebuilt `pekno-worker-cuda12` image, available through `WORKER_EXECUTION_MODE=cuda`.
 - [ ] **AMD ROCm**: planned; no official production compose file yet.
 - [ ] **Apple Silicon / Metal**: planned investigation for local developer workflows.
 - [ ] **Intel GPU / oneAPI**: planned investigation.

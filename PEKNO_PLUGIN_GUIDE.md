@@ -12,7 +12,8 @@ Pekno plugins are Python packages that run inside the worker process. The Hub pr
 - Plugin metadata is persisted in the `plugins` database table via `PluginRegistryORM`.
 - Enabled plugins are imported dynamically by `shared.plugins.manager.PluginManager`.
 - Hub and worker both load plugin manifests, but worker executes plugin logic.
-- Manual sync calls `run_plugin_pipeline_task(plugin_id, limit, user_id)`.
+- Manual sync calls `run_plugin_pipeline_task(plugin_id, limit, user_id, "manual")`.
+- Auto-sync calls `run_plugin_pipeline_task(plugin_id, limit, user_id, "auto")`.
 - Single URL parsing calls `parse_single_plugin_item_task(plugin_id, url, user_id, ...)`.
 - AI ingestion runs through `process_new_item_task`; scheduled incremental batches are fanned out by `trigger_ai_sweep_task`.
 
@@ -232,6 +233,25 @@ The GitHub built-in plugin currently receives a specialized `GitHubClient`. Othe
 
 If your plugin receives a generic `httpx.AsyncClient`, close long-lived clients only if you created them yourself. The pipeline closes the context HTTP client after single-item parsing when it exposes `aclose()`.
 
+### Sync Modes
+
+Pekno injects `ctx.config["_pekno_sync_mode"]` before calling `fetch_data(ctx)`:
+
+- `latest`: fetch only the newest page or batch. Auto-sync uses this after a plugin already has local history.
+- `full`: fetch historical pages until the source is exhausted. Manual sync and initial incremental backfill use this mode.
+
+Plugins should keep one `fetch_data(ctx)` entrypoint and branch inside it:
+
+```python
+async def fetch_data(self, ctx: PluginContext) -> list[dict]:
+    sync_mode = ctx.config.get("_pekno_sync_mode", "latest")
+    if sync_mode == "full":
+        return await self._fetch_all_pages(ctx)
+    return await self._fetch_latest_page(ctx)
+```
+
+Pagination, cursors, offsets, and platform-specific limits belong inside the plugin. If a source cannot support historical sync, fall back to `latest` and log a warning.
+
 ## Required Methods
 
 ### `fetch_data(ctx)`
@@ -240,7 +260,8 @@ Fetch raw records for sync.
 
 Rules:
 
-- Respect `ctx.config["sync_limit"]`.
+- Use `ctx.config["_pekno_sync_mode"]` to decide whether to fetch latest data or historical pages.
+- Treat `ctx.config["sync_limit"]` as a processing/batch preference, not as an API page-size requirement.
 - Return a list of raw dictionaries.
 - Do not write to the database.
 - Do not enqueue downstream tasks directly.
