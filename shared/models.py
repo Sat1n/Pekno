@@ -41,6 +41,9 @@ class ItemORM(Base):
     # 插件私有数据
     metadata_extra: Mapped[dict] = mapped_column(JSON, default={})
 
+    # AI 长总结触发时间, 用于处理锁的超时判断
+    long_summary_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
 
 class ConfigORM(Base):
     """用户配置存储表（加密存储敏感信息）"""

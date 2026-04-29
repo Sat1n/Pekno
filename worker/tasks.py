@@ -27,6 +27,7 @@ from urllib.parse import quote, unquote, urlparse
 from shared.config import ConfigManager, ConfigKeys
 from shared.credentials import get_user_credential, resolve_cookie_file_path
 from shared.locale import normalize_preferred_locale
+from shared.processing import release_processing_lock
 
 
 def _resolve_bilibili_cookiefile(url: str, user_id: str | None) -> str | None:
@@ -461,6 +462,13 @@ async def process_multimedia_task(
     """
     worker_log.info(f"🎬 Starting multimedia processing task: {item_id} | source={url}")
     
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(ItemORM).where(ItemORM.id == item_id))
+        item_check = result.scalar_one_or_none()
+        if item_check and item_check.ai_processing_status == "completed":
+            worker_log.info(f"⏭️ Item already completed, skipping: {item_id}")
+            return
+    
     # 获取 ItemORM 记录供参考
     async with AsyncSessionLocal() as session:
         result = await session.execute(ItemORM.__table__.select().where(ItemORM.id == item_id))
@@ -666,6 +674,7 @@ async def process_multimedia_task(
                 ItemORM.__table__.update()
                 .where(ItemORM.id == item_id)
                 .values(
+                    ai_processing_status="completed",
                     content_text=plain_transcript_text or item_data.content_text,
                     metadata_extra=meta,
                     embedding=vector if vector is not None else item_data.embedding,
@@ -683,6 +692,9 @@ async def process_multimedia_task(
         )
             
     except QuotaExceededException as exc:
+        async with AsyncSessionLocal() as session:
+            async with session.begin():
+                await release_processing_lock(item_id, session, success=False)
         await _mark_item_failed_with_circuit_breaker(
             item_id,
             error_message=exc.detail,
@@ -692,6 +704,8 @@ async def process_multimedia_task(
     except Exception as e:
         worker_log.error(f"❌ Multimedia processing pipeline failed: {e}")
         async with AsyncSessionLocal() as session:
+            async with session.begin():
+                await release_processing_lock(item_id, session, success=False)
             result = await session.execute(select(ItemORM).where(ItemORM.id == item_id))
             failed_item = result.scalar_one_or_none()
             if failed_item:
@@ -821,7 +835,15 @@ async def _download_vault_asset_impl(item_id: str, user_id: str | None = None):
         preferred_locale = metadata.get("preferred_locale")
 
         if item.intent in {"video", "audio"} and not already_processed:
-            await process_multimedia_task.kiq(item_id, source_url, user_id, preferred_locale)
+            async with AsyncSessionLocal() as session:
+                async with session.begin():
+                    locked = await acquire_processing_lock(item_id, session)
+                    if locked:
+                        worker_log.info(f"🔒 Processing lock acquired for vault download: {item_id}")
+            if locked:
+                await process_multimedia_task.kiq(item_id, source_url, user_id, preferred_locale)
+            else:
+                worker_log.info(f"⏭️ Processing lock already held, skipping re-enqueue: {item_id}")
         elif item.intent in {"video", "audio"}:
             worker_log.info(f"⏭️ 已存在多媒体分析结果，跳过重复处理: {item_id}")
 

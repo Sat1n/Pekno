@@ -1,7 +1,11 @@
 import asyncio
+import gc
 import os
+import time
+from pathlib import Path
 from typing import Any
 
+from faster_whisper import WhisperModel
 from hub.core.billing import estimate_tokens, record_api_usage
 from hub.core.llm.ollama_manager import force_unload_ollama
 from shared.logger import worker_log
@@ -23,6 +27,8 @@ async def _record_whisper_usage(model_name: str, transcript_text: str = "") -> N
 
 async def resolve_huggingface_env():
     """Resolve and inject Hugging Face environment settings for downloads."""
+    os.environ["HF_HOME"] = str(Path("data") / "cache" / "huggingface")
+
     os.environ.pop("HF_ENDPOINT", None)
     os.environ.pop("HUGGINGFACE_HUB_ENDPOINT", None)
 
@@ -66,6 +72,59 @@ async def resolve_huggingface_env():
 
 LOW_CONFIDENCE_LANGUAGE_THRESHOLD = 0.55
 
+_model_cache: dict[str, tuple[WhisperModel, str, float]] = {}
+IDLE_UNLOAD_SECONDS = 1800
+
+
+def _free_cuda_vram():
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            worker_log.info("🧹 CUDA VRAM cache cleared via torch.")
+    except ImportError:
+        pass
+
+
+async def _cleanup_idle_models(now: float):
+    stale = [
+        (k, dev) for k, (_, dev, t) in _model_cache.items()
+        if now - t > IDLE_UNLOAD_SECONDS
+    ]
+    if not stale:
+        return
+
+    had_cuda = False
+    for key, device in stale:
+        worker_log.info("🗑️ Unloading idle Whisper model: %s", key)
+        del _model_cache[key]
+        if device == "cuda":
+            had_cuda = True
+
+    gc.collect()
+    if had_cuda:
+        _free_cuda_vram()
+
+
+async def _get_or_load_whisper_model(model_name: str, device: str) -> WhisperModel:
+    cache_key = f"{model_name}:{device}"
+    now = time.time()
+
+    await _cleanup_idle_models(now)
+
+    if cache_key in _model_cache:
+        model, _, _ = _model_cache[cache_key]
+        _model_cache[cache_key] = (model, device, now)
+        return model
+
+    worker_log.info("📦 Loading Whisper model: %s on %s...", model_name, device)
+    model = await asyncio.to_thread(
+        WhisperModel, model_name, device=device, compute_type="int8"
+    )
+    _model_cache[cache_key] = (model, device, now)
+    worker_log.info("✅ Whisper model loaded: %s", cache_key)
+    return model
+
 
 class TranscriberFactory:
     @staticmethod
@@ -79,8 +138,7 @@ class TranscriberFactory:
                 await asyncio.sleep(2)
             try:
                 await resolve_huggingface_env()
-                
-                from faster_whisper import WhisperModel
+
                 current_endpoint = os.environ.get("HF_ENDPOINT", "https://huggingface.co")
                 disable_xet = os.environ.get("HF_HUB_DISABLE_XET", "0")
 
@@ -91,7 +149,7 @@ class TranscriberFactory:
                         current_endpoint,
                         disable_xet,
                     )
-                    model = await asyncio.to_thread(WhisperModel, model_name, device="cuda", compute_type="int8")
+                    model = await _get_or_load_whisper_model(model_name, "cuda")
                     worker_log.info("Faster-Whisper (%s) loaded successfully on GPU.", model_name)
                 else:
                     worker_log.info("CPU execution mode detected. Loading Faster-Whisper (%s) on CPU.", model_name)
@@ -100,7 +158,7 @@ class TranscriberFactory:
                         current_endpoint,
                         disable_xet,
                     )
-                    model = await asyncio.to_thread(WhisperModel, model_name, device="cpu", compute_type="int8")
+                    model = await _get_or_load_whisper_model(model_name, "cpu")
             except Exception as e:
                 if not use_cuda:
                     raise
@@ -113,7 +171,7 @@ class TranscriberFactory:
                     os.environ.get("HF_ENDPOINT", "https://huggingface.co"),
                     os.environ.get("HF_HUB_DISABLE_XET", "0"),
                 )
-                model = await asyncio.to_thread(WhisperModel, model_name, device="cpu", compute_type="int8")
+                model = await _get_or_load_whisper_model(model_name, "cpu")
 
             worker_log.info("Starting local transcription: %s", audio_path)
             segments_generator, info = await asyncio.to_thread(model.transcribe, audio_path, beam_size=5)
@@ -147,7 +205,7 @@ class TranscriberFactory:
                     "language_probability": language_probability,
                     "low_confidence": True,
                 }
-            
+
             result = []
             for s in await asyncio.to_thread(list, segments_generator):
                 result.append({
