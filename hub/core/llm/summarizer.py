@@ -11,6 +11,65 @@ class VideoSummaryResult(BaseModel):
     summary: str
     keyframe_timestamps: list[int]  # 推荐截取画面的整数秒数列表（1-3个）
 
+
+def _repair_video_summary_json(raw_output: str, locale: str) -> VideoSummaryResult | None:
+    """
+    尝试修复 LLM 返回的格式不正确的 JSON。
+    常见错误: keyframe_timestamps 被写成嵌套数组 [[1,2,3]], 或多了额外字段。
+    """
+    try:
+        data = json.loads(raw_output)
+    except json.JSONDecodeError:
+        # JSON 本身不合法, 跳过后面的摘要提取
+        return _extract_summary_by_regex(raw_output, locale)
+
+    # 修复 keyframe_timestamps: 拍平嵌套数组 [[1,2,3]] -> [1,2,3]
+    if isinstance(data, dict):
+        timestamps = data.get("keyframe_timestamps")
+        if isinstance(timestamps, list):
+            while len(timestamps) == 1 and isinstance(timestamps[0], list):
+                timestamps = timestamps[0]
+            data["keyframe_timestamps"] = [int(v) for v in timestamps if isinstance(v, (int, float))]
+
+        # 先尝试用修复后的 data 重新构建
+        try:
+            return VideoSummaryResult(
+                summary=data.get("summary", ""),
+                keyframe_timestamps=data["keyframe_timestamps"],
+            )
+        except Exception:
+            pass
+
+    return _extract_summary_by_regex(raw_output, locale)
+
+
+def _extract_summary_by_regex(raw_output: str, locale: str) -> VideoSummaryResult | None:
+    """层 2: 用正则从原始输出中提取 summary 字段的文本内容 (兼容非法 JSON)。"""
+    match = re.search(r'"summary"\s*:\s*"', raw_output)
+    if not match:
+        return None
+
+    start = match.end()
+    content_chars = []
+    i = start
+    while i < len(raw_output):
+        ch = raw_output[i]
+        if ch == "\\" and i + 1 < len(raw_output):
+            content_chars.append(raw_output[i + 1])
+            i += 2
+        elif ch == '"':
+            break
+        else:
+            content_chars.append(ch)
+            i += 1
+
+    summary_text = "".join(content_chars)
+    if not summary_text.strip():
+        return None
+
+    hub_log.info(f"🔧 Extracted summary via regex ({len(summary_text)} chars), keyframe_timestamps empty.")
+    return VideoSummaryResult(summary=summary_text, keyframe_timestamps=[])
+
 async def summarize_video_transcript(item: Any, transcript: str, preferred_locale: str | None = None) -> VideoSummaryResult:
     """
     AI 导演总结引擎 - 防幻觉机制与复合约束注入
@@ -69,7 +128,14 @@ async def summarize_video_transcript(item: Any, transcript: str, preferred_local
         data = json.loads(raw_output)
         return VideoSummaryResult(**data)
     except Exception as e:
-        hub_log.error(f"❌ Director summary engine returned invalid structured output: {e}, raw_output={raw_output}")
+        hub_log.warning(f"⚠️ Director summary engine returned malformed JSON, attempting repair: {e}")
+
+        # 层 1: 尝试修复常见 JSON 错误
+        repaired = _repair_video_summary_json(raw_output, normalized_locale)
+        if repaired:
+            return repaired
+
+        hub_log.error(f"❌ Director summary engine repair failed, raw_output={raw_output}")
         fallback_summary = (
             "Failed to parse the structured multimedia summary output."
             if normalized_locale == "en"
