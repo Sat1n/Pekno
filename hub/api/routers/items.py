@@ -22,6 +22,7 @@ from shared.logger import hub_log
 from shared.locale import normalize_preferred_locale
 from shared.entities import AIProcessingStatus
 from shared.models import ItemORM, UserItemStateORM, VaultCategoryORM
+from shared.processing import acquire_processing_lock
 from shared.plugins.base import BasePlugin
 from shared.plugins.manager import plugin_manager
 from shared.time_utils import now_in_app_timezone_naive
@@ -482,8 +483,14 @@ async def _queue_video_summary_if_needed(item: ItemORM, user_id: str | None = No
         return
 
     try:
-        from worker.tasks import process_multimedia_task
+        async with AsyncSessionLocal() as session:
+            async with session.begin():
+                locked = await acquire_processing_lock(item.id, session)
+                if not locked:
+                    hub_log.info(f"⏭️ Processing lock already held for video: {item.id}")
+                    return
 
+        from worker.tasks import process_multimedia_task
         await process_multimedia_task.kiq(item.id, item.raw_link, user_id, preferred_locale)
     except Exception:
         hub_log.exception("Failed to dispatch video summary task")
@@ -964,6 +971,15 @@ async def summarize_item(item_id: str, request: Request, current_user=Depends(ge
                 "task_id": "",
                 "message": "This video already has multimedia analysis results. No new run is needed.",
             }
+        async with AsyncSessionLocal() as lock_session:
+            async with lock_session.begin():
+                locked = await acquire_processing_lock(item_id, lock_session)
+                if not locked:
+                    return {
+                        "status": "already_processing",
+                        "task_id": "",
+                        "message": "AI summary is already running for this video. Please wait.",
+                    }
         from worker.tasks import process_multimedia_task
         await process_multimedia_task.kiq(item_id, item.raw_link, current_user["id"], preferred_locale)
         msg = "The AI multimedia analysis pipeline has started. Audio extraction and keyframe generation are in progress."
@@ -1017,7 +1033,7 @@ async def get_item_summary_status(item_id: str, current_user=Depends(get_current
 
     return {
         "item_id": item_id,
-        "status": "pending",
+        "status": "processing" if item.ai_processing_status == AIProcessingStatus.processing else "pending",
     }
 
 
