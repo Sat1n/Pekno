@@ -27,7 +27,7 @@ from urllib.parse import quote, unquote, urlparse
 from shared.config import ConfigManager, ConfigKeys
 from shared.credentials import get_user_credential, resolve_cookie_file_path
 from shared.locale import normalize_preferred_locale
-from shared.processing import acquire_processing_lock, release_processing_lock
+from shared.processing import release_processing_lock
 
 
 def _resolve_bilibili_cookiefile(url: str, user_id: str | None) -> str | None:
@@ -463,11 +463,11 @@ async def process_multimedia_task(
     worker_log.info(f"🎬 Starting multimedia processing task: {item_id} | source={url}")
     
     async with AsyncSessionLocal() as session:
-        async with session.begin():
-            locked = await acquire_processing_lock(item_id, session)
-            if not locked:
-                worker_log.info(f"⏭️ Processing lock held by another task, skipping: {item_id}")
-                return
+        result = await session.execute(select(ItemORM).where(ItemORM.id == item_id))
+        item_check = result.scalar_one_or_none()
+        if item_check and item_check.ai_processing_status == "completed":
+            worker_log.info(f"⏭️ Item already completed, skipping: {item_id}")
+            return
     
     # 获取 ItemORM 记录供参考
     async with AsyncSessionLocal() as session:
