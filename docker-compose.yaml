@@ -34,6 +34,8 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
       RUN_DB_MIGRATIONS: "1"
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-120}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
     command: ["uv", "run", "python", "hub/main.py"]
     depends_on:
       postgres:
@@ -67,6 +69,8 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
       RUN_DB_MIGRATIONS: "0"
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-120}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
     command: ["uv", "run", "taskiq", "worker", "worker.main:broker"]
     depends_on:
       postgres:
@@ -100,6 +104,8 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
       RUN_DB_MIGRATIONS: "0"
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-120}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
     command: ["sh", "-lc", "uv run python scripts/scheduler_bootstrap.py && uv run taskiq scheduler worker.main:scheduler"]
     depends_on:
       postgres:
