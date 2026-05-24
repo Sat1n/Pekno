@@ -103,6 +103,7 @@ async def run_plugin_pipeline_task(
     limit: int = None,
     user_id: str | None = None,
     sync_mode: str = "manual",
+    preferred_locale: str | None = None,
 ):
     """
     Run the generic sync pipeline for a specific plugin.
@@ -206,6 +207,9 @@ async def run_plugin_pipeline_task(
                 final_metadata = normalized.get("metadata_extra", {})
                 final_metadata.update(metadata_extra)
                 final_metadata["has_long_summary"] = False
+
+                if preferred_locale:
+                    final_metadata["preferred_locale"] = preferred_locale
 
                 if incremental_ai_sync:
                     await _store_lightweight_item(

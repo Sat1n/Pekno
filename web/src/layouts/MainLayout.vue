@@ -13,6 +13,7 @@ import SettingsDialog from '@/components/SettingsDialog.vue'
 import PluginSettingsDialog from '@/components/PluginSettingsDialog.vue'
 import { SUPPORTED_LOCALES, getAppLocale, setAppLocale } from '@/i18n'
 import {
+  apiClient,
   clearNotifications,
   clearStoredToken,
   getNotifications,
@@ -162,10 +163,20 @@ async function navigateTo(path: string, disabled?: boolean) {
   await router.push(path)
 }
 
-onMounted(() => {
+onMounted(async () => {
   const savedSidebarState = window.localStorage.getItem(SIDEBAR_STATE_KEY)
   if (savedSidebarState === 'false') {
     sidebarOpen.value = false
+  }
+
+  // Sync locale from backend on mount (if user is logged in)
+  try {
+    const { data } = await apiClient.get('/api/auth/me')
+    if (data.preferred_locale && data.preferred_locale !== currentLocale.value) {
+      currentLocale.value = data.preferred_locale
+    }
+  } catch {
+    // User not logged in or API error, use localStorage locale
   }
 
   void loadNotifications()
@@ -197,6 +208,10 @@ watch(currentLocale, (value) => {
   if (locale.value !== nextLocale) {
     locale.value = nextLocale
   }
+  // Sync locale preference to backend
+  apiClient.put('/api/auth/locale', { locale: nextLocale }).catch((err) => {
+    console.error('Failed to sync locale to backend:', err)
+  })
 })
 
 watch(locale, (value) => {
