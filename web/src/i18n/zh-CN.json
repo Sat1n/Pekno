@@ -653,6 +653,7 @@
     "importDatabaseDesc": "高危操作。直接清空并覆盖现有数据库，仅用于本地调试复现问题。",
     "importDatabaseWarningTitle": "⚠️ 高危操作警告",
     "importDatabaseWarningDesc": "导入操作将直接清空当前数据库的所有内容并覆盖！由于安全性原因，导出文件不包含加密密钥。如果您需要恢复 API Token 等加密数据，必须手动从生产服务器拷贝 `data/secrets/pekno_encryption_key`（或配置环境变量）到本地环境。\n您确定要继续覆盖吗？",
+    "haveReadWarning": "我已阅读上述通知",
     "importSuccess": "数据库导入成功，请刷新页面",
     "changePassword": "修改密码",
     "currentPassword": "当前密码",

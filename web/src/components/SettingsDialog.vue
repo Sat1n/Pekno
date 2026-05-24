@@ -12,6 +12,7 @@ import { usePluginStore } from '@/store/usePluginStore'
 import { apiClient, getStoredToken, API_BASE_URL, changePassword, clearStoredToken, createInvitationCode, getDataSources, getInvitationCodes, getModelProviders, getStoredAuthUser, clearDataSource, saveModelAssignments, saveModelProvider, getPATs, createPAT, deletePAT, getSystemBillingSettings, saveSystemBillingSettings, resolveApiErrorMessage, type DataSourceStat, type InvitationCodeInfo, type ModelAssignmentInfo, type ModelProviderInfo, type PATItem, type SystemBillingSettings } from '@/lib/api'
 import { useToast } from '@/components/ui/toast/use-toast'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
+import { Checkbox } from '@/components/ui/checkbox'
 import PluginInstallDialog from './PluginInstallDialog.vue'
 
 const props = defineProps<{ open: boolean; initialTab?: string }>()
@@ -72,6 +73,10 @@ const developerSettings = ref({ pause_scheduler: false })
 const isLoadingDeveloper = ref(false)
 const isSavingDeveloper = ref(false)
 const isImportingDb = ref(false)
+const isImportDatabaseDialogOpen = ref(false)
+const isImportWarningRead = ref(false)
+const pendingImportFile = ref<File | null>(null)
+const importDatabaseTarget = ref<HTMLInputElement | null>(null)
 const importFileInput = ref<HTMLInputElement | null>(null)
 
 async function loadDeveloperSettings() {
@@ -125,20 +130,28 @@ function triggerImportFileInput() {
   importFileInput.value?.click()
 }
 
-async function handleImportDatabase(event: Event) {
+function promptImportDatabase(event: Event) {
   const target = event.target as HTMLInputElement
   const file = target.files?.[0]
   if (!file) return
-  
-  if (!confirm(t('settings.importDatabaseWarningDesc'))) {
-    target.value = ''
-    return
-  }
 
+  pendingImportFile.value = file
+  importDatabaseTarget.value = target
+  isImportWarningRead.value = false
+  isImportDatabaseDialogOpen.value = true
+}
+
+async function executeImportDatabase() {
+  if (!pendingImportFile.value || !importDatabaseTarget.value) return
+
+  const file = pendingImportFile.value
+  const target = importDatabaseTarget.value
+
+  isImportDatabaseDialogOpen.value = false
   isImportingDb.value = true
   const formData = new FormData()
   formData.append('file', file)
-  
+
   try {
     await apiClient.post('/api/admin/system/developer/import', formData, {
       headers: { 'Content-Type': 'multipart/form-data' }
@@ -150,7 +163,18 @@ async function handleImportDatabase(event: Event) {
   } finally {
     isImportingDb.value = false
     target.value = ''
+    pendingImportFile.value = null
+    importDatabaseTarget.value = null
   }
+}
+
+function cancelImportDatabase() {
+  if (isImportingDb.value) return
+  if (importDatabaseTarget.value) {
+    importDatabaseTarget.value.value = ''
+  }
+  pendingImportFile.value = null
+  importDatabaseTarget.value = null
 }
 
 
@@ -1439,7 +1463,7 @@ function formatBillingCost(value: number | undefined, currency: string | undefin
                           <Loader2 v-if="isImportingDb" class="w-4 h-4 mr-2 animate-spin" />
                           Import Database
                         </Button>
-                        <input type="file" ref="importFileInput" accept=".dump" class="hidden" @change="handleImportDatabase" />
+                        <input type="file" ref="importFileInput" accept=".dump" class="hidden" @change="promptImportDatabase" />
                       </div>
                     </div>
                   </div>
@@ -1498,6 +1522,38 @@ function formatBillingCost(value: number | undefined, currency: string | undefin
       </div>
     </DialogContent>
   </Dialog>
+
+  <AlertDialog :open="isImportDatabaseDialogOpen" @update:open="(val) => { isImportDatabaseDialogOpen = val; if (!val) cancelImportDatabase(); }">
+    <AlertDialogContent class="max-w-[400px]">
+      <AlertDialogHeader>
+        <AlertDialogTitle>Import Database</AlertDialogTitle>
+        <AlertDialogDescription class="pt-2 text-destructive">
+          {{ t('settings.importDatabaseWarningDesc') }}
+        </AlertDialogDescription>
+      </AlertDialogHeader>
+
+      <div class="flex items-center space-x-2 mt-4">
+        <Checkbox id="import-warning-read" v-model="isImportWarningRead" />
+        <label
+          for="import-warning-read"
+          class="text-sm font-medium leading-none cursor-pointer select-none"
+        >
+          {{ t('settings.haveReadWarning') }}
+        </label>
+      </div>
+
+      <div class="flex justify-end gap-3 mt-4">
+        <AlertDialogCancel>{{ t('common.cancel') }}</AlertDialogCancel>
+        <Button
+          variant="destructive"
+          :disabled="!isImportWarningRead"
+          @click="executeImportDatabase"
+        >
+          Import Database
+        </Button>
+      </div>
+    </AlertDialogContent>
+  </AlertDialog>
 
   <AlertDialog :open="isClearDialogOpen" @update:open="isClearDialogOpen = $event">
     <AlertDialogContent class="max-w-[400px]">
