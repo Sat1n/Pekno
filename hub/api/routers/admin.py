@@ -18,7 +18,7 @@ from hub.api.schemas import (
 from hub.core.billing import get_billing_state, save_billing_config
 from hub.core import model_settings
 from hub.core.security import require_admin
-from shared.database import AsyncSessionLocal, DB_USER, DB_PASS, DB_HOST, DB_PORT, DB_NAME
+from shared.database import AsyncSessionLocal, DB_USER, DB_PASS, DB_HOST, DB_PORT, DB_NAME, engine
 from shared.models import InvitationCodeORM, UserORM, SystemConfigORM
 
 router = APIRouter(prefix="/api/admin", tags=["Admin"])
@@ -166,21 +166,29 @@ async def import_database(file: UploadFile = File(...), current_user=Depends(req
     db_url = f"postgresql://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
     fd, path = tempfile.mkstemp(suffix=".dump")
     os.close(fd)
-    
+
     try:
         content = await file.read()
         with open(path, "wb") as f:
             f.write(content)
-            
-        subprocess.run(
+
+        result = subprocess.run(
             ["pg_restore", "--clean", "--if-exists", "-O", "-x", "-d", db_url, path],
-            check=True,
             capture_output=True,
         )
-    except subprocess.CalledProcessError as e:
-        raise HTTPException(status_code=500, detail=f"Import failed: {e.stderr.decode('utf-8', errors='replace')}")
+
+        # pg_restore exit codes: 0=success, 1=warnings (acceptable), 2+=errors
+        if result.returncode >= 2:
+            stderr_text = result.stderr.decode("utf-8", errors="replace")
+            raise HTTPException(status_code=500, detail=f"Import failed: {stderr_text}")
+
+        # pg_restore modifies the schema; invalidate all cached prepared
+        # statements in the hub's connection pool so the next request creates
+        # fresh connections instead of hitting InvalidCachedStatementError.
+        await engine.dispose()
+
     finally:
         if os.path.exists(path):
             os.remove(path)
-            
+
     return {"status": "success"}
