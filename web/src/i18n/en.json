@@ -654,6 +654,7 @@
     "importDatabaseDesc": "DANGER. Overwrite current database with a backup file.",
     "importDatabaseWarningTitle": "⚠️ DANGEROUS OPERATION",
     "importDatabaseWarningDesc": "Import will CLEAR and overwrite the current database! The exported file does not contain encryption keys for security. You must manually copy the `pekno_encryption_key` from the production server to decrypt sensitive data.\nAre you sure you want to continue?",
+    "haveReadWarning": "I have read the notification above",
     "importSuccess": "Database imported successfully. Please refresh the page.",
     "changePassword": "Change Password",
     "currentPassword": "Current Password",
