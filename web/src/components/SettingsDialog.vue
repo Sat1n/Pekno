@@ -116,7 +116,7 @@ function handleExportDatabase() {
       window.URL.revokeObjectURL(downloadUrl)
       a.remove()
     })
-    .catch(err => {
+    .catch(() => {
       toast({ title: 'Export failed', variant: 'destructive' })
     })
 }
