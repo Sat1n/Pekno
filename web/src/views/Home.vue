@@ -186,6 +186,7 @@ const selectedTranscriptSegments = computed(() =>
 const hoverTimers = new Map<string, number>()
 const hoverDataMap = ref<Record<string, HoverResponse>>({})
 const activeHoverItemId = ref<string | null>(null)
+const activeDropdownItemId = ref<string | null>(null)
 const hoverSuppressedItemId = ref<string | null>(null)
 const showBackToTop = ref(false)
 let scrollContainer: HTMLElement | null = null
@@ -1172,7 +1173,7 @@ watch(isAddDialogOpen, (isOpen) => {
     </div>
 
     <div v-else :class="['grid transition-all duration-300', gridClass]">
-      <template v-for="item in searchResults" :key="item.id">
+      <template v-for="(item, index) in searchResults" :key="item.id">
         <div
           v-if="!isWatchLaterPage && initialAnchorItemId === item.id"
           class="col-span-full flex items-center gap-3 rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 text-sm text-primary"
@@ -1190,6 +1191,7 @@ watch(isAddDialogOpen, (isOpen) => {
             item.isWatchLater && !item.isFavorited ? 'border-amber-300/60 shadow-amber-100/20' : '',
             layoutMode === 'compact' ? 'rounded-lg' : 'rounded-xl'
           ]"
+          :style="index > 10 ? 'content-visibility: auto; contain-intrinsic-size: auto none auto 250px;' : ''"
           @click="handleCardClick(item)"
           @mouseenter="handleCardMouseEnter(item)"
           @mouseleave="handleCardMouseLeave(item)"
@@ -1233,7 +1235,7 @@ watch(isAddDialogOpen, (isOpen) => {
           @mouseenter.stop="suppressCardHover(item.id)"
           @mouseleave.stop="releaseCardHover(item.id)"
         >
-          <DropdownMenu>
+          <DropdownMenu @update:open="(isOpen) => isOpen ? activeDropdownItemId = item.id : (activeDropdownItemId === item.id && (activeDropdownItemId = null))">
             <DropdownMenuTrigger as-child>
               <Button
                 variant="ghost"
@@ -1244,7 +1246,7 @@ watch(isAddDialogOpen, (isOpen) => {
                 <MoreVertical class="h-4 w-4" />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" class="w-48">
+            <DropdownMenuContent v-if="activeDropdownItemId === item.id" align="end" class="w-48">
               <DropdownMenuItem @click.stop="handleAISummary(item)">
                 <Sparkles class="mr-2 h-4 w-4 text-primary" />
                 <span>{{ t('home.aiSummary') }}</span>
