@@ -71,7 +71,7 @@ services:
       RUN_DB_MIGRATIONS: "0"
       ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-120}
       JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
-    command: ["uv", "run", "taskiq", "worker", "worker.main:broker"]
+    command: ["uv", "run", "taskiq", "worker", "-p", "4", "worker.main:broker"]
     depends_on:
       postgres:
         condition: service_healthy

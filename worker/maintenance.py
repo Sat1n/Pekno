@@ -1,4 +1,4 @@
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from shared.database import AsyncSessionLocal
 from shared.entities import AIProcessingStatus, UniversalItem
 from shared.models import ConfigORM, ItemORM, PluginRegistryORM, UserItemStateORM, SystemConfigORM
@@ -273,12 +273,34 @@ async def system_ttl_cleanup_task():
     task_name="trigger_ai_sweep",
     schedule=[{"cron": "*/5 * * * *"}],
 )
-async def trigger_ai_sweep_task(limit: int = 20):
+async def trigger_ai_sweep_task(limit: int = 100):
     if await _is_scheduler_paused():
         worker_log.info("⏸️ Scheduler is paused by developer settings. Skipping AI sweep.")
         return
 
     worker_log.info("🧠 AI sweep started. Looking for pending lightweight items.")
+
+    # 恢复卡在 processing 状态超过 30 分钟的项（崩溃恢复机制）
+    timeout_threshold = now_in_app_timezone_naive() - timedelta(minutes=30)
+    async with AsyncSessionLocal() as session:
+        recovery_result = await session.execute(
+            update(ItemORM)
+            .where(
+                ItemORM.ai_processing_status == AIProcessingStatus.processing.value,
+                ItemORM.updated_at < timeout_threshold,
+            )
+            .values(
+                ai_processing_status=AIProcessingStatus.pending_ai.value,
+                updated_at=now_in_app_timezone_naive(),
+            )
+        )
+        recovered_count = recovery_result.rowcount
+        if recovered_count > 0:
+            await session.commit()
+            worker_log.info(f"🔄 Recovered {recovered_count} items stuck in processing status.")
+        else:
+            await session.rollback()
+
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             select(ItemORM)
