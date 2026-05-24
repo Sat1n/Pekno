@@ -86,8 +86,34 @@ Required manifest fields:
 
 - `id`: Stable snake_case plugin ID. This becomes the DB key and install directory name.
 - `name`: Human-readable name.
-- `version`: Plugin version.
+- `version`: Plugin version (see Versioning below).
 - `source_type`: Stable item source type written to `items.source_type`.
+
+### Versioning
+
+Plugins must follow [Semantic Versioning](https://semver.org/) (`MAJOR.MINOR.PATCH`):
+
+- **MAJOR** (`2.0.0`): Breaking changes — removed settings, renamed `source_type`, changed item ID format.
+- **MINOR** (`1.1.0`): New features — new settings, new hover blocks, new capabilities.
+- **PATCH** (`1.0.1`): Bug fixes — no user-facing behavior changes.
+
+When to bump each segment:
+
+| Change | Bump |
+|--------|------|
+| Fix a bug in `normalize_item` | PATCH |
+| Add `cover_url` to normalized items | PATCH |
+| Add a new `settings_schema` field | MINOR |
+| Rename a `settings_schema` field | MAJOR |
+| Change item ID generation logic | MAJOR |
+| Change `source_type` | MAJOR |
+
+The Pekno framework uses version comparison during plugin upgrade:
+
+- Upgrading to a higher version: logged as `⬆️ Upgrading plugin`.
+- Reinstalling the same version: logged as `🔄 Reinstalling plugin`.
+- Installing a lower version: logged as `⬇️ Downgrading plugin` (warning).
+- The framework automatically backs up the previous version (up to 3 versions retained) under `worker/plugins/third_party/.backup/` before overwriting.
 
 Common optional fields:
 
@@ -308,12 +334,49 @@ Rules:
 - Return the same normalized item shape as `normalize_item()`, or return `_pipeline_raw_data` to let the pipeline call `normalize_item()` and `extract_text_for_ai()`.
 - Raise `ValueError` for invalid URLs or unsupported formats.
 - Use `ctx` when credentials or settings are needed.
+- **Always call the platform API to fetch real content.** Do not return a skeleton item with only URL-derived data. If your plugin has a `_fetch_video_info()`, `_fetch_article()`, or similar helper (used by `get_hover_blocks` or `fetch_data`), reuse it here.
+- **Populate `content_text` with meaningful content** (description, summary, article body) — this is what the AI summarizer uses to generate the short summary. An empty `content_text` produces low-quality AI summaries.
+- **Include all metadata fields** that `normalize_item` would produce (author, cover_url, published_at, etc.). Single-item parsing should produce items indistinguishable from batch sync items.
+- **Wrap API calls in try/except** — if the API call fails, fall back to a minimal item rather than crashing the entire parse task.
 
-Example using `_pipeline_raw_data`:
+Example using `_pipeline_raw_data` with API enrichment:
 
 ```python
 async def parse_single_item(self, url: str, ctx: PluginContext | None = None) -> dict:
-    raw = await fetch_remote_object(url, ctx)
+    item_id = self._extract_id(url)
+    if not item_id:
+        raise ValueError("Invalid URL format")
+
+    raw = {"id_hint": item_id, "link": url, "guid": url}
+
+    # Enrich with real platform data if ctx is available
+    if ctx:
+        try:
+            headers = self._headers(ctx)
+            async with httpx.AsyncClient(timeout=10.0, headers=headers) as client:
+                info = await self._fetch_detail(client, item_id)
+            raw["title"] = info.get("title", item_id)
+            raw["author"] = info.get("author", "")
+            raw["cover_url"] = info.get("cover")
+            raw["content_text"] = info.get("description", "")
+            raw["published_at"] = info.get("published_at")
+        except (httpx.HTTPError, ValueError) as exc:
+            ctx.log.warning(f"Failed to fetch detail for {url}: {exc}")
+            raw["title"] = item_id
+            raw["content_text"] = ""
+
+    normalized = self.normalize_item(raw)
+    normalized["_pipeline_raw_data"] = raw
+    return normalized
+```
+
+**Anti-pattern (do not do this):**
+
+```python
+# BAD: Only extracts an ID from the URL, no real content
+async def parse_single_item(self, url: str, ctx=None) -> dict:
+    vid = self._extract_id(url)
+    raw = {"title": vid, "link": url, "content_text": ""}  # ❌ empty content, no real title
     normalized = self.normalize_item(raw)
     normalized["_pipeline_raw_data"] = raw
     return normalized
@@ -400,6 +463,24 @@ During install:
 - Registry row is inserted or updated.
 - Hub reloads plugins in-process.
 - Worker receives `reload_system_plugins_task`.
+
+### Plugin Upgrade (Cover Install)
+
+When installing a plugin whose `id` already exists, Pekno performs a cover upgrade:
+
+1. **Version comparison**: The framework reads the existing version from the database and compares it with the new version using semantic versioning.
+2. **Automatic backup**: Before overwriting, the old plugin directory is copied to `worker/plugins/third_party/.backup/<plugin_id>_<version>_<timestamp>`. Up to 3 most recent backups are retained per plugin.
+3. **Logging**: Upgrade events are logged with version details:
+   - `⬆️ Upgrading plugin {id}: {old} → {new}` for version increases.
+   - `🔄 Reinstalling plugin {id}` for same-version reinstalls.
+   - `⬇️ Downgrading plugin {id}: {old} → {new}` (warning) for version decreases.
+4. **File replacement**: Old files are removed, new files are moved into place.
+5. **Registry update**: The database record is updated with the new version, name, and module path.
+6. **Hot reload**: Hub and Worker reload the updated plugin without restart.
+
+User configuration (settings, credentials) is stored in the `configs` table and is **not affected** by plugin upgrades. Item data in the `items` table is also preserved.
+
+Plugin authors should ensure backward compatibility when upgrading — changing item ID formats or `source_type` values may orphan existing data.
 
 Manual development flow for built-in plugins:
 

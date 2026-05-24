@@ -18,12 +18,15 @@ from sqlalchemy import select, delete
 from hub.core.security import get_current_user, require_admin
 from shared.api_errors import ApiError
 from shared.utils.path_guard import safe_resolve_path
+from shared.logger import hub_log
 
 router = APIRouter(prefix="/api/plugins", tags=["Plugins"])
 
 # Plugin installation paths
 PLUGIN_INSTALL_DIR = Path("worker/plugins/third_party").resolve()
 TEMP_PREVIEW_DIR = Path(tempfile.gettempdir()) / "pekno_plugins"
+PLUGIN_BACKUP_DIR = PLUGIN_INSTALL_DIR / ".backup"
+MAX_BACKUP_VERSIONS = 3
 
 
 def _ensure_plugin_install_dir() -> None:
@@ -31,6 +34,47 @@ def _ensure_plugin_install_dir() -> None:
     init_file = PLUGIN_INSTALL_DIR / "__init__.py"
     if not init_file.exists():
         init_file.write_text("", encoding="utf-8")
+
+
+def _parse_version(version: str) -> tuple[int, ...]:
+    """Parse a version string like '1.2.3' into a tuple for comparison."""
+    try:
+        return tuple(int(x) for x in version.split("."))
+    except (ValueError, AttributeError):
+        return (0,)
+
+
+def _compare_versions(old: str, new: str) -> int:
+    """Compare two version strings. Returns -1 if old < new, 0 if equal, 1 if old > new."""
+    old_parts = _parse_version(old)
+    new_parts = _parse_version(new)
+    if old_parts < new_parts:
+        return -1
+    elif old_parts > new_parts:
+        return 1
+    return 0
+
+
+def _backup_plugin(plugin_id: str, plugin_path: Path, version: str) -> None:
+    """Create a backup of the plugin before upgrade/downgrade."""
+    PLUGIN_BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_name = f"{plugin_id}_{version}_{timestamp}"
+    backup_path = PLUGIN_BACKUP_DIR / backup_name
+
+    shutil.copytree(str(plugin_path), str(backup_path))
+    hub_log.info(f"📦 Created backup: {backup_name}")
+
+    # Keep only MAX_BACKUP_VERSIONS most recent backups for this plugin
+    backups = sorted(
+        [p for p in PLUGIN_BACKUP_DIR.iterdir() if p.name.startswith(f"{plugin_id}_") and p.is_dir()],
+        key=lambda p: p.stat().st_mtime,
+    )
+    while len(backups) > MAX_BACKUP_VERSIONS:
+        oldest = backups.pop(0)
+        shutil.rmtree(oldest)
+        hub_log.info(f"🗑️ Removed old backup: {oldest.name}")
 
 
 async def _get_bound_credentials(plugin_id: str, user_id: str, required_credentials: list[str]) -> list[str]:
@@ -267,13 +311,35 @@ async def confirm_install_plugin(token: str, current_user=Depends(require_admin)
         if not plugin_id:
             raise HTTPException(status_code=400, detail="The plugin manifest is missing an id field.")
 
-        # 2. Move files into the installed plugin directory
+        new_version = manifest.get("version", "1.0.0")
+        old_version = None
+        is_upgrade = False
+
+        # 2. Check for existing installation and backup if upgrading
         target_path = PLUGIN_INSTALL_DIR / plugin_id
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(PluginRegistryORM.version).where(PluginRegistryORM.plugin_id == plugin_id)
+            )
+            existing = result.scalar_one_or_none()
+            if existing:
+                old_version = existing
+                cmp = _compare_versions(old_version, new_version)
+                if cmp < 0:
+                    is_upgrade = True
+                    hub_log.info(f"⬆️ Upgrading plugin {plugin_id}: {old_version} → {new_version}")
+                elif cmp > 0:
+                    hub_log.warning(f"⬇️ Downgrading plugin {plugin_id}: {old_version} → {new_version}")
+                else:
+                    hub_log.info(f"🔄 Reinstalling plugin {plugin_id} (version {new_version} unchanged)")
+
         if target_path.exists():
+            if old_version:
+                _backup_plugin(plugin_id, target_path, old_version)
             shutil.rmtree(target_path)
-            
+
         shutil.move(str(source_path), str(target_path))
-        
+
         # 3. Persist plugin registry entry
         module_path = f"worker.plugins.third_party.{plugin_id}.plugin"
         # If plugin.py is missing, fall back to the package root module
@@ -307,7 +373,15 @@ async def confirm_install_plugin(token: str, current_user=Depends(require_admin)
         # Worker side
         await reload_system_plugins_task.kiq()
 
-        return {"status": "success", "message": f"Plugin {plugin_id} was installed successfully."}
+        # Build response message with upgrade information
+        if is_upgrade and old_version:
+            message = f"Plugin {plugin_id} upgraded from {old_version} to {new_version}."
+        elif old_version:
+            message = f"Plugin {plugin_id} reinstalled (version {new_version})."
+        else:
+            message = f"Plugin {plugin_id} installed successfully."
+
+        return {"status": "success", "message": message, "is_upgrade": is_upgrade}
 
     except ApiError as e:
         raise HTTPException(status_code=e.status_code, detail=e.detail)
