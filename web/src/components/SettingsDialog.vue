@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Blocks, User, ChevronRight, Database, Trash2, Loader2, HardDrive, Puzzle, Plus, MailPlus, LogOut, KeyRound, Copy, BrainCircuit, SlidersHorizontal, Cpu, Save, Search, Sparkles, GalleryVerticalEnd, Shield, Server } from 'lucide-vue-next'
 import { usePluginStore } from '@/store/usePluginStore'
-import { API_BASE_URL, changePassword, clearStoredToken, createInvitationCode, getDataSources, getInvitationCodes, getModelProviders, getStoredAuthUser, clearDataSource, saveModelAssignments, saveModelProvider, getPATs, createPAT, deletePAT, getSystemBillingSettings, saveSystemBillingSettings, resolveApiErrorMessage, type DataSourceStat, type InvitationCodeInfo, type ModelAssignmentInfo, type ModelProviderInfo, type PATItem, type SystemBillingSettings } from '@/lib/api'
+import { apiClient, getStoredToken, API_BASE_URL, changePassword, clearStoredToken, createInvitationCode, getDataSources, getInvitationCodes, getModelProviders, getStoredAuthUser, clearDataSource, saveModelAssignments, saveModelProvider, getPATs, createPAT, deletePAT, getSystemBillingSettings, saveSystemBillingSettings, resolveApiErrorMessage, type DataSourceStat, type InvitationCodeInfo, type ModelAssignmentInfo, type ModelProviderInfo, type PATItem, type SystemBillingSettings } from '@/lib/api'
 import { useToast } from '@/components/ui/toast/use-toast'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import PluginInstallDialog from './PluginInstallDialog.vue'
@@ -67,6 +67,93 @@ const justCreatedToken = ref<string | null>(null)
 const selectedMcpToken = ref('')
 const isChangingPassword = ref(false)
 
+// Developer Settings state
+const developerSettings = ref({ pause_scheduler: false })
+const isLoadingDeveloper = ref(false)
+const isSavingDeveloper = ref(false)
+const isImportingDb = ref(false)
+const importFileInput = ref<HTMLInputElement | null>(null)
+
+async function loadDeveloperSettings() {
+  if (!isAdmin.value) return
+  isLoadingDeveloper.value = true
+  try {
+    const { data } = await apiClient.get('/api/admin/system/developer')
+    developerSettings.value = data || { pause_scheduler: false }
+  } catch (error) {
+    console.error('Failed to load developer settings:', error)
+  } finally {
+    isLoadingDeveloper.value = false
+  }
+}
+
+async function saveDeveloperSettings() {
+  isSavingDeveloper.value = true
+  try {
+    await apiClient.put('/api/admin/system/developer', developerSettings.value)
+  } catch (error: any) {
+    toast({ title: 'Save failed', description: resolveApiErrorMessage(error, 'settings.tryAgainLater'), variant: 'destructive' })
+  } finally {
+    isSavingDeveloper.value = false
+  }
+}
+
+function handleExportDatabase() {
+  const token = getStoredToken()
+  const url = `${API_BASE_URL}/api/admin/system/developer/export`
+  fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+    .then(response => {
+      if (!response.ok) throw new Error('Export failed')
+      return response.blob()
+    })
+    .then(blob => {
+      const downloadUrl = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = downloadUrl
+      a.download = 'pekno_database.dump'
+      document.body.appendChild(a)
+      a.click()
+      window.URL.revokeObjectURL(downloadUrl)
+      a.remove()
+    })
+    .catch(err => {
+      toast({ title: 'Export failed', variant: 'destructive' })
+    })
+}
+
+function triggerImportFileInput() {
+  importFileInput.value?.click()
+}
+
+async function handleImportDatabase(event: Event) {
+  const target = event.target as HTMLInputElement
+  const file = target.files?.[0]
+  if (!file) return
+  
+  if (!confirm(t('settings.importDatabaseWarningDesc'))) {
+    target.value = ''
+    return
+  }
+
+  isImportingDb.value = true
+  const formData = new FormData()
+  formData.append('file', file)
+  
+  try {
+    await apiClient.post('/api/admin/system/developer/import', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    })
+    toast({ title: t('settings.importSuccess') })
+    setTimeout(() => { window.location.reload() }, 1500)
+  } catch (error: any) {
+    toast({ title: 'Import failed', description: resolveApiErrorMessage(error, 'settings.tryAgainLater'), variant: 'destructive' })
+  } finally {
+    isImportingDb.value = false
+    target.value = ''
+  }
+}
+
+
 function getRuntimeOrigin(): string {
   if (API_BASE_URL) {
     return API_BASE_URL.replace(/\/$/, '')
@@ -114,6 +201,7 @@ const menuItems = computed(() => {
       { id: 'invites', label: t('settings.invites'), icon: MailPlus },
       { id: 'tokens', label: t('settings.tokens'), icon: Shield },
       { id: 'mcp', label: t('settings.mcp'), icon: Server },
+      { id: 'developer', label: t('settings.developer', 'Developer'), icon: SlidersHorizontal },
       { id: 'account', label: t('settings.account'), icon: User },
     ]
   }
@@ -460,6 +548,9 @@ watch(activeTab, (newTab) => {
   }
   if (newTab === 'tokens' || newTab === 'mcp') {
     void loadPats()
+  }
+  if (newTab === 'developer') {
+    void loadDeveloperSettings()
   }
 })
 
@@ -1295,6 +1386,64 @@ function formatBillingCost(value: number | undefined, currency: string | undefin
                     </div>
                   </div>
                 </ScrollArea>
+              </div>
+
+              <!-- Developer Settings -->
+              <div v-else-if="activeTab === 'developer'" class="space-y-8 animate-in fade-in slide-in-from-right-4 duration-300">
+                <div class="mb-6">
+                  <h2 class="text-xl font-bold tracking-tight">{{ t('settings.developer') }}</h2>
+                  <p class="text-sm text-muted-foreground mt-1">{{ t('settings.developerDesc') }}</p>
+                </div>
+
+                <div v-if="isLoadingDeveloper" class="flex items-center justify-center py-12">
+                  <Loader2 class="w-8 h-8 animate-spin text-muted-foreground" />
+                </div>
+                
+                <div v-else class="space-y-8">
+                  <!-- Scheduler Settings -->
+                  <div class="space-y-4">
+                    <div class="flex items-center justify-between border rounded-xl p-5 bg-card/50">
+                      <div class="space-y-1">
+                        <Label class="text-base font-semibold">{{ t('settings.pauseScheduler') }}</Label>
+                        <p class="text-sm text-muted-foreground">{{ t('settings.pauseSchedulerDesc') }}</p>
+                      </div>
+                      <Button :variant="developerSettings.pause_scheduler ? 'destructive' : 'secondary'" @click="developerSettings.pause_scheduler = !developerSettings.pause_scheduler; saveDeveloperSettings()">
+                        {{ developerSettings.pause_scheduler ? 'Paused' : 'Active' }}
+                      </Button>
+                    </div>
+                  </div>
+
+                  <!-- Database Operations -->
+                  <div class="space-y-4 pt-4">
+                    <h3 class="font-medium text-sm text-muted-foreground uppercase tracking-wider">Database Operations</h3>
+                    
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div class="flex flex-col border rounded-xl p-5 bg-card/50">
+                        <div class="flex items-center gap-2 mb-2">
+                          <HardDrive class="w-5 h-5 text-primary" />
+                          <Label class="text-base font-semibold">{{ t('settings.exportDatabase') }}</Label>
+                        </div>
+                        <p class="text-sm text-muted-foreground mb-4 flex-1">{{ t('settings.exportDatabaseDesc') }}</p>
+                        <Button variant="outline" class="w-full" @click="handleExportDatabase">
+                          Export Database
+                        </Button>
+                      </div>
+
+                      <div class="flex flex-col border rounded-xl p-5 bg-destructive/5 border-destructive/20">
+                        <div class="flex items-center gap-2 mb-2">
+                          <Save class="w-5 h-5 text-destructive" />
+                          <Label class="text-base font-semibold text-destructive">{{ t('settings.importDatabase') }}</Label>
+                        </div>
+                        <p class="text-sm text-muted-foreground mb-4 flex-1">{{ t('settings.importDatabaseDesc') }}</p>
+                        <Button variant="destructive" class="w-full" @click="triggerImportFileInput" :disabled="isImportingDb">
+                          <Loader2 v-if="isImportingDb" class="w-4 h-4 mr-2 animate-spin" />
+                          Import Database
+                        </Button>
+                        <input type="file" ref="importFileInput" accept=".dump" class="hidden" @change="handleImportDatabase" />
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
 
               <div v-else-if="activeTab === 'account'" class="space-y-8 animate-in fade-in slide-in-from-right-4 duration-300">
