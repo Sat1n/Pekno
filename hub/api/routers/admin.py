@@ -1,7 +1,13 @@
 import secrets
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi.responses import FileResponse
+from starlette.background import BackgroundTask
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert
+import tempfile
+import subprocess
+import os
 
 from hub.api.schemas import (
     BillingSettingsRequest,
@@ -12,8 +18,8 @@ from hub.api.schemas import (
 from hub.core.billing import get_billing_state, save_billing_config
 from hub.core import model_settings
 from hub.core.security import require_admin
-from shared.database import AsyncSessionLocal
-from shared.models import InvitationCodeORM, UserORM
+from shared.database import AsyncSessionLocal, DB_USER, DB_PASS, DB_HOST, DB_PORT, DB_NAME
+from shared.models import InvitationCodeORM, UserORM, SystemConfigORM
 
 router = APIRouter(prefix="/api/admin", tags=["Admin"])
 
@@ -107,3 +113,74 @@ async def get_system_billing(current_user=Depends(require_admin)):
 async def update_system_billing(payload: BillingSettingsRequest, current_user=Depends(require_admin)):
     await save_billing_config(payload.model_dump())
     return await get_billing_state()
+
+
+@router.get("/system/developer")
+async def get_developer_settings(current_user=Depends(require_admin)):
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(SystemConfigORM.value).where(SystemConfigORM.key == "developer_settings")
+        )
+        val = result.scalar_one_or_none()
+        return val or {"pause_scheduler": False}
+
+
+@router.put("/system/developer")
+async def update_developer_settings(payload: dict, current_user=Depends(require_admin)):
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            stmt = insert(SystemConfigORM).values(
+                key="developer_settings", value=payload
+            ).on_conflict_do_update(
+                index_elements=["key"],
+                set_={"value": payload}
+            )
+            await session.execute(stmt)
+        return payload
+
+
+@router.get("/system/developer/export")
+async def export_database(current_user=Depends(require_admin)):
+    db_url = f"postgresql://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+    fd, path = tempfile.mkstemp(suffix=".dump")
+    os.close(fd)
+    try:
+        subprocess.run(
+            ["pg_dump", "-F", "c", "-O", "-x", "-f", path, db_url],
+            check=True,
+            capture_output=True,
+        )
+    except subprocess.CalledProcessError as e:
+        raise HTTPException(status_code=500, detail=f"Export failed: {e.stderr.decode('utf-8', errors='replace')}")
+    
+    return FileResponse(
+        path, 
+        media_type="application/octet-stream", 
+        filename="pekno_database.dump",
+        background=BackgroundTask(os.remove, path)
+    )
+
+
+@router.post("/system/developer/import")
+async def import_database(file: UploadFile = File(...), current_user=Depends(require_admin)):
+    db_url = f"postgresql://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+    fd, path = tempfile.mkstemp(suffix=".dump")
+    os.close(fd)
+    
+    try:
+        content = await file.read()
+        with open(path, "wb") as f:
+            f.write(content)
+            
+        subprocess.run(
+            ["pg_restore", "--clean", "--if-exists", "-O", "-x", "-d", db_url, path],
+            check=True,
+            capture_output=True,
+        )
+    except subprocess.CalledProcessError as e:
+        raise HTTPException(status_code=500, detail=f"Import failed: {e.stderr.decode('utf-8', errors='replace')}")
+    finally:
+        if os.path.exists(path):
+            os.remove(path)
+            
+    return {"status": "success"}

@@ -1,7 +1,7 @@
 from sqlalchemy import delete, select
 from shared.database import AsyncSessionLocal
 from shared.entities import AIProcessingStatus, UniversalItem
-from shared.models import ConfigORM, ItemORM, PluginRegistryORM, UserItemStateORM
+from shared.models import ConfigORM, ItemORM, PluginRegistryORM, UserItemStateORM, SystemConfigORM
 from datetime import datetime, timedelta
 from worker.broker import broker
 from shared.logger import worker_log
@@ -77,11 +77,27 @@ async def _resolve_auto_sync_user_id(plugin_id: str) -> str | None:
 
     return None
 
+
+async def _is_scheduler_paused() -> bool:
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(SystemConfigORM.value).where(SystemConfigORM.key == "developer_settings")
+        )
+        val = result.scalar_one_or_none()
+        if val and isinstance(val, dict):
+            return val.get("pause_scheduler") == True
+        return False
+
+
 @broker.task(
     task_name="system_heartbeat",
     schedule=[{"cron": "*/5 * * * *"}],
 )
 async def system_heartbeat_task():
+    if await _is_scheduler_paused():
+        worker_log.info("⏸️ Scheduler is paused by developer settings. Skipping heartbeat scan.")
+        return
+
     now = now_in_app_timezone_naive()
     next_update_at = now + timedelta(minutes=5)
     worker_log.info(
@@ -240,6 +256,10 @@ async def cleanup_expired_items() -> int:
     schedule=[{"cron": "*/5 * * * *"}],
 )
 async def system_ttl_cleanup_task():
+    if await _is_scheduler_paused():
+        worker_log.info("⏸️ Scheduler is paused by developer settings. Skipping TTL cleanup.")
+        return
+
     # Future config hook: this cron should be moved to global admin
     # settings once ConfigORM exposes platform-level scheduling options.
     next_cleanup_at = now_in_app_timezone_naive() + timedelta(minutes=5)
@@ -254,6 +274,10 @@ async def system_ttl_cleanup_task():
     schedule=[{"cron": "*/5 * * * *"}],
 )
 async def trigger_ai_sweep_task(limit: int = 20):
+    if await _is_scheduler_paused():
+        worker_log.info("⏸️ Scheduler is paused by developer settings. Skipping AI sweep.")
+        return
+
     worker_log.info("🧠 AI sweep started. Looking for pending lightweight items.")
     async with AsyncSessionLocal() as session:
         result = await session.execute(
