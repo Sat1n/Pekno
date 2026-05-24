@@ -13,6 +13,9 @@ from shared.database import AsyncSessionLocal
 from shared.models import PersonalAccessTokenORM, UserORM
 from shared.secret_store import load_or_create_secret
 from shared.time_utils import now_in_app_timezone_naive
+from dotenv import load_dotenv
+
+load_dotenv()
 
 pwd_context = CryptContext(
     schemes=["pbkdf2_sha256", "bcrypt_sha256", "bcrypt"],
