@@ -1,9 +1,15 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
+import { X } from 'lucide-vue-next'
 import type { HoverResponse } from '@/lib/api'
 
 defineProps<{
   blocks: HoverResponse
+  showCloseButton?: boolean
+}>()
+
+defineEmits<{
+  close: []
 }>()
 
 const { t } = useI18n()
@@ -15,7 +21,15 @@ const langColors = [
 </script>
 
 <template>
-  <div class="hover-preview-container w-72 bg-card/85 backdrop-blur-2xl border border-border/50 rounded-xl shadow-2xl overflow-hidden p-4 space-y-4 animate-in fade-in zoom-in-95 duration-300">
+  <div class="hover-preview-container relative w-72 bg-card/85 backdrop-blur-2xl border border-border/50 rounded-xl shadow-2xl overflow-hidden p-4 space-y-4 animate-in fade-in zoom-in-95 duration-300">
+    <button
+      v-if="showCloseButton"
+      class="absolute top-2 right-2 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-background/80 text-muted-foreground hover:bg-background hover:text-foreground transition-colors"
+      :title="t('common.close')"
+      @click.stop="$emit('close')"
+    >
+      <X class="h-3.5 w-3.5" />
+    </button>
     
     <template v-for="(block, index) in blocks" :key="index">
       

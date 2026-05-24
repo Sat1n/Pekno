@@ -24,7 +24,7 @@ import {
   SheetHeader,
   SheetTitle
 } from '@/components/ui/sheet'
-import { Github, Tv, FileText, MoreVertical, Sparkles, Clock3, Clock4, ExternalLink, Trash2, Star, Loader2, Download, X, Upload, Link2, Heart, HeartOff, UserRound, ArrowUp } from 'lucide-vue-next'
+import { Github, Tv, FileText, MoreVertical, Sparkles, Clock3, Clock4, ExternalLink, Trash2, Star, Loader2, Download, X, Upload, Link2, Heart, HeartOff, UserRound, ArrowUp, Eye } from 'lucide-vue-next'
 import { API_BASE_URL, getItems, search, summarizeItem, getItemSummaryStatus, getStoredAuthUser, toggleItemWatchLater, toggleItemFavorite, markItemsReadBatch, getActivePlugins, getParsePlugins, getHoverBlocks, uploadItem, parseItemUrl, resolveApiErrorMessage, type RawItem, type SearchResult, type ActivePlugin, type HoverResponse, type UploadDedupResponse } from '@/lib/api'
 import HoverPreview from '@/components/HoverPreview.vue'
 import { useToast } from '@/components/ui/toast/use-toast'
@@ -188,8 +188,13 @@ const hoverDataMap = ref<Record<string, HoverResponse>>({})
 const activeHoverItemId = ref<string | null>(null)
 const activeDropdownItemId = ref<string | null>(null)
 const hoverSuppressedItemId = ref<string | null>(null)
+const manuallyTriggeredHoverItemId = ref<string | null>(null)
+const hoverPreviewPosition = ref<{ top: number; left: number } | null>(null)
+const isMobile = ref(false)
 const showBackToTop = ref(false)
 let scrollContainer: HTMLElement | null = null
+let mobileMediaQuery: MediaQueryList | null = null
+let mobileMediaHandler: ((e: MediaQueryListEvent) => void) | null = null
 
 function extractAuthorName(source: string, metadata: Record<string, any>, item: Record<string, any>) {
   const candidates = source === 'bilibili'
@@ -225,12 +230,15 @@ function updateBackToTopVisibility() {
 }
 
 function handleCardMouseEnter(item: LocalSearchResult) {
+  // 移动端不触发 hover，改用菜单手动触发
+  if (isMobile.value) return
   // 只在 list/grid 模式下，或者你有空间才显示，compact 先不用管
   if (hoverSuppressedItemId.value === item.id) return
   if (activeHoverItemId.value === item.id) return
-  
+
   const timer = window.setTimeout(async () => {
     if (hoverSuppressedItemId.value === item.id) return
+    updateHoverPreviewPosition(item.id)
     activeHoverItemId.value = item.id
     if (!hoverDataMap.value[item.id]) {
       try {
@@ -251,13 +259,18 @@ function handleCardMouseEnter(item: LocalSearchResult) {
 }
 
 function handleCardMouseLeave(item: LocalSearchResult) {
+  // 移动端不响应 mouseleave
+  if (isMobile.value) return
   const timer = hoverTimers.get(item.id)
   if (timer) {
     window.clearTimeout(timer)
     hoverTimers.delete(item.id)
   }
+  // 手动触发的 hover 不因鼠标离开而关闭
+  if (manuallyTriggeredHoverItemId.value === item.id) return
   if (activeHoverItemId.value === item.id) {
     activeHoverItemId.value = null
+    hoverPreviewPosition.value = null
   }
 }
 
@@ -280,6 +293,48 @@ function clearHoverTimer(itemId: string) {
   if (timer) {
     window.clearTimeout(timer)
     hoverTimers.delete(itemId)
+  }
+}
+
+function updateHoverPreviewPosition(itemId: string) {
+  const cardEl = cardElements.get(itemId)
+  if (!cardEl) return
+  const rect = cardEl.getBoundingClientRect()
+  hoverPreviewPosition.value = {
+    top: rect.top + rect.height / 2,
+    left: rect.left + rect.width / 2,
+  }
+}
+
+async function handleManualPreview(item: LocalSearchResult) {
+  clearHoverTimer(item.id)
+  updateHoverPreviewPosition(item.id)
+  manuallyTriggeredHoverItemId.value = item.id
+  activeHoverItemId.value = item.id
+  if (!hoverDataMap.value[item.id]) {
+    try {
+      const blocks = await getHoverBlocks(item.id)
+      if (blocks && blocks.length > 0) {
+        hoverDataMap.value[item.id] = blocks
+      } else {
+        activeHoverItemId.value = null
+        manuallyTriggeredHoverItemId.value = null
+      }
+    } catch (e) {
+      console.error("Failed to fetch hover blocks", e)
+      activeHoverItemId.value = null
+      manuallyTriggeredHoverItemId.value = null
+    }
+  }
+}
+
+function handleClosePreview(item: LocalSearchResult) {
+  if (manuallyTriggeredHoverItemId.value === item.id) {
+    manuallyTriggeredHoverItemId.value = null
+  }
+  if (activeHoverItemId.value === item.id) {
+    activeHoverItemId.value = null
+    hoverPreviewPosition.value = null
   }
 }
 
@@ -563,6 +618,12 @@ async function handleSourceClick(sourceId: string) {
 }
 
 onMounted(async () => {
+  // 移动端检测：粗指针设备（触摸屏）视为移动端
+  mobileMediaQuery = window.matchMedia('(pointer: coarse)')
+  isMobile.value = mobileMediaQuery.matches
+  mobileMediaHandler = (e: MediaQueryListEvent) => { isMobile.value = e.matches }
+  mobileMediaQuery.addEventListener('change', mobileMediaHandler)
+
   try {
     activePlugins.value = await getActivePlugins()
     parsePlugins.value = await getParsePlugins()
@@ -594,6 +655,14 @@ onBeforeUnmount(() => {
 
   scrollContainer?.removeEventListener('scroll', updateBackToTopVisibility)
   scrollContainer = null
+
+  // 清理移动端检测监听器
+  if (mobileMediaQuery && mobileMediaHandler) {
+    mobileMediaQuery.removeEventListener('change', mobileMediaHandler)
+    mobileMediaQuery = null
+    mobileMediaHandler = null
+  }
+
   void flushPendingReads()
 })
 
@@ -1196,12 +1265,6 @@ watch(isAddDialogOpen, (isOpen) => {
           @mouseenter="handleCardMouseEnter(item)"
           @mouseleave="handleCardMouseLeave(item)"
         >
-        <HoverPreview 
-          v-if="activeHoverItemId === item.id && hoverDataMap[item.id]"
-          :blocks="hoverDataMap[item.id] || []"
-          class="absolute z-[100] top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 cursor-auto pointer-events-auto"
-          @click.stop
-        />
         <div
           v-if="item.has_long_summary || item.isFavorited || item.isWatchLater"
           class="absolute top-2 left-2 z-10 flex items-center gap-1.5"
@@ -1247,6 +1310,10 @@ watch(isAddDialogOpen, (isOpen) => {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent v-if="activeDropdownItemId === item.id" align="end" class="w-48">
+              <DropdownMenuItem @click.stop="handleManualPreview(item)">
+                <Eye class="mr-2 h-4 w-4" />
+                <span>{{ t('home.preview') }}</span>
+              </DropdownMenuItem>
               <DropdownMenuItem @click.stop="handleAISummary(item)">
                 <Sparkles class="mr-2 h-4 w-4 text-primary" />
                 <span>{{ t('home.aiSummary') }}</span>
@@ -1372,6 +1439,24 @@ watch(isAddDialogOpen, (isOpen) => {
       </Button>
     </transition>
   </MainLayout>
+
+  <Teleport to="body">
+    <HoverPreview
+      v-if="activeHoverItemId && hoverDataMap[activeHoverItemId] && hoverPreviewPosition"
+      :blocks="hoverDataMap[activeHoverItemId] || []"
+      :show-close-button="manuallyTriggeredHoverItemId === activeHoverItemId || isMobile"
+      :style="{
+        position: 'fixed',
+        top: `${hoverPreviewPosition.top}px`,
+        left: `${hoverPreviewPosition.left}px`,
+        transform: 'translate(-50%, -50%)',
+        zIndex: 100,
+      }"
+      class="cursor-auto pointer-events-auto"
+      @click.stop
+      @close="handleClosePreview(searchResults.find(i => i.id === activeHoverItemId)!)"
+    />
+  </Teleport>
 
   <Sheet v-model:open="isSheetOpen">
     <SheetContent
