@@ -107,6 +107,7 @@ class UserORM(Base):
     username: Mapped[str] = mapped_column(String, unique=True, index=True)
     hashed_password: Mapped[str] = mapped_column(String)
     role: Mapped[str] = mapped_column(String, default="admin")
+    preferred_locale: Mapped[str] = mapped_column(String, default="zh-CN", server_default="zh-CN")
 
 
 class PersonalAccessTokenORM(Base):

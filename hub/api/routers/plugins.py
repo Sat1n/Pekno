@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Request
 from typing import Dict, Any, List
 import shutil
 import os
@@ -470,15 +470,18 @@ async def save_plugin_config(plugin_id: str, config: Dict[str, Any], current_use
     return {"status": "success", "message": f"{plugin.manifest.get('name')} configuration was saved."}
 
 @router.post("/{plugin_id}/sync")
-async def trigger_plugin_sync(plugin_id: str, current_user=Depends(get_current_user)):
+async def trigger_plugin_sync(plugin_id: str, request: Request, current_user=Depends(get_current_user)):
     """Trigger a manual sync for a plugin."""
     plugin = plugin_manager.get_plugin(plugin_id)
     if not plugin:
         raise HTTPException(status_code=404, detail=f"Plugin was not found: {plugin_id}")
-        
+
+    # Extract preferred locale from Accept-Language header
+    preferred_locale = request.headers.get("Accept-Language", "zh-CN")
+
     # 异步触发，取代之前的 sync_github_stars_task
-    task = await run_plugin_pipeline_task.kiq(plugin_id, None, current_user["id"], "manual")
-    
+    task = await run_plugin_pipeline_task.kiq(plugin_id, None, current_user["id"], "manual", preferred_locale)
+
     return {
         "status": "accepted",
         "task_id": task.task_id if task else None,

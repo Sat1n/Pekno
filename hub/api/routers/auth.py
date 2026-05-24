@@ -247,3 +247,40 @@ async def delete_pat(pat_id: str, current_user=Depends(get_current_user)):
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="令牌不存在")
             await session.delete(pat)
     return {"status": "success"}
+
+
+class UpdateLocaleRequest(BaseModel):
+    locale: str
+
+
+class UserLocaleResponse(BaseModel):
+    preferred_locale: str
+
+
+@router.get("/me", response_model=UserLocaleResponse)
+async def get_current_user_info(current_user=Depends(get_current_user)):
+    """Get current user's preferred locale"""
+    async with AsyncSessionLocal() as session:
+        user = await session.get(UserORM, current_user["id"])
+        if not user:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户不存在")
+        return UserLocaleResponse(preferred_locale=user.preferred_locale)
+
+
+@router.put("/locale")
+async def update_locale(
+    payload: UpdateLocaleRequest,
+    current_user=Depends(get_current_user),
+):
+    """Update current user's preferred locale"""
+    # Normalize locale to zh-CN or en
+    normalized_locale = "zh-CN" if payload.locale.startswith("zh") else "en"
+
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            user = await session.get(UserORM, current_user["id"])
+            if not user:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户不存在")
+            user.preferred_locale = normalized_locale
+
+    return {"status": "success", "preferred_locale": normalized_locale}

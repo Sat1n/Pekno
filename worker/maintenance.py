@@ -1,7 +1,7 @@
 from sqlalchemy import delete, select, update
 from shared.database import AsyncSessionLocal
 from shared.entities import AIProcessingStatus, UniversalItem
-from shared.models import ConfigORM, ItemORM, PluginRegistryORM, UserItemStateORM, SystemConfigORM
+from shared.models import ConfigORM, ItemORM, PluginRegistryORM, UserItemStateORM, SystemConfigORM, UserORM
 from datetime import datetime, timedelta
 from worker.broker import broker
 from shared.logger import worker_log
@@ -25,6 +25,17 @@ async def _get_plugin_setting(plugin_id: str, key: str, fallback: str, user_id: 
     if default in (None, ""):
         return fallback
     return str(default).lower() if isinstance(default, bool) else str(default)
+
+
+async def _get_user_preferred_locale(user_id: str | None) -> str | None:
+    """Get the preferred locale for a user from the database."""
+    if not user_id:
+        return None
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(UserORM.preferred_locale).where(UserORM.id == user_id)
+        )
+        return result.scalar_one_or_none()
 
 
 async def _resolve_auto_sync_user_id(plugin_id: str) -> str | None:
@@ -157,13 +168,14 @@ async def system_heartbeat_task():
                         f"💓 [{plugin_id}] Auto-sync skipped because no user has all required credentials bound and readable."
                     )
                     continue
+                preferred_locale = await _get_user_preferred_locale(user_id)
                 worker_log.info(
-                    f"💓 [{plugin_id}] Auto-sync conditions met. Dispatching incremental sync task for user {user_id}."
+                    f"💓 [{plugin_id}] Auto-sync conditions met. Dispatching incremental sync task for user {user_id} (locale={preferred_locale})."
                 )
-                await run_plugin_pipeline_task.kiq(plugin_id, None, user_id, "auto")
+                await run_plugin_pipeline_task.kiq(plugin_id, None, user_id, "auto", preferred_locale)
             else:
                 worker_log.info(f"💓 [{plugin_id}] Auto-sync conditions met. Dispatching incremental sync task.")
-                await run_plugin_pipeline_task.kiq(plugin_id, None, None, "auto")
+                await run_plugin_pipeline_task.kiq(plugin_id, None, None, "auto", None)
             triggered_count += 1
         else:
             worker_log.info(
