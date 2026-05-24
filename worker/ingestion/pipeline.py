@@ -59,7 +59,7 @@ class IngestionPipeline:
 
     async def _store_to_vector_db(self, item: UniversalItem, core_text: str):
         feature_text = "\n".join(part for part in (core_text, " ".join(item.tags)) if part)
-        
+
         # 2. 调用 Embedding 服务
         embed_model_name = await self.ai.get_embedding_model_name()
         self.logger.info(f"🧠 [Embed] Computing vector with model [{embed_model_name}]...")
@@ -68,6 +68,11 @@ class IngestionPipeline:
         # 3. 写入数据库
         async with AsyncSessionLocal() as session:
             async with session.begin():
+                # Clear quota failure tracking on successful processing
+                metadata = dict(item.metadata_extra or {})
+                metadata.pop("quota_failures", None)
+                metadata.pop("quota_cooldown_until", None)
+
                 data = {
                     "id": item.id,
                     "title": item.title,
@@ -78,7 +83,7 @@ class IngestionPipeline:
                     "content_text": item.content_text,
                     "summary": item.summary,
                     "tags": item.tags,
-                    "metadata_extra": item.metadata_extra,
+                    "metadata_extra": metadata,
                     "embedding": vector, # <--- 核心：存入向量！
                     "ai_processing_status": AIProcessingStatus.completed.value,
                 }
@@ -187,6 +192,22 @@ async def process_new_item_task(item_dict: dict):
                     metadata = dict(existing_item.metadata_extra or {})
                     metadata["processing_status"] = "failed"
                     metadata["processing_error"] = exc.detail
+
+                    # Exponential backoff for quota exhaustion
+                    from datetime import timedelta
+                    quota_failures = metadata.get("quota_failures", 0) + 1
+                    metadata["quota_failures"] = quota_failures
+
+                    # Calculate cooldown: 5, 10, 20, 40, 60 minutes (capped at 60)
+                    cooldown_minutes = min(60, 5 * (2 ** (quota_failures - 1)))
+                    cooldown_until = now_in_app_timezone_naive() + timedelta(minutes=cooldown_minutes)
+                    metadata["quota_cooldown_until"] = cooldown_until.isoformat()
+
+                    worker_log.warning(
+                        f"⏸️ Quota backoff: {item.id} will retry in {cooldown_minutes} minutes "
+                        f"(failure #{quota_failures})"
+                    )
+
                     await session.execute(
                         ItemORM.__table__.update()
                         .where(ItemORM.id == item.id)

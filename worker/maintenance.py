@@ -302,16 +302,40 @@ async def trigger_ai_sweep_task(limit: int = 100):
             await session.rollback()
 
     async with AsyncSessionLocal() as session:
+        now = now_in_app_timezone_naive()
         result = await session.execute(
             select(ItemORM)
             .where(ItemORM.ai_processing_status == AIProcessingStatus.pending_ai.value)
             .order_by(ItemORM.created_at.asc())
             .limit(limit)
         )
-        items = result.scalars().all()
+        all_pending = result.scalars().all()
+
+        # Filter out items still in quota cooldown period
+        items = []
+        cooldown_count = 0
+        for item in all_pending:
+            metadata = item.metadata_extra or {}
+            cooldown_str = metadata.get("quota_cooldown_until")
+            if cooldown_str:
+                try:
+                    from datetime import datetime
+                    cooldown_until = datetime.fromisoformat(cooldown_str)
+                    if cooldown_until > now:
+                        cooldown_count += 1
+                        continue
+                except (ValueError, TypeError):
+                    pass
+            items.append(item)
 
         if not items:
-            worker_log.info("🧠 AI sweep finished. No pending items found.")
+            if cooldown_count > 0:
+                worker_log.info(
+                    f"🧠 AI sweep finished. {cooldown_count} items in quota cooldown, "
+                    f"no eligible items to process."
+                )
+            else:
+                worker_log.info("🧠 AI sweep finished. No pending items found.")
             return
 
         item_ids = [item.id for item in items]

@@ -4,7 +4,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, and_, select
 
 from hub.api.schemas import (
     ForceProcessResponse,
@@ -178,9 +178,41 @@ async def _get_monitor_items() -> tuple[int, float, list[PluginHealthResponse], 
     day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
     async with AsyncSessionLocal() as session:
-        backlog_result = await session.execute(select(ItemORM))
-        backlog_items = backlog_result.scalars().all()
-        rag_backlog_count = sum(1 for item in backlog_items if _needs_rag_processing(item))
+        # Optimized backlog query: filter at database level instead of loading all items
+        backlog_query = select(func.count()).select_from(ItemORM).where(
+            or_(
+                # Retryable failures
+                ItemORM.metadata_extra["processing_status"].as_string().in_(
+                    ["failed", "queued", "pending", "processing"]
+                ),
+                # Missing embedding
+                ItemORM.embedding.is_(None),
+                # Missing summary
+                or_(
+                    ItemORM.summary.is_(None),
+                    func.trim(ItemORM.summary) == ""
+                ),
+                # Image without understanding
+                and_(
+                    ItemORM.intent == "image",
+                    ItemORM.metadata_extra["image_understanding"].is_(None)
+                ),
+                # PDF without completed OCR (simplified check)
+                and_(
+                    ItemORM.intent == "document",
+                    ItemORM.metadata_extra["intent_type"].as_string() == "pdf",
+                    or_(
+                        ItemORM.metadata_extra["ocr"].is_(None),
+                        and_(
+                            ItemORM.metadata_extra["ocr"]["status"].as_string() != "completed",
+                            ItemORM.metadata_extra["ocr"]["status"].as_string() != "disabled"
+                        )
+                    )
+                )
+            )
+        )
+        backlog_result = await session.execute(backlog_query)
+        rag_backlog_count = backlog_result.scalar() or 0
 
         api_today_result = await session.execute(
             select(func.coalesce(func.sum(ApiUsageORM.estimated_cost), 0.0)).where(

@@ -28,6 +28,7 @@ from shared.config import ConfigManager, ConfigKeys
 from shared.credentials import get_user_credential, resolve_cookie_file_path
 from shared.locale import normalize_preferred_locale
 from shared.processing import release_processing_lock
+from shared.entities import AIProcessingStatus
 
 
 def _resolve_bilibili_cookiefile(url: str, user_id: str | None) -> str | None:
@@ -1052,6 +1053,7 @@ async def process_image_understanding_task(
                     tags=tags,
                     metadata_extra=metadata,
                     embedding=vector,
+                    ai_processing_status=AIProcessingStatus.completed.value,
                     updated_at=now_in_app_timezone_naive(),
                 )
             )
@@ -1174,6 +1176,7 @@ async def process_pdf_ocr_task(
 
         values = {
             "metadata_extra": metadata,
+            "ai_processing_status": AIProcessingStatus.completed.value,
             "updated_at": now_in_app_timezone_naive(),
         }
 
@@ -1367,6 +1370,7 @@ async def process_uploaded_text_document_task(
                     tags=tags,
                     embedding=vector,
                     metadata_extra=metadata,
+                    ai_processing_status=AIProcessingStatus.completed.value,
                     updated_at=now_in_app_timezone_naive(),
                 )
             )
