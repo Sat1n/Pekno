@@ -58,6 +58,13 @@ class PluginManager:
                 self._infer_default_auto_short_summary(normalized),
             ),
         }
+        settings_schema["show_on_home"] = {
+            "type": "boolean",
+            "label": "在首页显示",
+            "scope": "user",
+            "default": self._get_framework_default(normalized, "show_on_home", True),
+            "description": "关闭后，该插件的内容不会出现在聚合首页",
+        }
         settings_schema["retention_hours"] = {
             "type": "integer",
             "label": "数据存活时间(小时)",
@@ -120,7 +127,7 @@ class PluginManager:
     async def ensure_builtin_plugins(self, session) -> None:
         """Ensure built-in plugins are present before any service loads the registry."""
         stmt = insert(PluginRegistryORM).values(
-            plugin_id="github_stars",
+            plugin_id="github_star",
             name="GitHub Stars",
             module_path="worker.plugins.github.plugin",
             is_enabled=True,

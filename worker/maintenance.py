@@ -8,7 +8,7 @@ from shared.logger import worker_log
 from shared.config import ConfigManager, ConfigKeys
 from worker.plugins.pipeline import run_plugin_pipeline_task
 from worker.ingestion.pipeline import process_new_item_task
-from worker.plugins.runtime import find_plugin_by_source_type
+from worker.plugins.manager import plugin_manager
 from shared.credentials import get_user_credential, validate_required_credentials
 from shared.plugins.manager import plugin_manager
 from shared.time_utils import get_app_timezone, now_in_app_timezone_naive
@@ -364,7 +364,8 @@ async def trigger_ai_sweep_task(limit: int = 100):
     dispatched_count = 0
     for item in items:
         user_id = await _resolve_item_user_id(item.id)
-        plugin_id, plugin = await find_plugin_by_source_type(item.source_type)
+        plugin_id = item.plugin_id
+        plugin = plugin_manager.get_plugin(plugin_id) if plugin_id else None
         auto_short_summary = True
         if plugin_id and plugin:
             auto_short_summary = (
@@ -380,6 +381,7 @@ async def trigger_ai_sweep_task(limit: int = 100):
             id=item.id,
             title=item.title,
             source_type=item.source_type,
+            plugin_id=plugin_id,
             created_at=item.created_at,
             raw_link=item.raw_link,
             intent=item.intent,

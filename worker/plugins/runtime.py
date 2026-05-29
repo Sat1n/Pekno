@@ -61,7 +61,7 @@ async def build_plugin_context_for_user(plugin_id: str, plugin, user_id: str | N
 
     import httpx
     http_client = None
-    if plugin_id == "github_stars":
+    if plugin_id == "github_star":
         from worker.plugins.github.client import GitHubClient
         token = config_dict.get("token")
         if not token:
@@ -78,18 +78,6 @@ async def build_plugin_context_for_user(plugin_id: str, plugin, user_id: str | N
         env=runtime_env,
     )
 
-
-async def find_plugin_by_source_type(source_type: str):
-    if not plugin_manager.plugins:
-        async with AsyncSessionLocal() as session:
-            await plugin_manager.load_enabled_plugins(session)
-
-    for plugin_id, plugin in plugin_manager.plugins.items():
-        manifest = getattr(plugin, "_manifest", {}) or plugin.manifest or {}
-        if manifest.get("source_type") == source_type or plugin_id == source_type:
-            return plugin_id, plugin
-
-    return None, None
 
 
 def resolve_sync_fetch_mode(

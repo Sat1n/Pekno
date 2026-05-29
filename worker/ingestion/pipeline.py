@@ -11,8 +11,8 @@ from worker.plugins.runtime import (
     build_plugin_context_for_user,
     close_plugin_context,
     fallback_text_for_summary,
-    find_plugin_by_source_type,
 )
+from worker.plugins.manager import plugin_manager
 
 class IngestionPipeline:
     def __init__(self):
@@ -77,6 +77,7 @@ class IngestionPipeline:
                     "id": item.id,
                     "title": item.title,
                     "source_type": item.source_type,
+                    "plugin_id": item.plugin_id,
                     "raw_link": str(item.raw_link),
                     "intent": item.intent,
                     "retention_days": item.retention_hours,
@@ -112,7 +113,8 @@ class IngestionPipeline:
         if (item.metadata_extra or {}).get("ai_text_extracted"):
             return core_text
 
-        plugin_id, plugin = await find_plugin_by_source_type(item.source_type)
+        plugin = plugin_manager.get_plugin(item.plugin_id) if item.plugin_id else None
+        plugin_id = item.plugin_id
         if not plugin_id or not plugin:
             return core_text
 

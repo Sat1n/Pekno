@@ -36,6 +36,7 @@ class UniversalItem(BaseModel):
     id: str
     title: str
     source_type: str
+    plugin_id: Optional[str] = None
     created_at: datetime = Field(default_factory=now_in_app_timezone_naive)
     raw_link: str
     intent: str
