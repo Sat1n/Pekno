@@ -9,7 +9,7 @@ from run_mcp_smoke import MCPDemoClient
 
 
 DEFAULT_BASE_URL = "http://127.0.0.1:8001/api/mcp"
-DEFAULT_PLUGIN_NAME = "github_stars"
+DEFAULT_PLUGIN_NAME = "github_star"
 DEFAULT_SYNC_LIMIT = 100
 
 
@@ -17,7 +17,7 @@ async def main() -> None:
     parser = argparse.ArgumentParser(description="Smoke-test the admin-only MCP tool update_plugin_config.")
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL, help="Base MCP URL")
     parser.add_argument("--token", default=os.getenv("PEKNO_MCP_TOKEN"), help="Admin PAT token, or set PEKNO_MCP_TOKEN")
-    parser.add_argument("--plugin-name", default=DEFAULT_PLUGIN_NAME, help="Plugin ID, default: github_stars")
+    parser.add_argument("--plugin-name", default=DEFAULT_PLUGIN_NAME, help="Plugin ID, default: github_star")
     parser.add_argument("--sync-limit", type=int, default=DEFAULT_SYNC_LIMIT, help="New sync_limit value, default: 100")
     args = parser.parse_args()
 

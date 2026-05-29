@@ -18,17 +18,16 @@ from worker.plugins.runtime import (
     build_plugin_context_for_user,
     close_plugin_context,
     fallback_text_for_summary,
-    find_plugin_by_source_type,
     resolve_sync_fetch_mode,
 )
 
 
 async def _store_lightweight_item(
-    normalized: dict,
-    metadata_extra: dict,
-    *,
+    normalized: dict[str, Any],
+    metadata_extra: dict[str, Any] | None,
     user_id: str | None,
     retention_hours: int,
+    plugin_id: str | None = None,
 ) -> None:
     item_id = normalized["id"]
     now = now_in_app_timezone_naive()
@@ -40,6 +39,7 @@ async def _store_lightweight_item(
         "id": item_id,
         "title": normalized.get("title", ""),
         "source_type": normalized["source_type"],
+        "plugin_id": plugin_id,
         "created_at": now,
         "raw_link": normalized.get("raw_link", "#"),
         "intent": normalized.get("intent", "article"),
@@ -217,6 +217,7 @@ async def run_plugin_pipeline_task(
                         final_metadata,
                         user_id=user_id,
                         retention_hours=int(config_dict.get("retention_hours", normalized.get("retention_hours", 168))),
+                        plugin_id=plugin_id,
                     )
                     worker_log.info(f"📥 [{plugin_id}] Stored lightweight item for AI sweep: {normalized['title']}")
                     continue
@@ -227,9 +228,10 @@ async def run_plugin_pipeline_task(
 
                 item = UniversalItem(
                     id=normalized["id"],
-                    title=normalized["title"],
+                    title=normalized.get("title", ""),
                     source_type=normalized["source_type"],
-                    raw_link=normalized["raw_link"],
+                    plugin_id=plugin_id,
+                    raw_link=normalized.get("raw_link", "#"),
                     content_text=ai_text.strip() if ai_text and ai_text.strip() else normalized.get("content_text", ""),
                     intent=normalized.get("intent", "article"),
                     retention_hours=int(config_dict.get("retention_hours", normalized.get("retention_hours", 168))),
@@ -341,9 +343,10 @@ async def parse_single_plugin_item_task(
 
         item = UniversalItem(
             id=normalized["id"],
-            title=normalized["title"],
+            title=normalized.get("title", ""),
             source_type=normalized["source_type"],
-            raw_link=normalized["raw_link"],
+            plugin_id=plugin_id,
+            raw_link=normalized.get("raw_link", "#"),
             content_text=ai_text.strip() if ai_text and ai_text.strip() else normalized.get("content_text", ""),
             intent=normalized.get("intent", "article"),
             retention_hours=retention_value,
@@ -381,7 +384,8 @@ async def summarize_repo_task(
             item = result.fetchone()
             if not item: return
 
-        plugin_id, plugin = await find_plugin_by_source_type(item.source_type)
+        plugin_id = item.plugin_id
+        plugin = plugin_manager.get_plugin(plugin_id) if plugin_id else None
         raw_data = build_item_raw_data(item)
         text_to_summarize = ""
 

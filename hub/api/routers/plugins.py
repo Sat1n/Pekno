@@ -553,7 +553,7 @@ async def trigger_plugin_sync(plugin_id: str, request: Request, current_user=Dep
     # Extract preferred locale from Accept-Language header
     preferred_locale = request.headers.get("Accept-Language", "zh-CN")
 
-    # 异步触发，取代之前的 sync_github_stars_task
+    # 异步触发，取代之前的 sync_github_star_task
     task = await run_plugin_pipeline_task.kiq(plugin_id, None, current_user["id"], "manual", preferred_locale)
 
     return {

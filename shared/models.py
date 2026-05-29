@@ -19,6 +19,7 @@ class ItemORM(Base):
     title: Mapped[str] = mapped_column(String)
     embedding: Mapped[Optional[Vector]] = mapped_column(Vector(768))
     source_type: Mapped[str] = mapped_column(String)
+    plugin_id: Mapped[Optional[str]] = mapped_column(String, nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now_in_app_timezone_naive)
     raw_link: Mapped[str] = mapped_column(String)
     intent: Mapped[str] = mapped_column(String)

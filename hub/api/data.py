@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from typing import List, Dict, Any
 from shared.database import AsyncSessionLocal
 from shared.models import ItemORM, UserItemStateORM
-from sqlalchemy import select, func, delete
+from sqlalchemy import select, func, delete, or_, func
 from pydantic import BaseModel
 from hub.core.security import require_admin
 
@@ -16,9 +16,11 @@ class DataSourceStat(BaseModel):
 async def get_data_sources(current_user=Depends(require_admin)):
     """获取所有数据源的统计信息"""
     async with AsyncSessionLocal() as session:
+        # 使用 coalesce 优先使用 plugin_id，如果没有则使用 source_type
+        group_col = func.coalesce(ItemORM.plugin_id, ItemORM.source_type)
         result = await session.execute(
-            select(ItemORM.source_type, func.count('*').label('count'))
-            .group_by(ItemORM.source_type)
+            select(group_col, func.count('*').label('count'))
+            .group_by(group_col)
         )
         stats = result.all()
         return [DataSourceStat(source_type=row[0], count=row[1]) for row in stats]
@@ -31,7 +33,12 @@ async def clear_data_source(source_type: str, current_user=Depends(require_admin
         try:
             # 执行删除操作
             item_ids_result = await session.execute(
-                select(ItemORM.id).where(ItemORM.source_type == source_type)
+                select(ItemORM.id).where(
+                    or_(
+                        ItemORM.plugin_id == source_type,
+                        ItemORM.source_type == source_type
+                    )
+                )
             )
             item_ids = item_ids_result.scalars().all()
 
@@ -41,7 +48,12 @@ async def clear_data_source(source_type: str, current_user=Depends(require_admin
                 )
 
             result = await session.execute(
-                delete(ItemORM).where(ItemORM.source_type == source_type)
+                delete(ItemORM).where(
+                    or_(
+                        ItemORM.plugin_id == source_type,
+                        ItemORM.source_type == source_type
+                    )
+                )
             )
             await session.commit()
             

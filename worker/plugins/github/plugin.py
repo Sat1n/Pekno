@@ -11,7 +11,7 @@ class GitHubStarsPlugin(BasePlugin):
     def __init__(self):
         super().__init__()
         self._manifest = {
-            "id": "github_stars",
+            "id": "github_star",
             "name": "GitHub Stars",
             "source_type": "github_star",
             "description": "Sync the repositories you starred on GitHub.",

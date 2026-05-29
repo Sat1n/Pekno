@@ -21,7 +21,8 @@ from shared.database import AsyncSessionLocal
 from shared.logger import hub_log
 from shared.locale import normalize_preferred_locale
 from shared.entities import AIProcessingStatus
-from shared.models import ItemORM, UserItemStateORM, VaultCategoryORM
+from shared.models import ItemORM, UserItemStateORM, VaultCategoryORM, ConfigORM
+from shared.crypto import decrypt_value
 from shared.processing import acquire_processing_lock
 from shared.plugins.base import BasePlugin
 from shared.plugins.manager import plugin_manager
@@ -86,8 +87,8 @@ SUPPORTED_DOCX_MIME_KEYWORDS = {
     "wordprocessingml.document",
 }
 PLUGIN_NAME_ALIASES = {
-    "github": "github_stars",
-    "github_stars": "github_stars",
+    "github": "github_star",
+    "github_star": "github_star",
     "bilibili": "bilibili_sync",
     "bilibili_sync": "bilibili_sync",
 }
@@ -558,6 +559,22 @@ async def get_items(
     current_user=Depends(get_current_user),
 ):
     async with AsyncSessionLocal() as session:
+        if not plugin_manager.plugins:
+            await plugin_manager.load_enabled_plugins(session)
+            
+        config_result = await session.execute(
+            select(ConfigORM).where(
+                ConfigORM.key == "show_on_home",
+                ConfigORM.user_id == current_user["id"]
+            )
+        )
+        hidden_plugin_ids = []
+        for config in config_result.scalars().all():
+            if config.value:
+                decrypted = decrypt_value(config.value)
+                if decrypted and decrypted.lower() == "false":
+                    hidden_plugin_ids.append(config.plugin_id)
+
         stmt = (
             select(ItemORM, UserItemStateORM)
             .join(
@@ -576,6 +593,10 @@ async def get_items(
             stmt = stmt.where(UserItemStateORM.is_favorited == True)
         if source_type:
             stmt = stmt.where(ItemORM.source_type == source_type)
+            
+        if not watch_later_only and not favorited_only and not source_type and hidden_plugin_ids:
+            stmt = stmt.where(ItemORM.plugin_id.notin_(hidden_plugin_ids))
+
         if limit is not None:
             stmt = stmt.limit(limit)
 

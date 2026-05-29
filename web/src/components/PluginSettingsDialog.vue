@@ -585,7 +585,7 @@ async function handleSync() {
       <div class="p-6 bg-muted/30 border-t flex justify-between items-center mt-auto">
         <div class="flex gap-2">
           <Button
-            v-if="isAdmin && currentPlugin.manifest.id !== 'github_stars'"
+            v-if="isAdmin && currentPlugin.manifest.id !== 'github_star'"
             variant="ghost"
             class="text-destructive hover:text-destructive hover:bg-destructive/10"
             @click="isUninstallDialogOpen = true"
