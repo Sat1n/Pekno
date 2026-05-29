@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Settings, Save, RefreshCw, Loader2, AlertCircle, Check, Trash2, Upload, FileText } from 'lucide-vue-next'
+import { Settings, Save, RefreshCw, Loader2, AlertCircle, Check, Trash2, Upload, FileText, ChevronsUpDown } from 'lucide-vue-next'
 
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { Badge } from '@/components/ui/badge'
@@ -11,6 +11,13 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
 import { Switch } from '@/components/ui/switch'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Textarea } from '@/components/ui/textarea'
+import { TagsInput, TagsInputInput, TagsInputItem, TagsInputItemDelete, TagsInputItemText } from '@/components/ui/tags-input'
+import { Slider } from '@/components/ui/slider'
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
 import { useToast } from '@/components/ui/toast/use-toast'
 import { getStoredAuthUser, getUserCredentials, resolveApiErrorMessage, uninstallPluginApi, uploadCookieFile, type CookieFileUploadResult, type PluginCredentialState, type PluginSettingSchema, type UserCredentialItem } from '@/lib/api'
 import { usePluginStore } from '@/store/usePluginStore'
@@ -114,7 +121,11 @@ function initForm() {
     if (fieldConfig.secret) {
       formData.value[key] = ''
     } else {
-      formData.value[key] = config[key] ?? fieldConfig.default
+      let defaultVal = config[key] ?? fieldConfig.default
+      if (fieldConfig.type === 'array' && !defaultVal) {
+        defaultVal = []
+      }
+      formData.value[key] = defaultVal
     }
   }
 
@@ -454,9 +465,112 @@ async function handleSync() {
             </p>
           </div>
 
+          <div v-else-if="fieldConfig.type === 'string' && fieldConfig.format === 'textarea'" class="space-y-2">
+            <Label>{{ fieldConfig.label || fieldKey }}</Label>
+            <Textarea v-model="formData[fieldKey]" :rows="4" />
+            <p v-if="fieldConfig.description" class="text-xs text-muted-foreground">{{ fieldConfig.description }}</p>
+          </div>
+
+          <div v-else-if="fieldConfig.type === 'string' && fieldConfig.format === 'radio' && fieldConfig.enum" class="space-y-3">
+            <Label>{{ fieldConfig.label || fieldKey }}</Label>
+            <RadioGroup v-model="formData[fieldKey]" class="flex flex-col space-y-1">
+              <div v-for="option in fieldConfig.enum" :key="option" class="flex items-center space-x-2">
+                <RadioGroupItem :value="option" :id="`${fieldKey}-${option}`" />
+                <Label :for="`${fieldKey}-${option}`" class="font-normal cursor-pointer">{{ option }}</Label>
+              </div>
+            </RadioGroup>
+            <p v-if="fieldConfig.description" class="text-xs text-muted-foreground">{{ fieldConfig.description }}</p>
+          </div>
+
+          <div v-else-if="fieldConfig.type === 'string' && fieldConfig.enum" class="space-y-2">
+            <Label>{{ fieldConfig.label || fieldKey }}</Label>
+            <Select v-model="formData[fieldKey]">
+              <SelectTrigger>
+                <SelectValue :placeholder="t('settings.pluginCredentials.selectPlaceholder')" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem v-for="option in fieldConfig.enum" :key="option" :value="option">
+                  {{ option }}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+            <p v-if="fieldConfig.description" class="text-xs text-muted-foreground">{{ fieldConfig.description }}</p>
+          </div>
+
+          <div v-else-if="fieldConfig.type === 'integer' && fieldConfig.format === 'slider'" class="space-y-4">
+            <div class="flex justify-between items-center mb-2">
+              <Label>{{ fieldConfig.label || fieldKey }}</Label>
+              <span class="text-sm font-medium">{{ formData[fieldKey] }}</span>
+            </div>
+            <Slider
+              :model-value="[formData[fieldKey]]"
+              :min="fieldConfig.min || 0"
+              :max="fieldConfig.max || 100"
+              :step="1"
+              @update:model-value="(val) => { formData[fieldKey] = val?.[0] ?? 0 }"
+            />
+            <p v-if="fieldConfig.description" class="text-xs text-muted-foreground">{{ fieldConfig.description }}</p>
+          </div>
+
           <div v-else-if="fieldConfig.type === 'integer'" class="space-y-2">
             <Label>{{ fieldConfig.label || fieldKey }}</Label>
             <Input type="number" v-model.number="formData[fieldKey]" :min="fieldConfig.min" :max="fieldConfig.max" />
+            <p v-if="fieldConfig.description" class="text-xs text-muted-foreground">{{ fieldConfig.description }}</p>
+          </div>
+
+          <div v-else-if="fieldConfig.type === 'array' && fieldConfig.format === 'multiselect' && fieldConfig.enum" class="space-y-2">
+            <Label class="block">{{ fieldConfig.label || fieldKey }}</Label>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" class="w-full justify-between font-normal" role="combobox">
+                  <span class="truncate">
+                    {{ formData[fieldKey] && formData[fieldKey].length > 0 ? t('settings.pluginCredentials.selectedCount', { count: formData[fieldKey].length }) : t('settings.pluginCredentials.selectPlaceholder') }}
+                  </span>
+                  <ChevronsUpDown class="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent class="w-[300px] p-0" align="start">
+                <Command>
+                  <CommandInput :placeholder="t('settings.pluginCredentials.searchPlaceholder')" />
+                  <CommandEmpty>{{ t('settings.pluginCredentials.noResults') }}</CommandEmpty>
+                  <CommandList>
+                    <CommandGroup>
+                      <CommandItem
+                        v-for="option in fieldConfig.enum"
+                        :key="option"
+                        :value="option"
+                        @select="() => {
+                          const arr = formData[fieldKey] || [];
+                          const idx = arr.indexOf(option);
+                          if (idx > -1) {
+                            formData[fieldKey] = arr.filter((v: any) => v !== option);
+                          } else {
+                            formData[fieldKey] = [...arr, option];
+                          }
+                        }"
+                      >
+                        <div class="mr-2 flex h-4 w-4 items-center justify-center rounded-sm border border-primary" :class="[formData[fieldKey]?.includes(option) ? 'bg-primary text-primary-foreground' : 'opacity-50 [&_svg]:invisible']">
+                          <Check class="h-4 w-4" />
+                        </div>
+                        {{ option }}
+                      </CommandItem>
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
+            <p v-if="fieldConfig.description" class="text-xs text-muted-foreground">{{ fieldConfig.description }}</p>
+          </div>
+
+          <div v-else-if="fieldConfig.type === 'array'" class="space-y-2">
+            <Label>{{ fieldConfig.label || fieldKey }}</Label>
+            <TagsInput v-model="formData[fieldKey]">
+              <TagsInputItem v-for="item in formData[fieldKey]" :key="item" :value="item">
+                <TagsInputItemText />
+                <TagsInputItemDelete />
+              </TagsInputItem>
+              <TagsInputInput :placeholder="t('settings.pluginCredentials.addTag')" />
+            </TagsInput>
             <p v-if="fieldConfig.description" class="text-xs text-muted-foreground">{{ fieldConfig.description }}</p>
           </div>
 

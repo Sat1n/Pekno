@@ -752,7 +752,8 @@ export async function getItemSummaryStatus(itemId: string): Promise<SummaryStatu
 // ========== 动态插件 API ==========
 
 export interface PluginSettingSchema {
-  type: 'string' | 'boolean' | 'integer' | 'select'
+  type: 'string' | 'boolean' | 'integer' | 'select' | 'array' | 'number'
+  format?: 'textarea' | 'radio' | 'slider' | 'multiselect'
   label: string
   scope?: 'system' | 'user'
   description?: string
@@ -762,6 +763,7 @@ export interface PluginSettingSchema {
   min?: number
   max?: number
   options?: { label: string; value: string }[]
+  enum?: string[]
 }
 
 export interface PluginManifestData {

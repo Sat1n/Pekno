@@ -1,0 +1,86 @@
+{
+  "id": "ui_components_tester",
+  "name": "UI Components Tester",
+  "source_type": "ui_tester",
+  "description": "A plugin to test all UI components and generate fake data.",
+  "version": "1.0.0",
+  "required_credentials": [],
+  "auto_sync_supported": true,
+  "framework_defaults": {
+    "auto_sync": false,
+    "sync_limit": 10
+  },
+  "settings_schema": {
+    "test_string": {
+      "type": "string",
+      "label": "Test Normal String",
+      "description": "A standard text input",
+      "default": "Hello World"
+    },
+    "test_secret": {
+      "type": "string",
+      "secret": true,
+      "label": "Test Secret String",
+      "description": "A password input field"
+    },
+    "test_boolean": {
+      "type": "boolean",
+      "label": "Test Boolean Switch",
+      "description": "A toggle switch",
+      "default": true
+    },
+    "test_integer": {
+      "type": "integer",
+      "label": "Test Integer",
+      "description": "A numeric input field",
+      "min": 1,
+      "max": 100,
+      "default": 42
+    },
+    "test_textarea": {
+      "type": "string",
+      "format": "textarea",
+      "label": "Test Textarea",
+      "description": "A multi-line text input",
+      "default": "Line 1\nLine 2"
+    },
+    "test_select": {
+      "type": "string",
+      "enum": ["Option A", "Option B", "Option C"],
+      "label": "Test Dropdown Select",
+      "description": "A dropdown menu",
+      "default": "Option A"
+    },
+    "test_radio": {
+      "type": "string",
+      "format": "radio",
+      "enum": ["Choice 1", "Choice 2", "Choice 3"],
+      "label": "Test Radio Group",
+      "description": "Radio buttons",
+      "default": "Choice 2"
+    },
+    "test_slider": {
+      "type": "integer",
+      "format": "slider",
+      "min": 0,
+      "max": 100,
+      "label": "Test Slider",
+      "description": "A visual slider component",
+      "default": 50
+    },
+    "test_array_tags": {
+      "type": "array",
+      "label": "Test Tags Input",
+      "description": "Press enter to add tags",
+      "default": ["tag1", "tag2"]
+    },
+    "test_multiselect": {
+      "type": "array",
+      "format": "multiselect",
+      "enum": ["Item X", "Item Y", "Item Z"],
+      "label": "Test Multi-Select",
+      "description": "A multiple selection combobox",
+      "default": ["Item X", "Item Y"]
+    }
+  }
+}

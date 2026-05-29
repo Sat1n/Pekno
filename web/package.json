@@ -11,7 +11,7 @@
   "dependencies": {
     "@tailwindcss/typography": "^0.5.19",
     "@tailwindcss/vite": "^4.2.1",
-    "@vueuse/core": "^14.2.1",
+    "@vueuse/core": "^14.3.0",
     "axios": "^1.13.6",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -24,7 +24,7 @@
     "markdown-it-task-lists": "^2.1.1",
     "marked": "^17.0.5",
     "pdfjs-dist": "^5.6.205",
-    "reka-ui": "^2.9.2",
+    "reka-ui": "^2.9.8",
     "shiki": "^4.0.2",
     "tailwind-merge": "^3.5.0",
     "vue": "^3.5.25",
