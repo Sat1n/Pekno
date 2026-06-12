@@ -26,7 +26,7 @@ UPDATE_PLUGIN_CONFIG_TOOL = Tool(
     inputSchema={
         "type": "object",
         "properties": {
-            "plugin_name": {"type": "string", "description": "Plugin ID, such as bilibili or github_stars"},
+            "plugin_name": {"type": "string", "description": "Plugin ID, such as bilibili or github_star"},
             "config_json_str": {
                 "type": "string",
                 "description": "Plugin config JSON string, e.g. a JSON object containing cookie, token, or API keys.",

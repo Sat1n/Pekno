@@ -488,7 +488,7 @@ Manual development flow for built-in plugins:
 2. Add or update a registry row in `plugins` with `module_path`.
 3. Restart or trigger plugin reload.
 
-Built-in `github_stars` is auto-registered by `PluginManager.ensure_builtin_plugins()`.
+Built-in `github_star` is auto-registered by `PluginManager.ensure_builtin_plugins()`.
 
 ## Security and Safety Rules
 

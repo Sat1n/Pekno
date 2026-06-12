@@ -1164,7 +1164,7 @@ watch(parseUrl, (value) => {
   if (normalized.includes('bilibili.com') || normalized.includes('b23.tv')) {
     parsePluginName.value = 'bilibili_sync'
   } else if (normalized.includes('github.com')) {
-    parsePluginName.value = 'github_stars'
+    parsePluginName.value = 'github_star'
   }
 })
 

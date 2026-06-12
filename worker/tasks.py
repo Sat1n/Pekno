@@ -106,11 +106,11 @@ async def _get_github_access_token(user_id: str | None = None) -> str | None:
         credential = await get_user_credential(user_id, "github")
         if credential:
             return credential.token_value
-    token = await ConfigManager.get_config("github_stars", ConfigKeys.TOKEN, user_id=user_id)
+    token = await ConfigManager.get_config("github_star", ConfigKeys.TOKEN, user_id=user_id)
     if token:
         return token
     if user_id:
-        return await ConfigManager.get_config("github_stars", ConfigKeys.TOKEN)
+        return await ConfigManager.get_config("github_star", ConfigKeys.TOKEN)
     return None
 
 
