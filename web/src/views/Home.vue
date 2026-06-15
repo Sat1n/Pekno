@@ -24,7 +24,7 @@ import {
   SheetHeader,
   SheetTitle
 } from '@/components/ui/sheet'
-import { Github, Tv, FileText, MoreVertical, Sparkles, Clock3, Clock4, ExternalLink, Trash2, Star, Loader2, Download, X, Upload, Link2, Heart, HeartOff, UserRound, ArrowUp, Eye } from 'lucide-vue-next'
+import { Github, Tv, FileText, MoreVertical, Sparkles, Clock3, Clock4, ExternalLink, Trash2, Star, Loader2, Download, X, Upload, Link2, Heart, HeartOff, UserRound, ArrowUp, Eye, BookOpen, Play, MessageSquare, AtSign, Globe, Cloud, BookMarked, Bookmark, Rss } from 'lucide-vue-next'
 import { API_BASE_URL, getItems, search, summarizeItem, getItemSummaryStatus, getStoredAuthUser, toggleItemWatchLater, toggleItemFavorite, markItemsReadBatch, getActivePlugins, getParsePlugins, getHoverBlocks, uploadItem, parseItemUrl, resolveApiErrorMessage, type RawItem, type SearchResult, type ActivePlugin, type HoverResponse, type UploadDedupResponse } from '@/lib/api'
 import HoverPreview from '@/components/HoverPreview.vue'
 import { useToast } from '@/components/ui/toast/use-toast'
@@ -437,6 +437,18 @@ function mapSourceType(sourceType: string) {
     bilibili_subscribed: 'bilibili',
     article: 'article',
     upload: 'upload',
+    arxiv: 'arxiv',
+    youtube: 'youtube',
+    reddit: 'reddit',
+    twitter: 'twitter',
+    mastodon: 'mastodon',
+    bluesky: 'bluesky',
+    notion: 'notion',
+    readwise: 'readwise',
+    pocket: 'pocket',
+    instapaper: 'instapaper',
+    zotero: 'zotero',
+    rss: 'rss',
   }
 
   return sourceMap[sourceType] || sourceType
@@ -667,10 +679,25 @@ onBeforeUnmount(() => {
 })
 
 const getSourceIcon = (source: string) => {
-  if (source === 'github') return Github
-  if (source === 'bilibili') return Tv
-  if (source === 'upload') return Upload
-  return FileText
+  const iconMap: Record<string, typeof FileText> = {
+    github: Github,
+    bilibili: Tv,
+    upload: Upload,
+    arxiv: BookOpen,
+    youtube: Play,
+    reddit: MessageSquare,
+    twitter: AtSign,
+    mastodon: Globe,
+    bluesky: Cloud,
+    notion: FileText,
+    readwise: BookMarked,
+    pocket: FileText,
+    instapaper: FileText,
+    zotero: Bookmark,
+    rss: Rss,
+    article: FileText,
+  }
+  return iconMap[source] || FileText
 }
 
 const gridClass = computed(() => {

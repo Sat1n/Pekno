@@ -213,6 +213,18 @@ const sourceNames = computed<Record<string, string>>(() => ({
   github_star: t('settings.dataSourceGithubStars'),
   bilibili: t('settings.dataSourceBilibili'),
   article: t('settings.dataSourceLocalArticle'),
+  arxiv: t('settings.dataSourceArxiv'),
+  youtube: t('settings.dataSourceYoutube'),
+  reddit: t('settings.dataSourceReddit'),
+  twitter: t('settings.dataSourceTwitter'),
+  mastodon: t('settings.dataSourceMastodon'),
+  bluesky: t('settings.dataSourceBluesky'),
+  notion: t('settings.dataSourceNotion'),
+  readwise: t('settings.dataSourceReadwise'),
+  pocket: t('settings.dataSourcePocket'),
+  instapaper: t('settings.dataSourceInstapaper'),
+  zotero: t('settings.dataSourceZotero'),
+  rss: t('settings.dataSourceRss'),
 }))
 
 const menuItems = computed(() => {

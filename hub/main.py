@@ -226,6 +226,18 @@ async def hybrid_search_api(
                     "bilibili_subscribed": "bilibili",
                     "article": "article",
                     "upload": "upload",
+                    "arxiv": "arxiv",
+                    "youtube": "youtube",
+                    "reddit": "reddit",
+                    "twitter": "twitter",
+                    "mastodon": "mastodon",
+                    "bluesky": "bluesky",
+                    "notion": "notion",
+                    "readwise": "readwise",
+                    "pocket": "pocket",
+                    "instapaper": "instapaper",
+                    "zotero": "zotero",
+                    "rss": "rss",
                 }
                 source = source_map.get(item.source_type, item.source_type)
                 
