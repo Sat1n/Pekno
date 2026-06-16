@@ -1,3 +1,4 @@
+from typing import Any
 from shared.plugins.manager import plugin_manager
 from shared.entities import AIProcessingStatus, UniversalItem
 from hub.core.notifications import create_notification_for_user

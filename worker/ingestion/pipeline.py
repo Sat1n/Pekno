@@ -12,7 +12,7 @@ from worker.plugins.runtime import (
     close_plugin_context,
     fallback_text_for_summary,
 )
-from worker.plugins.manager import plugin_manager
+from shared.plugins.manager import plugin_manager
 
 class IngestionPipeline:
     def __init__(self):
