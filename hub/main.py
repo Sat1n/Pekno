@@ -224,11 +224,12 @@ async def hybrid_search_api(
                     "github_star": "github",
                     "bilibili": "bilibili",
                     "bilibili_subscribed": "bilibili",
+                    "bilibili_video": "bilibili",
                     "article": "article",
                     "upload": "upload",
                 }
                 source = source_map.get(item.source_type, item.source_type)
-                
+
                 search_results.append(FrontendSearchItem(
                     id=item.id,
                     title=item.title,
@@ -298,6 +299,7 @@ async def hybrid_search_api(
             "github_star": "github",
             "bilibili": "bilibili",
             "bilibili_subscribed": "bilibili",
+            "bilibili_video": "bilibili",
             "article": "article",
             "upload": "upload",
         }

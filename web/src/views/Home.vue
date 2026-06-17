@@ -435,6 +435,7 @@ function mapSourceType(sourceType: string) {
     github_star: 'github',
     bilibili: 'bilibili',
     bilibili_subscribed: 'bilibili',
+    bilibili_video: 'bilibili',
     article: 'article',
     upload: 'upload',
   }
