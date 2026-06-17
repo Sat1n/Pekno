@@ -8,7 +8,6 @@ from shared.logger import worker_log
 from shared.config import ConfigManager, ConfigKeys
 from worker.plugins.pipeline import run_plugin_pipeline_task
 from worker.ingestion.pipeline import process_new_item_task
-from worker.plugins.manager import plugin_manager
 from shared.credentials import get_user_credential, validate_required_credentials
 from shared.plugins.manager import plugin_manager
 from shared.time_utils import get_app_timezone, now_in_app_timezone_naive
