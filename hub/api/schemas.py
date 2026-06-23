@@ -168,11 +168,22 @@ class UserCredentialUpsertRequest(BaseModel):
     token_value: str = Field(min_length=1)
 
 
+class CookieFieldItem(BaseModel):
+    name: str
+    masked_value: str
+
+
+class CookieUpsertRequest(BaseModel):
+    platform: str
+    cookie_value: str = Field(min_length=1)
+
+
 class UserCredentialResponse(BaseModel):
     id: str
     platform: str
     label: str
     masked_value: Optional[str] = None
+    cookie_fields: Optional[list[CookieFieldItem]] = None
     created_at: datetime
     updated_at: datetime
 

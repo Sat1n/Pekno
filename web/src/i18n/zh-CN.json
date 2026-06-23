@@ -368,21 +368,17 @@
       "uninstalling": "卸载中...",
       "confirmUninstall": "确认卸载"
     },
-    "cookieFileUpload": {
-      "uploadCookie": "上传 Cookie 文件",
-      "selectFile": "选择文件",
-      "uploadSuccess": "Cookie 文件已上传",
-      "fileDate": "文件日期",
-      "cookieStatus": "Cookie 状态",
-      "requiredKeys": "必需 Cookie 项",
-      "keyFound": "{key} 已找到",
-      "keyMissing": "{key} 缺失",
-      "allKeysFound": "全部必需项已满足",
-      "someKeysMissing": "缺少 {count} 项必需 Cookie",
-      "noFile": "尚未上传 Cookie 文件",
-      "onlyTxtAccepted": "仅支持 .txt 格式的 Netscape Cookie 文件",
-      "uploadFailed": "Cookie 文件上传失败",
-      "currentFile": "当前已上传"
+    "cookieFields": {
+      "storedFields": "已存储的 Cookie 字段",
+      "lastUpdated": "上次更新",
+      "pasteHint": "粘贴从浏览器获取的 Cookie（F12 → 网络 → Cookie）或 Netscape 格式的 Cookie 文件",
+      "placeholder": "在此粘贴 Cookie 字符串...\n示例：SESSDATA=xxx; bili_jct=yyy; buvid3=zzz",
+      "saveCookie": "保存 Cookie",
+      "saveSuccess": "Cookie 保存成功",
+      "saveFailed": "Cookie 保存失败",
+      "emptyInput": "请先粘贴 Cookie 内容",
+      "noCookie": "尚未配置 Cookie",
+      "fieldsCount": "已存储 {count} 个 Cookie 字段"
     },
     "pluginsHeading": "插件管理",
     "pluginsDesc": "连接并配置第三方服务，让 Pekno 自动同步并分析你的数字内容。",

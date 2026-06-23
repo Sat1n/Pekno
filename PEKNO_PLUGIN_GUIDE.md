@@ -254,8 +254,83 @@ Credential behavior:
 - Bound credentials are available in `ctx.credentials`.
 - If the platform declares a `config_key`, the credential is also copied into `ctx.config`.
 - Example: `github` credentials are available as `ctx.credentials["github"]` and `ctx.config["token"]`.
+- **Cookie-based platforms** (e.g. `bilibili`) are automatically loaded from the database without requiring explicit binding. See the [Cookie Credentials](#cookie-credentials) section below.
 
 The GitHub built-in plugin currently receives a specialized `GitHubClient`. Other plugins receive an `httpx.AsyncClient(timeout=15.0)`.
+
+### Cookie Credentials
+
+Platforms with `"credential_kind": "cookie_file"` in `PLATFORM_WHITELIST` (currently only `bilibili`) use a special credential format. Instead of a plain token string, the value stored in `ctx.credentials[platform]` is a **JSON string**:
+
+```json
+{"format": "cookie_string", "value": "SESSDATA=xxx; bili_jct=yyy; buvid3=zzz"}
+```
+
+or:
+
+```json
+{"format": "netscape_file", "value": "# Netscape HTTP Cookie File\n.bilibili.com\tTRUE\t/\tTRUE\t1792687017\tSESSDATA\txxx\n..."}
+```
+
+The `format` field indicates the original input format:
+
+- `cookie_string`: A semicolon-separated cookie string from the browser (F12 → Network → Cookie). Each field is in `key=value` format, separated by `; `.
+- `netscape_file`: A Netscape-format cookie file (e.g. exported by a browser extension or yt-dlp).
+
+Plugins that consume cookie credentials **must** parse this JSON and extract the actual cookie value. Example helper:
+
+```python
+@staticmethod
+def _extract_cookie_header(raw: str) -> str:
+    """Parse stored credential and return a Cookie header value.
+
+    Handles both JSON format {"format":..., "value":...} and legacy raw strings.
+    """
+    import json as _json
+
+    raw = (raw or "").strip()
+    if not raw:
+        return ""
+    try:
+        data = _json.loads(raw)
+        value = data.get("value", "")
+    except (_json.JSONDecodeError, AttributeError, TypeError):
+        value = raw
+
+    if not value:
+        return ""
+    # Netscape file format: extract key=value pairs from tab-separated lines
+    if "\t" in value and "\n" in value:
+        cookies: dict[str, str] = {}
+        for line in value.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split("\t")
+            if len(parts) >= 7:
+                cookies[parts[5]] = parts[6]
+        return "; ".join(f"{k}={v}" for k, v in cookies.items())
+    # Cookie string: use as-is if it contains "=", otherwise wrap as SESSDATA
+    if "=" in value:
+        return value
+    return f"SESSDATA={value}"
+```
+
+Usage in a plugin:
+
+```python
+def _headers(self, ctx: PluginContext) -> dict[str, str]:
+    headers = {"User-Agent": "MyPlugin/1.0"}
+    raw = (ctx.config.get("cookie") or ctx.credentials.get("bilibili") or "").strip()
+    cookie_header = self._extract_cookie_header(raw)
+    if cookie_header:
+        headers["Cookie"] = cookie_header
+    return headers
+```
+
+The same parsing logic should be applied wherever the credential is consumed (e.g. `fetch_data`, `parse_single_item`, `get_hover_blocks`).
+
+**Important**: The framework automatically loads cookie credentials from the database for cookie-based platforms — no explicit binding via `__apply_global_credentials` is required. If the credential is missing, the framework raises `MissingPluginCredentialError` before your plugin code runs.
 
 If your plugin receives a generic `httpx.AsyncClient`, close long-lived clients only if you created them yourself. The pipeline closes the context HTTP client after single-item parsing when it exposes `aclose()`.
 

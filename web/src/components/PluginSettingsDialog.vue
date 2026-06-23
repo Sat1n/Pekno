@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Settings, Save, RefreshCw, Loader2, AlertCircle, Check, Trash2, Upload, FileText, ChevronsUpDown } from 'lucide-vue-next'
+import { Settings, Save, RefreshCw, Loader2, AlertCircle, Check, Trash2, ChevronsUpDown } from 'lucide-vue-next'
 
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { Badge } from '@/components/ui/badge'
@@ -19,7 +19,7 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
 import { useToast } from '@/components/ui/toast/use-toast'
-import { getStoredAuthUser, getUserCredentials, resolveApiErrorMessage, uninstallPluginApi, uploadCookieFile, type CookieFileUploadResult, type PluginCredentialState, type PluginSettingSchema, type UserCredentialItem } from '@/lib/api'
+import { getStoredAuthUser, getUserCredentials, resolveApiErrorMessage, uninstallPluginApi, saveCookie, type PluginCredentialState, type PluginSettingSchema, type UserCredentialItem } from '@/lib/api'
 import { usePluginStore } from '@/store/usePluginStore'
 
 const props = defineProps<{
@@ -45,9 +45,8 @@ const formData = ref<Record<string, any>>({})
 const userCredentials = ref<UserCredentialItem[]>([])
 const applyGlobalCredentials = ref<Record<string, boolean>>({})
 const globalCredentialInputs = ref<Record<string, string>>({})
-const cookieFileResults = ref<Record<string, CookieFileUploadResult | null>>({})
-const cookieUploading = ref<Record<string, boolean>>({})
-const cookieFileInputRefs = ref<Record<string, HTMLInputElement | null>>({})
+const cookieInputs = ref<Record<string, string>>({})
+const cookieSaving = ref<Record<string, boolean>>({})
 
 const currentPlugin = computed(() => pluginStore.pluginsManifests.value.find((plugin) => plugin.manifest.id === props.pluginId))
 const schema = computed<Record<string, PluginSettingSchema>>(() => currentPlugin.value?.manifest.settings_schema || {})
@@ -76,10 +75,9 @@ function credentialDotClass(platform: string) {
   const state = resolveCredentialState(platform)
   if (!state) return 'bg-slate-400'
   if (isCookieFilePlatform(platform)) {
-    if (state.status === 'applied' && state.cookie_valid) return 'bg-emerald-500'
-    if (state.status === 'applied' && !state.cookie_valid) return 'bg-amber-500'
-    if (state.status === 'available' && state.cookie_valid) return 'bg-sky-500'
-    if (state.status === 'available' && !state.cookie_valid) return 'bg-amber-500'
+    const hasFields = (state.cookie_fields?.length || 0) > 0
+    if (state.status === 'applied' && hasFields) return 'bg-emerald-500'
+    if (state.status === 'available' && hasFields) return 'bg-sky-500'
     return 'bg-slate-400'
   }
   const status = state.status
@@ -91,10 +89,10 @@ function credentialDotClass(platform: string) {
 function credentialStatusText(platform: string) {
   const state = resolveCredentialState(platform)
   if (isCookieFilePlatform(platform)) {
-    if (!state?.has_global) return t('settings.cookieFileUpload.noFile')
-    if (state.cookie_valid) return t('settings.cookieFileUpload.allKeysFound')
-    const missing = state.missing_keys?.length || 0
-    return t('settings.cookieFileUpload.someKeysMissing', { count: missing })
+    if (!state?.has_global) return t('settings.cookieFields.noCookie')
+    const count = state.cookie_fields?.length || 0
+    if (count > 0) return t('settings.cookieFields.fieldsCount', { count })
+    return t('settings.cookieFields.noCookie')
   }
   const status = state?.status
   if (status === 'applied') return t('settings.pluginCredentials.statusApplied')
@@ -131,12 +129,13 @@ function initForm() {
 
   applyGlobalCredentials.value = {}
   globalCredentialInputs.value = {}
-  cookieFileResults.value = {}
-  cookieUploading.value = {}
+  cookieInputs.value = {}
+  cookieSaving.value = {}
   for (const platform of requiredCredentials.value) {
     applyGlobalCredentials.value[platform] = (currentPlugin.value.credential_bindings || []).includes(platform)
     globalCredentialInputs.value[platform] = ''
-    cookieUploading.value[platform] = false
+    cookieInputs.value[platform] = ''
+    cookieSaving.value[platform] = false
   }
 }
 
@@ -166,45 +165,35 @@ function applyExistingCredential(platform: string) {
   applyGlobalCredentials.value[platform] = true
 }
 
-function triggerCookieFileInput(platform: string) {
-  cookieFileInputRefs.value[platform]?.click()
-}
-
-async function handleCookieUpload(platform: string, event: Event) {
-  const input = event.target as HTMLInputElement
-  const file = input.files?.[0]
-  if (!file) return
-
-  if (!file.name.endsWith('.txt')) {
+async function handleCookieSave(platform: string) {
+  const value = (cookieInputs.value[platform] || '').trim()
+  if (!value) {
     toast({
-      title: t('settings.cookieFileUpload.uploadFailed'),
-      description: t('settings.cookieFileUpload.onlyTxtAccepted'),
+      title: t('settings.cookieFields.saveFailed'),
+      description: t('settings.cookieFields.emptyInput'),
       variant: 'destructive',
     })
-    input.value = ''
     return
   }
 
-  cookieUploading.value[platform] = true
+  cookieSaving.value[platform] = true
   try {
-    const result = await uploadCookieFile(platform, file)
-    cookieFileResults.value[platform] = result
+    await saveCookie(platform, value)
     await pluginStore.loadAllPlugins()
     await loadUserCredentials()
-    initForm()
+    cookieInputs.value[platform] = ''
     toast({
-      title: t('settings.cookieFileUpload.uploadSuccess'),
-      description: t('settings.cookieFileUpload.uploadSuccess'),
+      title: t('settings.cookieFields.saveSuccess'),
+      description: t('settings.cookieFields.saveSuccess'),
     })
   } catch (error: any) {
     toast({
-      title: t('settings.cookieFileUpload.uploadFailed'),
+      title: t('settings.cookieFields.saveFailed'),
       description: resolveApiErrorMessage(error),
       variant: 'destructive',
     })
   } finally {
-    cookieUploading.value[platform] = false
-    input.value = ''
+    cookieSaving.value[platform] = false
   }
 }
 
@@ -382,45 +371,49 @@ async function handleSync() {
             </Button>
           </div>
 
-          <!-- Cookie file upload UI -->
+          <!-- Cookie input UI -->
           <div v-if="isCookieFilePlatform(platform)" class="space-y-3">
-            <input
-              :ref="(el) => { cookieFileInputRefs[platform] = el as HTMLInputElement }"
-              type="file"
-              accept=".txt"
-              class="hidden"
-              @change="(e) => handleCookieUpload(platform, e)"
-            />
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              :disabled="cookieUploading[platform]"
-              @click="triggerCookieFileInput(platform)"
-            >
-              <Loader2 v-if="cookieUploading[platform]" class="w-4 h-4 mr-2 animate-spin" />
-              <Upload v-else class="w-4 h-4 mr-2" />
-              {{ t('settings.cookieFileUpload.selectFile') }}
-            </Button>
+            <!-- Last updated time -->
+            <div v-if="findUserCredential(platform)?.updated_at" class="flex items-center gap-2 text-xs text-muted-foreground">
+              <span>{{ t('settings.cookieFields.lastUpdated') }}:</span>
+              <code class="bg-muted px-1.5 py-0.5 rounded text-[10px]">{{ new Date(findUserCredential(platform)!.updated_at).toLocaleString() }}</code>
+            </div>
 
-            <div v-if="resolveCredentialState(platform)?.has_global" class="space-y-2 text-xs">
-              <div class="flex items-center gap-2 text-muted-foreground">
-                <FileText class="w-3.5 h-3.5" />
-                <span>{{ t('settings.cookieFileUpload.fileDate') }}:</span>
-                <code class="bg-muted px-1.5 py-0.5 rounded text-[10px]">{{ resolveCredentialState(platform)?.cookie_file_date || '—' }}</code>
-              </div>
-
-              <div class="flex flex-wrap gap-1.5 pt-1">
+            <!-- Existing fields display -->
+            <div v-if="resolveCredentialState(platform)?.cookie_fields?.length" class="space-y-2">
+              <Label class="text-xs text-muted-foreground">{{ t('settings.cookieFields.storedFields') }}</Label>
+              <div class="flex flex-wrap gap-1.5">
                 <span
-                  v-for="key in resolveCredentialState(platform)?.required_keys"
-                  :key="key"
-                  class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium"
-                  :class="resolveCredentialState(platform)?.found_keys?.includes(key) ? 'bg-emerald-500/10 text-emerald-600' : 'bg-red-500/10 text-red-500'"
+                  v-for="field in resolveCredentialState(platform)?.cookie_fields"
+                  :key="field.name"
+                  class="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-mono bg-muted border"
                 >
-                  <Check v-if="resolveCredentialState(platform)?.found_keys?.includes(key)" class="w-3 h-3" />
-                  <AlertCircle v-else class="w-3 h-3" />
-                  {{ key }}
+                  <span class="text-muted-foreground">{{ field.name }}=</span>
+                  <span>{{ field.masked_value }}</span>
                 </span>
+              </div>
+            </div>
+
+            <!-- Paste area -->
+            <div class="space-y-2">
+              <Label class="text-xs text-muted-foreground">{{ t('settings.cookieFields.pasteHint') }}</Label>
+              <Textarea
+                v-model="cookieInputs[platform]"
+                :placeholder="t('settings.cookieFields.placeholder')"
+                :rows="3"
+                class="text-xs font-mono"
+              />
+              <div class="flex justify-end">
+                <Button
+                  type="button"
+                  size="sm"
+                  :disabled="cookieSaving[platform] || !cookieInputs[platform]?.trim()"
+                  @click="handleCookieSave(platform)"
+                >
+                  <Loader2 v-if="cookieSaving[platform]" class="w-4 h-4 mr-2 animate-spin" />
+                  <Check v-else class="w-4 h-4 mr-2" />
+                  {{ t('settings.cookieFields.saveCookie') }}
+                </Button>
               </div>
             </div>
           </div>

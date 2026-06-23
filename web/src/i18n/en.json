@@ -369,21 +369,17 @@
       "uninstalling": "Uninstalling...",
       "confirmUninstall": "Confirm uninstall"
     },
-    "cookieFileUpload": {
-      "uploadCookie": "Upload Cookie File",
-      "selectFile": "Select file",
-      "uploadSuccess": "Cookie file uploaded",
-      "fileDate": "File date",
-      "cookieStatus": "Cookie status",
-      "requiredKeys": "Required cookies",
-      "keyFound": "{key} found",
-      "keyMissing": "{key} missing",
-      "allKeysFound": "All required cookies present",
-      "someKeysMissing": "{count} required cookie(s) missing",
-      "noFile": "No cookie file uploaded yet",
-      "onlyTxtAccepted": "Only .txt Netscape cookie files are accepted",
-      "uploadFailed": "Cookie file upload failed",
-      "currentFile": "Currently uploaded"
+    "cookieFields": {
+      "storedFields": "Stored cookie fields",
+      "lastUpdated": "Last updated",
+      "pasteHint": "Paste your cookie from browser (F12 → Network → Cookie) or a Netscape cookie file",
+      "placeholder": "Paste cookie string here...\nExample: SESSDATA=xxx; bili_jct=yyy; buvid3=zzz",
+      "saveCookie": "Save Cookie",
+      "saveSuccess": "Cookie saved successfully",
+      "saveFailed": "Failed to save cookie",
+      "emptyInput": "Please paste your cookie content first",
+      "noCookie": "No cookie configured yet",
+      "fieldsCount": "{count} cookie field(s) stored"
     },
     "pluginsHeading": "Plugin Management",
     "pluginsDesc": "Connect and configure third-party services so Pekno can sync and analyze your digital content automatically.",
