@@ -31,8 +31,17 @@ async def build_plugin_context_for_user(plugin_id: str, plugin, user_id: str | N
             ConfigKeys.credential_binding(platform),
             user_id=user_id,
         )
+        is_cookie_platform = PLATFORM_WHITELIST.get(platform, {}).get("credential_kind") == "cookie_file"
+
         credential = None
-        if binding_enabled == "true" and user_id:
+        if is_cookie_platform and user_id:
+            # Cookie platforms: always load from DB (binding not required)
+            credential = await get_user_credential(user_id, platform)
+            if credential is None:
+                raise MissingPluginCredentialError(
+                    f"[{plugin_id}] Missing required cookie credential for platform '{platform}'"
+                )
+        elif binding_enabled == "true" and user_id:
             credential = await get_user_credential(user_id, platform)
             if credential is None:
                 raise MissingPluginCredentialError(

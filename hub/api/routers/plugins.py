@@ -9,7 +9,7 @@ from pathlib import Path
 from shared.plugins.manager import plugin_manager
 from shared.config import ConfigManager, SYSTEM_SCOPED_CONFIG_KEYS, ConfigKeys
 from shared.constants import PLATFORM_WHITELIST
-from shared.credentials import get_user_credential, mask_credential, validate_required_credentials, upsert_user_credential, _is_cookie_file_platform, get_cookie_file_path, validate_cookie_file
+from shared.credentials import get_user_credential, mask_credential, validate_required_credentials, upsert_user_credential, _is_cookie_file_platform, get_cookie_fields_for_display_async
 from shared.models import ConfigORM, PluginRegistryORM
 from shared.database import AsyncSessionLocal
 from shared.utils.zip_utils import safe_extract_zip
@@ -122,19 +122,16 @@ async def _resolve_plugin_credential_state(
     has_required_credentials = True
     for platform in required_credentials:
         if _is_cookie_file_platform(platform):
-            cookie_path = get_cookie_file_path(user_id, platform)
-            cookie_validation = validate_cookie_file(platform, cookie_path)
+            # Check DB credential instead of file
+            global_credential = await get_user_credential(user_id, platform)
+            has_global = global_credential is not None
             is_bound = platform in bound_credentials
-            file_exists = cookie_validation.get("file_exists", False)
-            is_valid = cookie_validation.get("valid", False)
+            cookie_fields = await get_cookie_fields_for_display_async(user_id, platform) if has_global else []
+            has_fields = len(cookie_fields) > 0
             status = "missing"
-            if is_bound and file_exists:
-                status = "applied"
-            elif file_exists:
-                status = "available"
-            if not is_valid:
-                has_required_credentials = False
-            elif not is_bound and file_exists:
+            if has_global and has_fields:
+                status = "applied" if is_bound else "available"
+            if not has_fields:
                 has_required_credentials = False
             credential_states.append(
                 {
@@ -143,13 +140,9 @@ async def _resolve_plugin_credential_state(
                     "status": status,
                     "masked_value": None,
                     "is_bound": is_bound,
-                    "has_global": file_exists,
+                    "has_global": has_global,
                     "credential_kind": "cookie_file",
-                    "cookie_file_date": cookie_validation.get("file_date"),
-                    "cookie_valid": is_valid,
-                    "found_keys": cookie_validation.get("found_keys", []),
-                    "missing_keys": cookie_validation.get("missing_keys", []),
-                    "required_keys": list(PLATFORM_WHITELIST[platform].get("required_cookie_keys", [])),
+                    "cookie_fields": cookie_fields,
                 }
             )
             continue
