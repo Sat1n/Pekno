@@ -1,0 +1,38 @@
+{
+  "extName": {
+    "message": "Pekno Cookie 同步",
+    "description": "Extension name"
+  },
+  "extDesc": {
+    "message": "自动将浏览器 Cookie 同步到你的 Pekno 实例。",
+    "description": "Extension description"
+  },
+  "apiConfig": {
+    "message": "API 配置",
+    "description": "Section title"
+  },
+  "apiUrl": {
+    "message": "API 地址",
+    "description": "Label"
+  },
+  "patToken": {
+    "message": "PAT 令牌",
+    "description": "Label"
+  },
+  "save": {
+    "message": "保存",
+    "description": "Button"
+  },
+  "testConn": {
+    "message": "测试连接",
+    "description": "Button"
+  },
+  "syncSettings": {
+    "message": "同步设置",
+    "description": "Section title"
+  },
+  "syncLog": {
+    "message": "同步日志",
+    "description": "Section title"
+  }
+}
