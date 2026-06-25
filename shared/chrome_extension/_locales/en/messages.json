@@ -1,0 +1,38 @@
+{
+  "extName": {
+    "message": "Pekno Cookie Sync",
+    "description": "Extension name"
+  },
+  "extDesc": {
+    "message": "Automatically sync browser cookies to your Pekno instance.",
+    "description": "Extension description"
+  },
+  "apiConfig": {
+    "message": "API Configuration",
+    "description": "Section title"
+  },
+  "apiUrl": {
+    "message": "API URL",
+    "description": "Label"
+  },
+  "patToken": {
+    "message": "PAT Token",
+    "description": "Label"
+  },
+  "save": {
+    "message": "Save",
+    "description": "Button"
+  },
+  "testConn": {
+    "message": "Test Connection",
+    "description": "Button"
+  },
+  "syncSettings": {
+    "message": "Sync Settings",
+    "description": "Section title"
+  },
+  "syncLog": {
+    "message": "Sync Log",
+    "description": "Section title"
+  }
+}

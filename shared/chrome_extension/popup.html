@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pekno Cookie Sync</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <header class="header">
+      <div class="logo">
+        <img src="icons/icon48.png" alt="Pekno" width="24" height="24">
+        <h1>Pekno Cookie Sync</h1>
+      </div>
+      <span id="connectionDot" class="dot dot-gray" title="Connection status"></span>
+    </header>
+
+    <!-- API Configuration -->
+    <section class="section">
+      <h2 data-i18n="apiConfig">API Configuration</h2>
+      <div class="field">
+        <label for="apiUrl" data-i18n="apiUrl">API URL</label>
+        <input type="url" id="apiUrl" placeholder="http://your-pekno-server:8001">
+      </div>
+      <div class="field">
+        <label for="pat" data-i18n="patToken">PAT Token</label>
+        <div class="input-group">
+          <input type="password" id="pat" placeholder="pekno_pat_...">
+          <button id="togglePat" class="btn-icon" title="Show/Hide">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+              <circle cx="12" cy="12" r="3"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+      <div class="actions">
+        <button id="saveConfig" class="btn btn-primary" data-i18n="save">Save</button>
+        <button id="testConnection" class="btn btn-secondary" data-i18n="testConn">Test Connection</button>
+      </div>
+      <p id="configStatus" class="status-text"></p>
+    </section>
+
+    <!-- Platform Sync Settings -->
+    <section id="platformSection" class="section hidden">
+      <h2 data-i18n="syncSettings">Sync Settings</h2>
+      <div id="platformList"></div>
+    </section>
+
+    <!-- Sync Log -->
+    <section id="logSection" class="section hidden">
+      <h2 data-i18n="syncLog">Sync Log</h2>
+      <div id="syncLog" class="log"></div>
+    </section>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>

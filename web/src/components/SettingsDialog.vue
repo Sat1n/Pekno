@@ -204,6 +204,11 @@ const availablePatScopes = computed(() => [
     label: t('settings.patScopeWriteSystemConfig'),
     description: t('settings.patScopeWriteSystemConfigDesc'),
   },
+  {
+    value: 'write:credential',
+    label: t('settings.patScopeWriteCredential'),
+    description: t('settings.patScopeWriteCredentialDesc'),
+  },
 ])
 
 const isClearDialogOpen = ref(false)
@@ -695,6 +700,7 @@ function formatPatScopes(scopes: string[]): string {
     'read:knowledge': t('settings.patScopeReadKnowledge'),
     'write:star': t('settings.patScopeWriteStar'),
     'write:system_config': t('settings.patScopeWriteSystemConfig'),
+    'write:credential': t('settings.patScopeWriteCredential'),
   }
   return scopes.map((scope) => labels[scope] || scope).join(' / ')
 }

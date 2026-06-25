@@ -17,6 +17,7 @@ PLATFORM_WHITELIST: Final[dict[str, dict[str, Any]]] = {
         "env_var": "PEKNO_BILIBILI_COOKIE_FILE",
         "legacy_config_key": "cookie",
         "cookie_dir": "bilibili",
+        "domain_patterns": [".bilibili.com"],
         "required_cookie_keys": [
             "SESSDATA",
             "buvid3",

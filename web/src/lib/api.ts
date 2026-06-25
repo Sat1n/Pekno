@@ -964,3 +964,14 @@ export async function createPAT(
 export async function deletePAT(id: string): Promise<void> {
   await apiClient.delete(`/api/auth/pat/${id}`)
 }
+
+// ========== Cookie Extension ==========
+
+export function downloadCookieExtension(): void {
+  const link = document.createElement('a')
+  link.href = `${API_BASE_URL}/api/user/credentials/cookie-extension/download`
+  link.setAttribute('download', 'pekno-cookie-extension.zip')
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+}

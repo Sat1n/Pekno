@@ -3,12 +3,12 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useColorMode } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
-import { Search, Clock, Settings, Sun, Moon, Monitor, LayoutList, LayoutGrid, Rows3, Bell, Plus, Archive, BarChart3, Languages } from 'lucide-vue-next'
+import { Search, Clock, Settings, Sun, Moon, Monitor, LayoutList, LayoutGrid, Rows3, Bell, Plus, Archive, BarChart3, Languages, Download } from 'lucide-vue-next'
 import { Sidebar, SidebarContent, SidebarGroup, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import SettingsDialog from '@/components/SettingsDialog.vue'
 import PluginSettingsDialog from '@/components/PluginSettingsDialog.vue'
 import { SUPPORTED_LOCALES, getAppLocale, setAppLocale } from '@/i18n'
@@ -16,6 +16,7 @@ import {
   apiClient,
   clearNotifications,
   clearStoredToken,
+  downloadCookieExtension,
   getNotifications,
   getStoredAuthUser,
   markAllNotificationsRead,
@@ -154,6 +155,10 @@ const navMain = computed(() => {
 async function logout() {
   clearStoredToken()
   await router.replace('/login')
+}
+
+function handleDownloadExtension() {
+  downloadCookieExtension()
 }
 
 async function navigateTo(path: string, disabled?: boolean) {
@@ -455,6 +460,11 @@ async function handleNotificationClick(notification: NotificationItem) {
             <DropdownMenuContent align="end" class="w-48">
               <DropdownMenuItem disabled>
                 {{ usernameLabel }}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem @click="handleDownloadExtension">
+                <Download class="w-4 h-4 mr-2" />
+                {{ t('common.downloadExtension') }}
               </DropdownMenuItem>
               <DropdownMenuItem @click="logout">
                 {{ t('common.logout') }}
