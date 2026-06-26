@@ -556,6 +556,12 @@ async def get_items(
     watch_later_only: bool = Query(default=False),
     favorited_only: bool = Query(default=False),
     source_type: Optional[str] = Query(default=None),
+    author: Optional[str] = Query(default=None, description="按作者过滤"),
+    intent: Optional[str] = Query(default=None, description="按内容类型过滤"),
+    vault_category_id: Optional[str] = Query(default=None, description="按分类过滤"),
+    is_read: Optional[bool] = Query(default=None, description="按已读状态过滤"),
+    date_from: Optional[str] = Query(default=None, description="开始时间 (ISO格式)"),
+    date_to: Optional[str] = Query(default=None, description="结束时间 (ISO格式)"),
     current_user=Depends(get_current_user),
 ):
     async with AsyncSessionLocal() as session:
@@ -593,8 +599,30 @@ async def get_items(
             stmt = stmt.where(UserItemStateORM.is_favorited == True)
         if source_type:
             stmt = stmt.where(ItemORM.source_type == source_type)
-            
-        if not watch_later_only and not favorited_only and not source_type and hidden_plugin_ids:
+        if author:
+            stmt = stmt.where(ItemORM.author.ilike(f"%{author}%"))
+        if intent:
+            stmt = stmt.where(ItemORM.intent == intent)
+        if vault_category_id:
+            stmt = stmt.where(UserItemStateORM.vault_category_id == vault_category_id)
+        if is_read is not None:
+            stmt = stmt.where(UserItemStateORM.is_read == is_read)
+        if date_from:
+            try:
+                from datetime import datetime as dt
+                parsed_date_from = dt.fromisoformat(date_from.replace('Z', '+00:00'))
+                stmt = stmt.where(ItemORM.created_at >= parsed_date_from)
+            except ValueError:
+                pass
+        if date_to:
+            try:
+                from datetime import datetime as dt
+                parsed_date_to = dt.fromisoformat(date_to.replace('Z', '+00:00'))
+                stmt = stmt.where(ItemORM.created_at <= parsed_date_to)
+            except ValueError:
+                pass
+
+        if not watch_later_only and not favorited_only and not source_type and not author and not intent and not vault_category_id and is_read is None and not date_from and not date_to and hidden_plugin_ids:
             stmt = stmt.where(ItemORM.plugin_id.notin_(hidden_plugin_ids))
 
         if limit is not None:

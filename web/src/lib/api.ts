@@ -384,6 +384,12 @@ export interface SearchParams {
   limit?: number
   source_type?: string
   favorited_only?: boolean
+  author?: string
+  intent?: string
+  vault_category_id?: string
+  is_read?: boolean
+  date_from?: string
+  date_to?: string
 }
 
 /**
@@ -398,6 +404,27 @@ export async function search(params: SearchParams = {}): Promise<SearchResult[]>
   }
   if (params.favorited_only) {
     queryParams.favorited_only = true
+  }
+  if (params.author) {
+    queryParams.author = params.author
+  }
+  if (params.intent) {
+    queryParams.intent = params.intent
+  }
+  if (params.vault_category_id) {
+    queryParams.vault_category_id = params.vault_category_id
+  }
+  if (params.is_read !== undefined && params.is_read !== null) {
+    queryParams.is_read = params.is_read
+  }
+  if (params.date_from) {
+    queryParams.date_from = params.date_from
+  }
+  if (params.date_to) {
+    queryParams.date_to = params.date_to
+  }
+  if (params.limit) {
+    queryParams.limit = params.limit
   }
   const response = await apiClient.get<SearchResult[]>('/api/search', {
     params: queryParams,
@@ -429,7 +456,18 @@ export async function searchGitHub(params: SearchParams = {}): Promise<SearchRes
 export async function getItems(
   limit?: number,
   offset: number = 0,
-  options: { watchLaterOnly?: boolean; favoritedOnly?: boolean; starredOnly?: boolean; source_type?: string } = {}
+  options: {
+    watchLaterOnly?: boolean
+    favoritedOnly?: boolean
+    starredOnly?: boolean
+    source_type?: string
+    author?: string
+    intent?: string
+    vault_category_id?: string
+    is_read?: boolean
+    date_from?: string
+    date_to?: string
+  } = {}
 ): Promise<RawItem[]> {
   const params: Record<string, number | boolean | string> = { offset }
   if (typeof limit === 'number') {
@@ -443,6 +481,24 @@ export async function getItems(
   }
   if (options.source_type) {
     params.source_type = options.source_type
+  }
+  if (options.author) {
+    params.author = options.author
+  }
+  if (options.intent) {
+    params.intent = options.intent
+  }
+  if (options.vault_category_id) {
+    params.vault_category_id = options.vault_category_id
+  }
+  if (options.is_read !== undefined && options.is_read !== null) {
+    params.is_read = options.is_read
+  }
+  if (options.date_from) {
+    params.date_from = options.date_from
+  }
+  if (options.date_to) {
+    params.date_to = options.date_to
   }
 
   const response = await apiClient.get<RawItem[]>('/api/items', {
@@ -974,4 +1030,44 @@ export function downloadCookieExtension(): void {
   document.body.appendChild(link)
   link.click()
   link.remove()
+}
+
+// ========== Saved Filters (Capsules) ==========
+
+export interface SavedFilter {
+  id: string
+  name: string
+  filter_params: Record<string, any>
+  sort_order: number
+  last_content_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export async function getSavedFilters(): Promise<SavedFilter[]> {
+  const res = await apiClient.get<SavedFilter[]>('/api/saved-filters')
+  return res.data
+}
+
+export async function createSavedFilter(
+  name: string,
+  filter_params: Record<string, any>
+): Promise<SavedFilter> {
+  const res = await apiClient.post<SavedFilter>('/api/saved-filters', {
+    name,
+    filter_params,
+  })
+  return res.data
+}
+
+export async function updateSavedFilter(
+  id: string,
+  payload: { name?: string; filter_params?: Record<string, any>; sort_order?: number }
+): Promise<SavedFilter> {
+  const res = await apiClient.put<SavedFilter>(`/api/saved-filters/${id}`, payload)
+  return res.data
+}
+
+export async function deleteSavedFilter(id: string): Promise<void> {
+  await apiClient.delete(`/api/saved-filters/${id}`)
 }

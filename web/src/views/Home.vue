@@ -8,7 +8,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Button } from '@/components/ui/button'
-import { Dialog, DialogContent } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
 import {
@@ -24,7 +24,10 @@ import {
   SheetHeader,
   SheetTitle
 } from '@/components/ui/sheet'
-import { Github, Tv, FileText, MoreVertical, Sparkles, Clock3, Clock4, ExternalLink, Trash2, Star, Loader2, Download, X, Upload, Link2, Heart, HeartOff, UserRound, ArrowUp, Eye, BookOpen, Play, MessageSquare, AtSign, Globe, Cloud, BookMarked, Bookmark, Rss } from 'lucide-vue-next'
+import { Github, Tv, FileText, MoreVertical, Sparkles, Clock3, Clock4, ExternalLink, Trash2, Star, Loader2, Download, X, Upload, Link2, Heart, HeartOff, UserRound, ArrowUp, Eye, BookOpen, Play, MessageSquare, AtSign, Globe, Cloud, BookMarked, Bookmark, Rss, Plus } from 'lucide-vue-next'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { API_BASE_URL, getItems, search, summarizeItem, getItemSummaryStatus, getStoredAuthUser, toggleItemWatchLater, toggleItemFavorite, markItemsReadBatch, getActivePlugins, getParsePlugins, getHoverBlocks, uploadItem, parseItemUrl, resolveApiErrorMessage, type RawItem, type SearchResult, type ActivePlugin, type HoverResponse, type UploadDedupResponse } from '@/lib/api'
 import HoverPreview from '@/components/HoverPreview.vue'
 import { useToast } from '@/components/ui/toast/use-toast'
@@ -58,6 +61,29 @@ watch(layoutMode, (val) => localStorage.setItem('pekno-layout', val))
 const searchQuery = ref('')
 const searchResults = ref<LocalSearchResult[]>([])
 const activeSource = ref<string>('all')
+
+// Filter state
+const filterState = ref({
+  author: '',
+  intent: '',
+  is_read: undefined as boolean | undefined,
+  date_from: '',
+  date_to: '',
+})
+
+// Saved filters (capsules)
+const savedFilters = ref<Array<{ id: string; name: string; filter_params: Record<string, any> }>>([])
+const activeCapsuleId = ref<string | null>(null)
+const isCreateCapsuleOpen = ref(false)
+const newCapsuleName = ref('')
+const capsuleFilter = ref({
+  author: '',
+  intent: '',
+  is_read: undefined as boolean | undefined,
+  date_from: '',
+  date_to: '',
+})
+const deleteConfirmCapsule = ref<{ id: string; name: string } | null>(null)
 const activePlugins = ref<ActivePlugin[]>([])
 const parsePlugins = ref<ActivePlugin[]>([])
 const isLoading = ref(false)
@@ -578,9 +604,17 @@ async function loadData(query: string = '') {
   isLoading.value = true
   try {
     const sourceFilter = activeSource.value === 'all' ? undefined : activeSource.value
+    const filterOptions = {
+      source_type: sourceFilter,
+      author: filterState.value.author || undefined,
+      intent: filterState.value.intent || undefined,
+      is_read: filterState.value.is_read,
+      date_from: filterState.value.date_from || undefined,
+      date_to: filterState.value.date_to || undefined,
+    }
 
     if (isWatchLaterPage.value) {
-      const items = await getItems(undefined, 0, { watchLaterOnly: true, source_type: sourceFilter })
+      const items = await getItems(undefined, 0, { watchLaterOnly: true, ...filterOptions })
       const normalized = items.map((item) => normalizeRawItem(item))
       initialAnchorItemId.value = null
       if (query.trim()) {
@@ -598,14 +632,14 @@ async function loadData(query: string = '') {
     }
 
     if (query.trim()) {
-      const results = await search({ q: query, source_type: sourceFilter })
+      const results = await search({ q: query, ...filterOptions })
       initialAnchorItemId.value = null
       searchResults.value = results.map(normalizeSearchResult)
       syncSelectedItemFromRoute()
       return
     }
 
-    const items = await getItems(undefined, 0, { source_type: sourceFilter })
+    const items = await getItems(undefined, 0, filterOptions)
     const normalized = items.map((item) => normalizeRawItem(item))
     initialAnchorItemId.value = normalized.find((item) => item.isRead)?.id ?? null
     searchResults.value = normalized
@@ -630,6 +664,102 @@ async function handleSourceClick(sourceId: string) {
   await loadData(searchQuery.value)
 }
 
+// Capsule functions
+async function loadSavedFilters() {
+  try {
+    const { getSavedFilters } = await import('@/lib/api')
+    savedFilters.value = await getSavedFilters()
+  } catch (error) {
+    console.error('Failed to load saved filters:', error)
+  }
+}
+
+function applyCapsule(capsule: { id: string; filter_params: Record<string, any> }) {
+  if (activeCapsuleId.value === capsule.id) {
+    // Deactivate capsule
+    activeCapsuleId.value = null
+    filterState.value = {
+      author: '',
+      intent: '',
+      is_read: undefined,
+      date_from: '',
+      date_to: '',
+    }
+  } else {
+    // Activate capsule
+    activeCapsuleId.value = capsule.id
+    const params = capsule.filter_params
+    filterState.value = {
+      author: params.author || '',
+      intent: params.intent || '',
+      is_read: params.is_read,
+      date_from: params.date_from || '',
+      date_to: params.date_to || '',
+    }
+  }
+  void loadData(searchQuery.value)
+}
+
+async function createCapsule() {
+  if (!newCapsuleName.value.trim()) return
+
+  try {
+    const { createSavedFilter } = await import('@/lib/api')
+    const filterParams: Record<string, any> = {}
+    if (capsuleFilter.value.author) filterParams.author = capsuleFilter.value.author
+    if (capsuleFilter.value.intent) filterParams.intent = capsuleFilter.value.intent
+    if (capsuleFilter.value.is_read !== undefined) filterParams.is_read = capsuleFilter.value.is_read
+    if (capsuleFilter.value.date_from) filterParams.date_from = capsuleFilter.value.date_from
+    if (capsuleFilter.value.date_to) filterParams.date_to = capsuleFilter.value.date_to
+
+    await createSavedFilter(newCapsuleName.value.trim(), filterParams)
+    newCapsuleName.value = ''
+    isCreateCapsuleOpen.value = false
+    await loadSavedFilters()
+  } catch (error) {
+    console.error('Failed to create capsule:', error)
+  }
+}
+
+async function deleteCapsule(id: string) {
+  try {
+    const { deleteSavedFilter } = await import('@/lib/api')
+    await deleteSavedFilter(id)
+    if (activeCapsuleId.value === id) {
+      activeCapsuleId.value = null
+    }
+    await loadSavedFilters()
+  } catch (error) {
+    console.error('Failed to delete capsule:', error)
+  }
+}
+
+function openCreateCapsule() {
+  newCapsuleName.value = ''
+  capsuleFilter.value = {
+    author: '',
+    intent: '',
+    is_read: undefined,
+    date_from: '',
+    date_to: '',
+  }
+  isCreateCapsuleOpen.value = true
+}
+
+function confirmDeleteCapsule(capsule: { id: string; name: string }) {
+  deleteConfirmCapsule.value = capsule
+}
+
+function cancelDeleteCapsule() {
+  deleteConfirmCapsule.value = null
+}
+
+async function confirmDelete() {
+  if (!deleteConfirmCapsule.value) return
+  await deleteCapsule(deleteConfirmCapsule.value.id)
+  deleteConfirmCapsule.value = null
+}
+
 onMounted(async () => {
   // 移动端检测：粗指针设备（触摸屏）视为移动端
   mobileMediaQuery = window.matchMedia('(pointer: coarse)')
@@ -644,6 +774,7 @@ onMounted(async () => {
     console.error('Failed to load plugin list:', e)
   }
   void loadData()
+  void loadSavedFilters()
   flushReadsInterval = window.setInterval(() => {
     void flushPendingReads()
   }, 5000)
@@ -1210,6 +1341,7 @@ watch(isAddDialogOpen, (isOpen) => {
   <MainLayout
     v-model:layout="layoutMode"
     v-model:search-query="searchQuery"
+    v-model:filter="filterState"
     @search="handleSearch"
     @add-content="isAddDialogOpen = true"
   >
@@ -1231,19 +1363,145 @@ watch(isAddDialogOpen, (isOpen) => {
       >
         {{ t('home.allSources') }}
       </button>
-      <button 
-        v-for="plugin in activePlugins" 
+      <button
+        v-for="plugin in activePlugins"
         :key="plugin.id"
         @click="handleSourceClick(plugin.source_type)"
         :class="[
           'rounded-full px-4 py-1.5 text-sm font-medium whitespace-nowrap transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-primary/20 cursor-pointer',
           activeSource === plugin.source_type
-            ? 'bg-primary text-primary-foreground shadow-md' 
+            ? 'bg-primary text-primary-foreground shadow-md'
             : 'bg-muted/50 text-muted-foreground hover:bg-muted/80 hover:text-foreground'
         ]"
       >
         {{ plugin.name }}
       </button>
+
+      <!-- Divider -->
+      <div v-if="savedFilters.length > 0" class="w-px h-6 bg-border mx-1"></div>
+
+      <!-- Saved filter capsules -->
+      <div
+        v-for="capsule in savedFilters"
+        :key="capsule.id"
+        class="flex items-center"
+      >
+        <button
+          :class="[
+            'group rounded-full pl-4 pr-2 py-1.5 text-sm font-medium whitespace-nowrap transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-primary/20 cursor-pointer flex items-center gap-1',
+            activeCapsuleId === capsule.id
+              ? 'bg-primary text-primary-foreground shadow-md'
+              : 'bg-muted/50 text-muted-foreground hover:bg-muted/80 hover:text-foreground'
+          ]"
+          @click="applyCapsule(capsule)"
+        >
+          <span>{{ capsule.name }}</span>
+          <span
+            class="inline-flex items-center justify-center w-4 h-4 rounded-full hover:bg-destructive/20 transition-colors"
+            @click.stop="confirmDeleteCapsule(capsule)"
+          >
+            <X class="h-3 w-3" />
+          </span>
+        </button>
+      </div>
+
+      <!-- Create capsule button -->
+      <Popover v-model:open="isCreateCapsuleOpen">
+        <PopoverTrigger as-child>
+          <button
+            class="rounded-full px-3 py-1.5 text-sm font-medium whitespace-nowrap transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-primary/20 cursor-pointer border border-dashed border-muted-foreground/50 text-muted-foreground hover:border-primary hover:text-primary"
+            @click="openCreateCapsule"
+          >
+            <Plus class="h-4 w-4 inline-block" />
+          </button>
+        </PopoverTrigger>
+        <PopoverContent class="w-80" align="start">
+          <div class="grid gap-4">
+            <div class="space-y-2">
+              <h4 class="font-medium leading-none">{{ t('filter.createCapsule') }}</h4>
+              <p class="text-sm text-muted-foreground">
+                {{ t('filter.createCapsuleDescription') }}
+              </p>
+            </div>
+
+            <!-- Author -->
+            <div class="grid gap-2">
+              <Label for="capsule-author">{{ t('filter.author') }}</Label>
+              <Input
+                id="capsule-author"
+                v-model="capsuleFilter.author"
+                :placeholder="t('filter.authorPlaceholder')"
+              />
+            </div>
+
+            <!-- Intent -->
+            <div class="grid gap-2">
+              <Label>{{ t('filter.intent') }}</Label>
+              <select
+                v-model="capsuleFilter.intent"
+                class="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+              >
+                <option value="">{{ t('filter.allIntents') }}</option>
+                <option value="video">Video</option>
+                <option value="article">Article</option>
+                <option value="image">Image</option>
+                <option value="code">Code</option>
+                <option value="social_post">Social Post</option>
+                <option value="dynamic">Dynamic</option>
+              </select>
+            </div>
+
+            <!-- Read Status -->
+            <div class="grid gap-2">
+              <Label>{{ t('filter.readStatus') }}</Label>
+              <select
+                v-model="capsuleFilter.is_read"
+                class="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+              >
+                <option :value="undefined">{{ t('filter.all') }}</option>
+                <option :value="true">{{ t('filter.read') }}</option>
+                <option :value="false">{{ t('filter.unread') }}</option>
+              </select>
+            </div>
+
+            <!-- Date Range -->
+            <div class="grid gap-2">
+              <Label>{{ t('filter.dateRange') }}</Label>
+              <div class="grid grid-cols-2 gap-2">
+                <Input
+                  v-model="capsuleFilter.date_from"
+                  type="date"
+                  :placeholder="t('filter.from')"
+                />
+                <Input
+                  v-model="capsuleFilter.date_to"
+                  type="date"
+                  :placeholder="t('filter.to')"
+                />
+              </div>
+            </div>
+
+            <!-- Capsule Name -->
+            <div class="grid gap-2">
+              <Label for="capsule-name">{{ t('filter.capsuleName') }}</Label>
+              <Input
+                id="capsule-name"
+                v-model="newCapsuleName"
+                :placeholder="t('filter.capsuleNamePlaceholder')"
+              />
+            </div>
+
+            <div class="flex justify-end gap-2">
+              <Button variant="ghost" size="sm" @click="isCreateCapsuleOpen = false">
+                {{ t('common.cancel') }}
+              </Button>
+              <Button size="sm" :disabled="!newCapsuleName.trim()" @click="createCapsule">
+                {{ t('common.save') }}
+              </Button>
+            </div>
+          </div>
+        </PopoverContent>
+      </Popover>
     </div>
 
     <div v-if="isLoading" :class="['grid transition-all duration-300', gridClass]">
@@ -1467,6 +1725,31 @@ watch(isAddDialogOpen, (isOpen) => {
       </Button>
     </transition>
   </MainLayout>
+
+  <!-- Delete Capsule Confirmation Dialog -->
+  <Dialog :open="!!deleteConfirmCapsule" @update:open="cancelDeleteCapsule">
+    <DialogContent class="sm:max-w-md">
+      <DialogHeader>
+        <DialogTitle>{{ t('capsule.deleteConfirm') }}</DialogTitle>
+        <DialogDescription>
+          {{ t('capsule.deleteConfirmDesc') }}
+        </DialogDescription>
+      </DialogHeader>
+      <div class="py-4">
+        <p class="text-sm text-muted-foreground">
+          {{ t('capsule.deleteConfirmCapsuleName') }}: <strong>{{ deleteConfirmCapsule?.name }}</strong>
+        </p>
+      </div>
+      <DialogFooter>
+        <Button variant="ghost" @click="cancelDeleteCapsule">
+          {{ t('common.cancel') }}
+        </Button>
+        <Button variant="destructive" @click="confirmDelete">
+          {{ t('common.delete') }}
+        </Button>
+      </DialogFooter>
+    </DialogContent>
+  </Dialog>
 
   <Teleport to="body">
     <HoverPreview
