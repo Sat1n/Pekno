@@ -1,13 +1,14 @@
 from sqlalchemy import delete, select, update
 from shared.database import AsyncSessionLocal
 from shared.entities import AIProcessingStatus, UniversalItem
-from shared.models import ConfigORM, ItemORM, PluginRegistryORM, UserItemStateORM, SystemConfigORM, UserORM
+from shared.models import ConfigORM, ItemORM, PluginRegistryORM, UserCredentialORM, UserItemStateORM, SystemConfigORM, UserORM
 from datetime import datetime, timedelta
 from worker.broker import broker
 from shared.logger import worker_log
 from shared.config import ConfigManager, ConfigKeys
 from worker.plugins.pipeline import run_plugin_pipeline_task
 from worker.ingestion.pipeline import process_new_item_task
+from shared.constants import PLATFORM_WHITELIST
 from shared.credentials import get_user_credential, validate_required_credentials
 from shared.plugins.manager import plugin_manager
 from shared.time_utils import get_app_timezone, now_in_app_timezone_naive
@@ -49,30 +50,47 @@ async def _resolve_auto_sync_user_id(plugin_id: str) -> str | None:
     async with AsyncSessionLocal() as session:
         candidate_user_ids: set[str] = set()
         for platform in required_credentials:
-            binding_key = ConfigKeys.credential_binding(platform)
-            result = await session.execute(
-                select(ConfigORM.user_id).where(
-                    ConfigORM.plugin_id == plugin_id,
-                    ConfigORM.key == binding_key,
-                    ConfigORM.value.is_not(None),
+            is_cookie_platform = PLATFORM_WHITELIST.get(platform, {}).get("credential_kind") == "cookie_file"
+
+            if is_cookie_platform:
+                # Cookie platforms: find users who have a credential record
+                result = await session.execute(
+                    select(UserCredentialORM.user_id).where(
+                        UserCredentialORM.platform == platform,
+                        UserCredentialORM.token_value.is_not(None),
+                    )
                 )
-            )
+            else:
+                # Token platforms: find users who have the binding config
+                binding_key = ConfigKeys.credential_binding(platform)
+                result = await session.execute(
+                    select(ConfigORM.user_id).where(
+                        ConfigORM.plugin_id == plugin_id,
+                        ConfigORM.key == binding_key,
+                        ConfigORM.value.is_not(None),
+                    )
+                )
+
             for user_id in result.scalars().all():
                 if user_id and user_id != "system":
                     candidate_user_ids.add(user_id)
 
         for user_id in sorted(candidate_user_ids):
-            all_bound = True
             all_readable = True
             for platform in required_credentials:
-                binding_enabled = await ConfigManager.get_config(
-                    plugin_id,
-                    ConfigKeys.credential_binding(platform),
-                    user_id=user_id,
-                )
-                if binding_enabled != "true":
-                    all_bound = False
-                    break
+                is_cookie_platform = PLATFORM_WHITELIST.get(platform, {}).get("credential_kind") == "cookie_file"
+
+                if not is_cookie_platform:
+                    # Non-cookie platforms require binding to be enabled
+                    binding_enabled = await ConfigManager.get_config(
+                        plugin_id,
+                        ConfigKeys.credential_binding(platform),
+                        user_id=user_id,
+                    )
+                    if binding_enabled != "true":
+                        all_readable = False
+                        break
+
                 try:
                     credential = await get_user_credential(user_id, platform)
                 except Exception:
@@ -82,7 +100,7 @@ async def _resolve_auto_sync_user_id(plugin_id: str) -> str | None:
                     all_readable = False
                     break
 
-            if all_bound and all_readable:
+            if all_readable:
                 return user_id
 
     return None
