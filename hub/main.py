@@ -83,7 +83,7 @@ def _build_local_asset_url(local_asset_path: str | None) -> str | None:
         return None
 
 from hub.api import data
-from hub.api.routers import admin, annotations, auth, items, monitor, notifications, plugins, user_credentials, vault
+from hub.api.routers import admin, annotations, auth, items, monitor, notifications, plugins, saved_filters, user_credentials, vault
 from hub.api.mcp import mcp_app
 from hub.api.middlewares.mcp_auth import MCPAuthMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -114,6 +114,7 @@ app.include_router(notifications.router)
 app.include_router(user_credentials.router)
 app.include_router(admin.router)
 app.include_router(monitor.router)
+app.include_router(saved_filters.router)
 protected_mcp_app = MCPAuthMiddleware(mcp_app)
 app.mount("/api/mcp", protected_mcp_app)
 
@@ -171,6 +172,13 @@ async def hybrid_search_api(
     q: Optional[str] = Query(None, description="搜索关键词，为空则返回所有"),
     source_type: Optional[str] = Query(None, description="按信息源过滤"),
     favorited_only: bool = Query(False, description="仅搜索当前用户已收藏内容"),
+    author: Optional[str] = Query(None, description="按作者过滤"),
+    intent: Optional[str] = Query(None, description="按内容类型过滤"),
+    vault_category_id: Optional[str] = Query(None, description="按分类过滤"),
+    is_read: Optional[bool] = Query(None, description="按已读状态过滤"),
+    date_from: Optional[str] = Query(None, description="开始时间 (ISO格式)"),
+    date_to: Optional[str] = Query(None, description="结束时间 (ISO格式)"),
+    limit: int = Query(20, ge=1, le=100, description="返回数量限制"),
     current_user=Depends(get_current_user),
 ):
     """
@@ -184,16 +192,50 @@ async def hybrid_search_api(
     - tags: 标签列表
     - time: 时间描述
     """
+    # 解析时间参数
+    from datetime import datetime as dt
+    parsed_date_from = None
+    parsed_date_to = None
+    if date_from:
+        try:
+            parsed_date_from = dt.fromisoformat(date_from.replace('Z', '+00:00'))
+        except ValueError:
+            pass
+    if date_to:
+        try:
+            parsed_date_to = dt.fromisoformat(date_to.replace('Z', '+00:00'))
+        except ValueError:
+            pass
+
     # 如果没有搜索词，返回最近的数据
     if not q:
         async with AsyncSessionLocal() as session:
-            result = await session.execute(
+            stmt = (
                 select(ItemORM)
                 .join(UserItemStateORM, UserItemStateORM.item_id == ItemORM.id)
                 .where(UserItemStateORM.user_id == current_user["id"])
                 .order_by(ItemORM.created_at.desc())
-                .limit(20)
+                .limit(limit)
             )
+            # 应用筛选条件
+            if source_type:
+                stmt = stmt.where(ItemORM.source_type == source_type)
+            if favorited_only:
+                stmt = stmt.where(UserItemStateORM.is_favorited == True)
+            if author:
+                stmt = stmt.where(ItemORM.author.ilike(f"%{author}%"))
+            if intent:
+                stmt = stmt.where(ItemORM.intent == intent)
+            if vault_category_id:
+                stmt = stmt.where(UserItemStateORM.vault_category_id == vault_category_id)
+            if is_read is not None:
+                stmt = stmt.where(UserItemStateORM.is_read == is_read)
+            if parsed_date_from:
+                stmt = stmt.where(ItemORM.created_at >= parsed_date_from)
+            if parsed_date_to:
+                stmt = stmt.where(ItemORM.created_at <= parsed_date_to)
+
+            result = await session.execute(stmt)
             items = result.scalars().all()
             state_map = await _get_user_item_state_map(current_user["id"], [item.id for item in items])
             # 转换为前端格式
@@ -203,23 +245,23 @@ async def hybrid_search_api(
                 metadata = item.metadata_extra or {}
                 lang = metadata.get("lang")
                 pushed_at = metadata.get("pushed_at")
-                
+
                 tags = list(item.tags) if item.tags else []
                 if lang and lang not in tags:
                     tags.insert(0, lang)
                 if not tags:
                     tags = ["未分类"]
-                
+
                 # 强制卡片的 summary 只使用原始短描述
                 summary = item.content_text or "暂无描述"
                 time_str = format_github_time(pushed_at) if pushed_at else format_time_ago(item.created_at)
                 cover_url = metadata.get("cover_url")
-                author = metadata.get("up_name") or metadata.get("author")
+                item_author = item.author or metadata.get("up_name") or metadata.get("author")
                 has_long_summary = metadata.get("has_long_summary", False)
                 # 长总结独立赋值 (item.summary 里面存的才是大模型生成的 Markdown)
                 long_summary = metadata.get("long_summary") if has_long_summary else None
                 keyframes = metadata.get("keyframes")
-                
+
                 source_map = {
                     "github_star": "github",
                     "bilibili": "bilibili",
@@ -249,7 +291,7 @@ async def hybrid_search_api(
                     long_summary=long_summary,
                     has_long_summary=has_long_summary,
                     cover_url=cover_url,
-                    author=author,
+                    author=item_author,
                     raw_link=item.raw_link,
                     local_asset_url=_build_local_asset_url(item.local_asset_path),
                     source_type=item.source_type,
@@ -264,14 +306,20 @@ async def hybrid_search_api(
                     is_favorited=bool(state.is_favorited) if state else False,
                 ))
             return search_results
-    
+
     # 有搜索词时，执行混合搜索
     results = await search_service.hybrid_search(
         q,
         current_user["id"],
-        limit=20,
+        limit=limit,
         source_type=source_type,
         favorited_only=favorited_only,
+        author=author,
+        intent=intent,
+        vault_category_id=vault_category_id,
+        is_read=is_read,
+        date_from=parsed_date_from,
+        date_to=parsed_date_to,
     )
     state_map = await _get_user_item_state_map(current_user["id"], [item.id for item, _ in results])
     

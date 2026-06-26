@@ -224,6 +224,36 @@
       "unsupportedType": "Only static images, common video/audio formats, PDF, TXT, Markdown, and DOCX uploads are supported."
     }
   },
+  "filter": {
+    "title": "Filters",
+    "description": "Apply filters to narrow down your search results.",
+    "author": "Author",
+    "authorPlaceholder": "Filter by author name...",
+    "intent": "Content Type",
+    "allIntents": "All types",
+    "readStatus": "Read Status",
+    "all": "All",
+    "read": "Read",
+    "unread": "Unread",
+    "dateRange": "Date Range",
+    "from": "From",
+    "to": "To",
+    "clear": "Clear",
+    "apply": "Apply",
+    "createCapsule": "Create Capsule",
+    "createCapsuleDescription": "Create a custom filter capsule for quick access.",
+    "capsuleName": "Capsule Name",
+    "capsuleNamePlaceholder": "e.g. Favorite Authors"
+  },
+  "capsule": {
+    "dynamicSort": "Dynamic sort",
+    "dynamicSortDesc": "Capsules with newer content appear first.",
+    "deleteConfirm": "Delete this capsule?",
+    "deleteConfirmDesc": "This action cannot be undone.",
+    "deleteConfirmCapsuleName": "Capsule",
+    "editCapsule": "Edit capsule",
+    "noName": "Unnamed capsule"
+  },
   "vault": {
     "searchResultDirect": "Search results are shown directly by relevance.",
     "organizedByCategory": "Organize your highest-value saves with custom categories.",

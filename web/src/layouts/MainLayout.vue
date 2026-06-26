@@ -11,6 +11,7 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import SettingsDialog from '@/components/SettingsDialog.vue'
 import PluginSettingsDialog from '@/components/PluginSettingsDialog.vue'
+import FilterPanel, { type FilterState } from '@/components/FilterPanel.vue'
 import { SUPPORTED_LOCALES, getAppLocale, setAppLocale } from '@/i18n'
 import {
   apiClient,
@@ -31,7 +32,7 @@ const props = withDefaults(defineProps<{
   searchPlaceholder: '',
 })
 
-defineEmits<{
+const emit = defineEmits<{
   search: []
   addContent: []
 }>()
@@ -123,6 +124,17 @@ const languageOptions = computed(() =>
 
 const layoutMode = defineModel<'list' | 'grid' | 'compact'>('layout', { default: 'list' })
 const searchQuery = defineModel<string>('searchQuery', { default: '' })
+
+// Filter state
+const filterState = defineModel<FilterState>('filter', {
+  default: () => ({
+    author: '',
+    intent: '',
+    is_read: undefined,
+    date_from: '',
+    date_to: '',
+  }),
+})
 
 const SIDEBAR_STATE_KEY = 'pekno-sidebar-open'
 const isSettingsOpen = ref(false)
@@ -297,13 +309,21 @@ async function handleNotificationClick(notification: NotificationItem) {
           <SidebarTrigger />
         </div>
 
-        <div class="flex-1 max-w-xl relative group mx-4">
-          <Search class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-          <Input 
-            v-model="searchQuery"
-            :placeholder="effectiveSearchPlaceholder" 
-            class="w-full pl-9 bg-muted/50 border-transparent focus:bg-background rounded-md h-9 transition-all"
-            @keyup.enter="$emit('search')"
+        <div class="flex-1 max-w-xl relative group mx-4 flex items-center gap-2">
+          <div class="relative flex-1">
+            <Search class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <Input
+              v-model="searchQuery"
+              :placeholder="effectiveSearchPlaceholder"
+              class="w-full pl-9 bg-muted/50 border-transparent focus:bg-background rounded-md h-9 transition-all"
+              @keyup.enter="$emit('search')"
+            />
+          </div>
+
+          <!-- Filter Panel -->
+          <FilterPanel
+            v-model="filterState"
+            @apply="$emit('search')"
           />
         </div>
 

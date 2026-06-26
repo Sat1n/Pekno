@@ -223,6 +223,36 @@
       "unsupportedType": "仅支持静态图片、常用音视频、PDF、TXT、Markdown 和 DOCX 上传。"
     }
   },
+  "filter": {
+    "title": "筛选",
+    "description": "使用筛选条件缩小搜索范围。",
+    "author": "作者",
+    "authorPlaceholder": "按作者名称筛选...",
+    "intent": "内容类型",
+    "allIntents": "所有类型",
+    "readStatus": "阅读状态",
+    "all": "全部",
+    "read": "已读",
+    "unread": "未读",
+    "dateRange": "时间范围",
+    "from": "开始",
+    "to": "结束",
+    "clear": "清除",
+    "apply": "应用",
+    "createCapsule": "创建胶囊",
+    "createCapsuleDescription": "创建自定义筛选胶囊，方便快速访问。",
+    "capsuleName": "胶囊名称",
+    "capsuleNamePlaceholder": "例如：关注的作者"
+  },
+  "capsule": {
+    "dynamicSort": "动态排序",
+    "dynamicSortDesc": "有新内容的胶囊会更靠前。",
+    "deleteConfirm": "删除此胶囊？",
+    "deleteConfirmDesc": "此操作无法撤销。",
+    "deleteConfirmCapsuleName": "胶囊",
+    "editCapsule": "编辑胶囊",
+    "noName": "未命名胶囊"
+  },
   "vault": {
     "searchResultDirect": "搜索结果按相关性直接展示。",
     "organizedByCategory": "按你的自定义分类组织高价值收藏。",

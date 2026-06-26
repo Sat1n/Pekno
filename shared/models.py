@@ -38,6 +38,7 @@ class ItemORM(Base):
     content_text: Mapped[Optional[str]] = mapped_column(Text)
     summary: Mapped[Optional[str]] = mapped_column(Text)
     tags: Mapped[List[str]] = mapped_column(ARRAY(String), default=[])
+    author: Mapped[Optional[str]] = mapped_column(String, nullable=True, index=True)
     
     # 插件私有数据
     metadata_extra: Mapped[dict] = mapped_column(JSON, default={})
@@ -248,3 +249,20 @@ class InvitationCodeORM(Base):
     is_used: Mapped[bool] = mapped_column(Boolean, default=False)
     used_by_user_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now_in_app_timezone_naive)
+
+
+class SavedFilterORM(Base):
+    """用户保存的筛选条件（胶囊）"""
+    __tablename__ = "saved_filters"
+    __table_args__ = (
+        UniqueConstraint("user_id", "name", name="uq_saved_filter_user_name"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String)
+    filter_params: Mapped[dict] = mapped_column(JSON, default={})
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    last_content_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now_in_app_timezone_naive)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=now_in_app_timezone_naive, onupdate=now_in_app_timezone_naive)
