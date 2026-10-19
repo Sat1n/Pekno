@@ -568,34 +568,33 @@ async def embed_text(text: str) -> Tuple[List[float], str]:
             base_url=base_url,
         )
         vector = await asyncio.to_thread(client.embed_query, text)
-        vector = validate_embedding(vector)
         await record_api_usage(
             model_name,
             prompt_tokens=estimate_tokens(text),
             completion_tokens=0,
             force_zero_cost=True,
         )
-        return vector, model_name
+        return validate_embedding(vector), model_name
 
     api_key, base_url = _resolve_openai_config(provider_id, provider_config)
     async with create_openai_client(api_key, base_url) as client:
         raw_response = await client.embeddings.with_raw_response.create(
             model=model_name, input=text, encoding_format="float",
         )
-        # Validate before SDK coercion (which can turn JSON booleans into floats).
         try:
             payload = raw_response.http_response.json()
         except ValueError:
             payload = None
-        data = payload.get("data") if isinstance(payload, dict) else None
-        first = data[0] if isinstance(data, list) and data else None
-        vector = validate_embedding(first.get("embedding") if isinstance(first, dict) else None)
-        response = raw_response.parse()
-    usage = read_response_usage(response)
+    # A successful upstream request incurred usage even if its vector is invalid.
+    # Read raw usage without SDK coercion of the vector's numeric components.
+    usage = read_response_usage(payload)
     if usage:
         await record_api_usage(model_name, *usage)
     else:
         await record_api_usage(model_name, prompt_tokens=estimate_tokens(text), completion_tokens=0)
+    data = payload.get("data") if isinstance(payload, dict) else None
+    first = data[0] if isinstance(data, list) and data else None
+    vector = validate_embedding(first.get("embedding") if isinstance(first, dict) else None)
     return vector, model_name
 
 

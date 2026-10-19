@@ -59,14 +59,27 @@ def test_invalid_embedding_contract(vector, code, dimension):
 @pytest.mark.asyncio
 @pytest.mark.parametrize('provider_id', ['openai_compatible', 'llama_cpp'])
 @pytest.mark.parametrize('vector,code,dimension', INVALID_VECTORS[:-1])
-async def test_compatible_embedding_rejected_before_usage_write(config_store, sdk_transport, provider_id, vector, code, dimension):
+async def test_compatible_embedding_records_usage_before_rejection(config_store, sdk_transport, provider_id, vector, code, dimension):
     _, behavior = sdk_transport
     behavior['embedding'] = vector
+    behavior['embedding_usage'] = {'prompt_tokens': 500, 'total_tokens': 500}
     await settings.save_model_provider_config(provider_id, {'base_url': 'http://model.test/v1'})
     with pytest.raises(ApiError) as error:
         await assign_and_call(provider_id, 'embedding')
     assert_vector_error(error.value, code, dimension)
-    settings.record_api_usage.assert_not_awaited()
+    settings.record_api_usage.assert_awaited_once_with('test-model', 500, 0, 500)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('provider_id', ['openai_compatible', 'llama_cpp'])
+async def test_invalid_embedding_without_reported_usage_records_estimate(config_store, sdk_transport, provider_id):
+    _, behavior = sdk_transport
+    behavior.update(embedding=[0.1] * 1024, embedding_usage=None)
+    await settings.save_model_provider_config(provider_id, {'base_url': 'http://model.test/v1'})
+    with pytest.raises(ApiError) as error:
+        await assign_and_call(provider_id, 'embedding')
+    assert_vector_error(error.value, ERR_EMBEDDING_DIMENSION_MISMATCH, 1024)
+    settings.record_api_usage.assert_awaited_once_with('test-model', prompt_tokens=3, completion_tokens=0)
 
 
 @pytest.mark.asyncio
@@ -81,7 +94,7 @@ async def test_ollama_embedding_uses_same_contract(config_store, monkeypatch, ve
     with pytest.raises(ApiError) as error:
         await settings.embed_text('Private source')
     assert_vector_error(error.value, code, dimension)
-    usage.assert_not_awaited()
+    usage.assert_awaited_once_with('test-model', prompt_tokens=3, completion_tokens=0, force_zero_cost=True)
 
 
 @pytest.mark.asyncio
@@ -117,6 +130,7 @@ async def test_bad_dimension_prevents_ingestion_and_search_db_access(config_stor
     pipeline_module, _ = worker_modules
     _, behavior = sdk_transport
     behavior['embedding'] = [0.1] * 1024
+    behavior['embedding_usage'] = {'prompt_tokens': 500, 'total_tokens': 500}
     await settings.save_model_provider_config(provider_id, {'base_url': 'http://model.test/v1'})
     await settings.save_model_assignments([{'key': 'embedding', 'provider': provider_id, 'model': 'test-model'}])
     db = Mock(side_effect=AssertionError('Vector SQL must not run'))
@@ -131,6 +145,8 @@ async def test_bad_dimension_prevents_ingestion_and_search_db_access(config_stor
             await method('Private query', user_id='test-user')
         assert error.value.error_code == ERR_EMBEDDING_DIMENSION_MISMATCH
     db.assert_not_called()
+    assert settings.record_api_usage.await_count == 3
+    assert all(call.args == ('test-model', 500, 0, 500) for call in settings.record_api_usage.await_args_list)
 
 
 @pytest.mark.asyncio

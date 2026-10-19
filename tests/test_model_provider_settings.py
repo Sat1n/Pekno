@@ -193,7 +193,7 @@ async def sdk_transport(monkeypatch):
             return httpx.Response(401, json={"error": {"message": "Invalid key", "type": "authentication_error"}})
         payload = json.loads(request.content)
         if request.url.path.endswith("/embeddings"):
-            body = {"object": "list", "model": payload["model"], "data": [{"index": 0, "object": "embedding", "embedding": behavior["embedding"]}], "usage": {"prompt_tokens": 3, "total_tokens": 3}}
+            body = {"object": "list", "model": payload["model"], "data": [{"index": 0, "object": "embedding", "embedding": behavior["embedding"]}], "usage": behavior.get("embedding_usage", {"prompt_tokens": 3, "total_tokens": 3})}
             # Some services emit non-standard NaN/Infinity JSON. Exercise that
             # response at the SDK boundary rather than failing in httpx's encoder.
             return httpx.Response(200, content=json.dumps(body), headers={"Content-Type": "application/json"})
@@ -264,6 +264,8 @@ async def test_model_failures_propagate(config_store, sdk_transport, provider_id
         await assign_and_call(provider_id, purpose)
     if purpose in {"short_summary", "long_summary"}:
         assert error.value.error_code == "ERR_AI_UNAVAILABLE"
+    if purpose == "embedding":
+        settings.record_api_usage.assert_not_awaited()
 
 
 @pytest.mark.asyncio
