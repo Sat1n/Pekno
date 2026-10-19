@@ -6,6 +6,11 @@
     "ERR_INVALID_INPUT": "提交的内容无效，请检查后重试。",
     "ERR_VALIDATION_FAILED": "请求参数校验失败。",
     "ERR_INTERNAL_SERVER_ERROR": "服务暂时不可用，请稍后再试。",
+    "ERR_EMBEDDING_DIMENSION_MISMATCH": "向量维度与 Pekno 要求的 768 维不符，请选择兼容的模型。",
+    "ERR_EMBEDDING_INVALID": "模型返回了空向量或非法向量。",
+    "ERR_AI_EMPTY_SUMMARY": "模型返回了空摘要，请重试或检查模型服务。",
+    "ERR_AI_TIMEOUT": "摘要请求超时，请检查模型服务后重试。",
+    "ERR_AI_UNAVAILABLE": "摘要服务请求失败，请检查服务状态与认证配置。",
     "ERR_QUOTA_EXCEEDED": "API 限额可能已用尽，请联系管理员。",
     "ERR_UPLOAD_UNSUPPORTED_TYPE": "当前文件类型暂不支持上传。",
     "ERR_PLUGIN_NOT_FOUND": "找不到对应的插件。",
@@ -426,6 +431,15 @@
     "allCapabilities": "全部能力",
     "noMatchingProviders": "当前筛选条件下没有匹配的模型提供商。",
     "providerConfigHint": "推荐先完成供应商接入，再到“系统模型设置”里为不同任务分配模型。",
+    "thinkingModeHint": "auto 保留服务默认行为；disabled 禁用思考；enabled 启用思考。仅在服务支持思考控制时修改。",
+    "providerStatusHint": "绿灯表示必填配置已保存，不代表服务连通、Key 有效或模型可用。",
+    "keyRequired": "（必填）",
+    "keyOptional": "（选填）",
+    "keyUpdateHint": "留空保留已保存的 Key；输入新 Key 可替换。Key 选填的供应商未配置 Key 时，不发送认证头。",
+    "savedKeyPresent": "已保存 API Key，其内容不会显示。",
+    "clearSavedKey": "清除已保存 Key",
+    "cancelClearKey": "取消清除 Key",
+    "clearKeyPending": "保存配置后将清除 Key。要求认证的供应商将变为未配置状态。",
     "currentlySaved": "当前已保存",
     "saveProviderConfig": "保存提供商配置",
     "providerSavedTitle": "提供商配置已保存",
@@ -462,6 +476,11 @@
         "name": "Ollama",
         "badge": "本地优先",
         "description": "连接本地或局域网 Ollama，适合离线推理与自托管场景。"
+      },
+      "llama_cpp": {
+        "name": "llama.cpp",
+        "badge": "本地优先",
+        "description": "连接 llama-server，用于本地标签提取、摘要和向量生成。API Key 选填；服务地址可包含或省略 /v1。"
       },
       "openai_compatible": {
         "name": "OpenAI Compatible",
@@ -554,6 +573,7 @@
       }
     },
     "modelConfigFields": {
+      "thinking_mode": "思考模式",
       "host": "服务地址",
       "base_url": "Base URL",
       "api_key": "API Key",

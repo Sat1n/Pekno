@@ -5,6 +5,7 @@ from pgvector.sqlalchemy import Vector # 处理向量的核心
 from datetime import datetime, timedelta
 from typing import List, Optional
 from shared.time_utils import now_in_app_timezone_naive
+from shared.ai_validation import EMBEDDING_DIMENSIONS
 import uuid
 
 class Base(DeclarativeBase):
@@ -17,7 +18,7 @@ class ItemORM(Base):
     # 基础字段
     id: Mapped[str] = mapped_column(String, primary_key=True)
     title: Mapped[str] = mapped_column(String)
-    embedding: Mapped[Optional[Vector]] = mapped_column(Vector(768))
+    embedding: Mapped[Optional[Vector]] = mapped_column(Vector(EMBEDDING_DIMENSIONS))
     source_type: Mapped[str] = mapped_column(String)
     plugin_id: Mapped[Optional[str]] = mapped_column(String, nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now_in_app_timezone_naive)

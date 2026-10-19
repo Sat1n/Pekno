@@ -1,0 +1,19 @@
+{"provider": "openai_compatible", "purpose": "tagging", "status": "running"}
+{"provider": "openai_compatible", "purpose": "tagging", "model": "qwen9b", "status": "passed", "output_size": 4, "elapsed_seconds": 5.49, "http_status": 200, "interface_success": true, "finish_reason": "stop", "content_size": 61, "reasoning_size": 0}
+{"provider": "openai_compatible", "purpose": "short_summary", "status": "running"}
+{"provider": "openai_compatible", "purpose": "short_summary", "model": "qwen9b", "status": "passed", "output_size": 116, "elapsed_seconds": 0.65, "http_status": 200, "interface_success": true, "finish_reason": "stop", "content_size": 116, "reasoning_size": 0}
+{"provider": "openai_compatible", "purpose": "long_summary", "status": "running"}
+{"provider": "openai_compatible", "purpose": "long_summary", "model": "qwen9b", "status": "passed", "output_size": 1585, "elapsed_seconds": 5.35, "http_status": 200, "interface_success": true, "finish_reason": "stop", "content_size": 1585, "reasoning_size": 0}
+{"provider": "openai_compatible", "purpose": "embedding", "status": "running"}
+{"provider": "openai_compatible", "purpose": "embedding", "model": "nomic-embedding", "status": "passed", "output_size": 768, "storage_compatible": true, "elapsed_seconds": 3.77, "http_status": 200, "interface_success": true, "actual_dimension": 768, "expected_dimension": 768}
+{"provider": "openai_compatible", "purpose": "embedding_database_roundtrip", "model": "nomic-embedding", "expected_dimension": 768, "status": "passed", "stored_dimensions": [768, 768], "stored_rows": 2, "semantic_top_hit": "knowledge", "cosine_distance": 0.383237}
+{"provider": "llama_cpp", "purpose": "tagging", "status": "running"}
+{"provider": "llama_cpp", "purpose": "tagging", "model": "qwen9b", "status": "passed", "output_size": 5, "elapsed_seconds": 5.48, "http_status": 200, "interface_success": true, "finish_reason": "stop", "content_size": 56, "reasoning_size": 0}
+{"provider": "llama_cpp", "purpose": "short_summary", "status": "running"}
+{"provider": "llama_cpp", "purpose": "short_summary", "model": "qwen9b", "status": "passed", "output_size": 112, "elapsed_seconds": 0.63, "http_status": 200, "interface_success": true, "finish_reason": "stop", "content_size": 112, "reasoning_size": 0}
+{"provider": "llama_cpp", "purpose": "long_summary", "status": "running"}
+{"provider": "llama_cpp", "purpose": "long_summary", "model": "qwen9b", "status": "passed", "output_size": 1882, "elapsed_seconds": 6.37, "http_status": 200, "interface_success": true, "finish_reason": "stop", "content_size": 1882, "reasoning_size": 0}
+{"provider": "llama_cpp", "purpose": "embedding", "status": "running"}
+{"provider": "llama_cpp", "purpose": "embedding", "model": "nomic-embedding", "status": "passed", "output_size": 768, "storage_compatible": true, "elapsed_seconds": 3.84, "http_status": 200, "interface_success": true, "actual_dimension": 768, "expected_dimension": 768}
+{"provider": "llama_cpp", "purpose": "embedding_database_roundtrip", "model": "nomic-embedding", "expected_dimension": 768, "status": "passed", "stored_dimensions": [768, 768], "stored_rows": 2, "semantic_top_hit": "knowledge", "cosine_distance": 0.383237}
+{"requests": 14, "authentication": "no_authorization_header", "passed": 10, "failed": 0}

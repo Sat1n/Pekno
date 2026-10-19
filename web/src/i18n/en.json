@@ -6,6 +6,11 @@
     "ERR_INVALID_INPUT": "The submitted input is invalid. Please review it and try again.",
     "ERR_VALIDATION_FAILED": "Request validation failed.",
     "ERR_INTERNAL_SERVER_ERROR": "The service is temporarily unavailable. Please try again later.",
+    "ERR_EMBEDDING_DIMENSION_MISMATCH": "The embedding dimension does not match Pekno’s required 768 dimensions. Select a compatible model.",
+    "ERR_EMBEDDING_INVALID": "The model returned an empty or invalid embedding.",
+    "ERR_AI_EMPTY_SUMMARY": "The model returned an empty summary. Please retry or check the model service.",
+    "ERR_AI_TIMEOUT": "The summary request timed out. Please check the model service and retry.",
+    "ERR_AI_UNAVAILABLE": "The summary service request failed. Please check the service and authentication.",
     "ERR_QUOTA_EXCEEDED": "The API quota may be exhausted. Please contact an administrator.",
     "ERR_UPLOAD_UNSUPPORTED_TYPE": "This file type is not supported for upload.",
     "ERR_PLUGIN_NOT_FOUND": "The requested plugin could not be found.",
@@ -427,6 +432,15 @@
     "allCapabilities": "All capabilities",
     "noMatchingProviders": "No model providers match the current filters.",
     "providerConfigHint": "It is best to finish provider onboarding first, then assign models to each workflow below.",
+    "thinkingModeHint": "Use auto to keep the service default, disabled to turn thinking off, or enabled to turn it on. Only change this for a server that supports thinking controls.",
+    "providerStatusHint": "Green means required configuration has been saved. It does not verify connectivity, key validity, or model availability.",
+    "keyRequired": "(required)",
+    "keyOptional": "(optional)",
+    "keyUpdateHint": "Leave blank to keep the saved key; enter a new key to replace it. Without a key, optional-key providers send no Authorization header.",
+    "savedKeyPresent": "An API key is saved. Its value is hidden.",
+    "clearSavedKey": "Clear saved API key",
+    "cancelClearKey": "Cancel key removal",
+    "clearKeyPending": "Save configuration to remove the key. Providers requiring authentication will become unconfigured.",
     "currentlySaved": "Currently saved",
     "saveProviderConfig": "Save Provider Configuration",
     "providerSavedTitle": "Provider configuration saved",
@@ -463,6 +477,11 @@
         "name": "Ollama",
         "badge": "Local Preferred",
         "description": "Connect to local or LAN Ollama, suitable for offline inference and self-hosted scenarios."
+      },
+      "llama_cpp": {
+        "name": "llama.cpp",
+        "badge": "Local Preferred",
+        "description": "Connect to llama-server for self-hosted tagging, summaries, and embeddings. API Key is optional; Base URL accepts a server address with or without /v1."
       },
       "openai_compatible": {
         "name": "OpenAI Compatible",
@@ -555,6 +574,7 @@
       }
     },
     "modelConfigFields": {
+      "thinking_mode": "Thinking mode",
       "host": "Service Address",
       "base_url": "Base URL",
       "api_key": "API Key",
