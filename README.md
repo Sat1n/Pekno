@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="./LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-green.svg" /></a>
-  <img alt="Version" src="https://img.shields.io/badge/version-0.2.0-blue.svg" />
+  <img alt="Version" src="https://img.shields.io/badge/version-0.3.1-blue.svg" />
   <img alt="Phase" src="https://img.shields.io/badge/phase-0%20Genesis-8A2BE2.svg" />
   <img alt="Python" src="https://img.shields.io/badge/python-3.13-3776AB.svg" />
   <img alt="Vue" src="https://img.shields.io/badge/frontend-Vue%203%20%2B%20Vite-42b883.svg" />

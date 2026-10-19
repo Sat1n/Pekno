@@ -56,13 +56,14 @@ def estimate_tokens(text: str | None) -> int:
 
 
 def read_response_usage(response: Any) -> tuple[int, int, int] | None:
-    usage = getattr(response, "usage", None)
+    usage = response.get("usage") if isinstance(response, dict) else getattr(response, "usage", None)
     if usage is None:
         return None
 
-    prompt_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
-    completion_tokens = int(getattr(usage, "completion_tokens", 0) or 0)
-    total_tokens = int(getattr(usage, "total_tokens", 0) or (prompt_tokens + completion_tokens))
+    get_usage = usage.get if isinstance(usage, dict) else lambda key, default: getattr(usage, key, default)
+    prompt_tokens = int(get_usage("prompt_tokens", 0) or 0)
+    completion_tokens = int(get_usage("completion_tokens", 0) or 0)
+    total_tokens = int(get_usage("total_tokens", 0) or (prompt_tokens + completion_tokens))
     if prompt_tokens == 0 and completion_tokens == 0 and total_tokens == 0:
         return None
     return prompt_tokens, completion_tokens, total_tokens

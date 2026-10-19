@@ -1,0 +1,30 @@
+Pekno v0.3.1 verification — 2026-10-19 (Asia/Shanghai)
+
+Focused command:
+uv run --no-sync pytest tests/test_model_provider_settings.py tests/test_ai_output_validation.py -q
+161 passed, 2 warnings in 2.54s
+
+Related regression command:
+uv run --no-sync pytest tests/test_model_provider_settings.py tests/test_ai_output_validation.py tests/test_annotations_api.py tests/test_github_client.py tests/test_item_collection_flow.py tests/test_mcp_admin_tool.py tests/test_mcp_mount.py tests/test_mcp_streamable_mount.py tests/test_plugin_summary_pipeline.py tests/test_search_relevance.py -q --tb=line
+FAILED tests/test_annotations_api.py::test_local_asset_url_maps_uploads_directory
+FAILED tests/test_item_collection_flow.py::test_upload_deduplicates_by_file_hash
+FAILED tests/test_item_collection_flow.py::test_favorite_only_queues_vault_download_on_first_toggle
+FAILED tests/test_mcp_mount.py::test_mcp_sse_valid_token_can_call_search_tool_and_disconnect_cleanly[asyncio]
+FAILED tests/test_mcp_streamable_mount.py::test_mcp_streamable_http_can_initialize_and_call_search[asyncio]
+5 failed, 178 passed, 2 warnings in 2.72s
+
+Frontend:
+cd web && npm run build
+✓ built in 5.45s
+
+git diff --check: passed
+
+Full live model/database evidence: v0.3.1-service-validation.jsonl
+Live 1024-dimension rejection (expected exit 1): v0.3.1-dimension-rejection.jsonl
+Live short-summary content checks: v0.3.1-short-summary-validation.jsonl
+Isolated database confirmed vector(768), remaining smoke items/users: 0/0.
+
+Embedding accounting follow-up: simulated upstream 1024-dimensional responses report 500 tokens.
+Reported usage is recorded exactly once before vector rejection; no business vector SQL runs.
+Missing usage retains token estimates; failed upstream requests do not create usage records.
+Live service artifacts and unchanged frontend build above are from the preceding acceptance run.

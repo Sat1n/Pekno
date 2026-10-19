@@ -1,0 +1,5 @@
+{"provider": "openai_compatible", "purpose": "embedding", "status": "running"}
+{"provider": "openai_compatible", "purpose": "embedding", "model": "qwen-embedding", "status": "failed", "exception": "EmbeddingValidationError", "error_code": "ERR_EMBEDDING_DIMENSION_MISMATCH", "storage_compatible": false, "expected_dimension": 768, "actual_dimension": 1024, "http_status": 200, "elapsed_seconds": 19.32, "interface_success": true}
+{"provider": "llama_cpp", "purpose": "embedding", "status": "running"}
+{"provider": "llama_cpp", "purpose": "embedding", "model": "qwen-embedding", "status": "failed", "exception": "EmbeddingValidationError", "error_code": "ERR_EMBEDDING_DIMENSION_MISMATCH", "storage_compatible": false, "expected_dimension": 768, "actual_dimension": 1024, "http_status": 200, "elapsed_seconds": 0.02, "interface_success": true}
+{"requests": 2, "authentication": "no_authorization_header", "passed": 0, "failed": 2}

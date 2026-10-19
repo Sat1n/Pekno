@@ -71,6 +71,7 @@ async def _call_llm(provider, prompt: str) -> str:
             model=provider.model,
             messages=[{"role": "user", "content": prompt}],
             response_format={"type": "json_object"},
+            **provider.completion_options,
         )
     else:
         response = await provider.client.chat.completions.create(

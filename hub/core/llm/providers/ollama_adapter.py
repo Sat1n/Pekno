@@ -11,6 +11,8 @@ import json
 from typing import Any
 from shared.locale import build_output_language_instruction
 from shared.logger import hub_log
+from hub.core.llm.summary_call import request_summary
+from .openai_client import create_openai_client
 
 from hub.core.billing import (
     check_api_limit_or_raise,
@@ -107,10 +109,7 @@ class OllamaProvider(BaseLLMProvider):
     def __init__(self, host: str, model: str):
         self.host = host.rstrip("/")
         # Ollama 默认 OpenAI 兼容地址通常是 http://localhost:11434/v1
-        self.client = openai.AsyncOpenAI(
-            api_key="ollama", # Ollama 不需要真正的 Key
-            base_url=f"{self.host}/v1"
-        )
+        self.client = create_openai_client("ollama", f"{self.host}/v1")
         self.model_name = model
 
     async def _create_chat_completion(self, **kwargs: Any):
@@ -139,21 +138,27 @@ class OllamaProvider(BaseLLMProvider):
                 f"字数不限，要求排版精美的 Markdown 格式，层级清晰，重点突出：\n{text[:8000]}"
             )
             
-        response = await self._create_chat_completion(
+        async def record_summary_usage(response, content):
+            usage = read_response_usage(response)
+            if usage:
+                await record_api_usage(self.model_name, *usage, force_zero_cost=True)
+            else:
+                await record_api_usage(
+                    self.model_name,
+                    prompt_tokens=estimate_tokens(prompt),
+                    completion_tokens=estimate_tokens(content),
+                    force_zero_cost=True,
+                )
+
+        response, content = await request_summary(
+            lambda: self._create_chat_completion(
+                model=self.model_name,
+                messages=[{"role": "user", "content": prompt}],
+            ),
             model=self.model_name,
-            messages=[{"role": "user", "content": prompt}]
+            purpose="short_summary" if length == "short" else "long_summary",
+            record_usage=record_summary_usage,
         )
-        content = response.choices[0].message.content or ""
-        usage = read_response_usage(response)
-        if usage:
-            await record_api_usage(self.model_name, *usage, force_zero_cost=True)
-        else:
-            await record_api_usage(
-                self.model_name,
-                prompt_tokens=estimate_tokens(prompt),
-                completion_tokens=estimate_tokens(content),
-                force_zero_cost=True,
-            )
         return content
 
     async def extract_tags(self, text: str, preferred_locale: str | None = None) -> list[str]:

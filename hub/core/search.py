@@ -6,6 +6,7 @@ from shared.database import AsyncSessionLocal
 from shared.models import ItemORM, UserItemStateORM
 from hub.core.llm.service import EmbeddingService
 from shared.logger import hub_log
+from shared.ai_validation import validate_embedding
 
 class SearchService:
     def __init__(self):
@@ -55,9 +56,12 @@ class SearchService:
         is_read: Optional[bool] = None,
         date_from: Optional[datetime] = None,
         date_to: Optional[datetime] = None,
+        query_vector: Optional[List[float]] = None,
     ) -> List[Tuple[ItemORM, float]]:
         """第一路召回：纯向量检索"""
-        query_vector = await self.embed_service.get_vector(query_text)
+        if query_vector is None:
+            query_vector = await self.embed_service.get_vector(query_text)
+        query_vector = validate_embedding(query_vector)
         async with AsyncSessionLocal() as session:
             distance = ItemORM.embedding.cosine_distance(query_vector)
             stmt = (
@@ -139,6 +143,8 @@ class SearchService:
         date_to: Optional[datetime] = None,
     ) -> List[Tuple[ItemORM, float]]:
         """混合搜索 2.0：RRF 排序融合，返回值使用归一化相关性分数。"""
+        # Validate before starting either database recall path.
+        query_vector = validate_embedding(await self.embed_service.get_vector(query_text))
         vec_task = self._get_vector_candidates(
             query_text,
             user_id,
@@ -151,6 +157,7 @@ class SearchService:
             is_read=is_read,
             date_from=date_from,
             date_to=date_to,
+            query_vector=query_vector,
         )
         kw_task = self._get_keyword_candidates(
             query_text,

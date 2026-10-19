@@ -3,13 +3,17 @@ import base64
 import json
 import re
 from typing import Any, Dict, List, Tuple
+from urllib.parse import urlsplit
 
-import openai
 from langchain_ollama import OllamaEmbeddings
 
+from shared.api_errors import ApiError
+from shared.ai_validation import validate_embedding, validate_summary
+from shared.error_codes import ERR_INVALID_INPUT, ERR_INTERNAL_SERVER_ERROR
 from shared.config import SYSTEM_CONFIG_USER_ID, ConfigManager, get_default_ollama_base_url
 from hub.core.llm.providers.ollama_adapter import OllamaProvider, ensure_ollama_model
 from hub.core.llm.providers.openai_adapter import OpenAIProvider
+from hub.core.llm.providers.openai_client import create_openai_client
 from hub.core.billing import check_api_limit_or_raise, estimate_tokens, read_response_usage, record_api_usage
 
 MODEL_SETTINGS_NAMESPACE = "__model_settings__"
@@ -42,7 +46,7 @@ MODEL_PROVIDER_CATALOG: List[Dict[str, Any]] = [
         "badge": "Local Preferred",
         "capabilities": ["LLM", "Embedding", "Vision"],
         "config_fields": [
-            {"key": "host", "label": "Service Address", "type": "string", "default": get_default_ollama_base_url()},
+            {"key": "host", "label": "Service Address", "required": True, "type": "string", "default": get_default_ollama_base_url()},
         ],
     },
     {
@@ -52,8 +56,21 @@ MODEL_PROVIDER_CATALOG: List[Dict[str, Any]] = [
         "badge": "通用兼容",
         "capabilities": ["LLM", "Embedding", "Vision"],
         "config_fields": [
-            {"key": "base_url", "label": "Base URL", "type": "string", "default": "https://api.openai.com/v1"},
-            {"key": "api_key", "label": "API Key", "type": "string", "secret": True, "default": ""},
+            {"key": "base_url", "label": "Base URL", "required": True, "type": "string", "default": "https://api.openai.com/v1"},
+            {"key": "api_key", "label": "API Key", "type": "string", "secret": True, "required": False, "default": ""},
+            {"key": "thinking_mode", "label": "Thinking Mode", "type": "string", "default": "auto"},
+        ],
+    },
+    {
+        "id": "llama_cpp",
+        "name": "llama.cpp",
+        "description": "Connect to llama-server for self-hosted inference. API Key is optional.",
+        "badge": "Local Preferred",
+        "capabilities": ["LLM", "Embedding"],
+        "config_fields": [
+            {"key": "base_url", "label": "Base URL", "required": True, "type": "string", "default": "http://127.0.0.1:8080/v1"},
+            {"key": "api_key", "label": "API Key", "type": "string", "secret": True, "required": False, "default": ""},
+            {"key": "thinking_mode", "label": "Thinking Mode", "type": "string", "default": "auto"},
         ],
     },
     {
@@ -63,8 +80,8 @@ MODEL_PROVIDER_CATALOG: List[Dict[str, Any]] = [
         "badge": "官方",
         "capabilities": ["LLM", "Embedding", "Vision"],
         "config_fields": [
-            {"key": "base_url", "label": "Base URL", "type": "string", "default": "https://api.openai.com/v1"},
-            {"key": "api_key", "label": "API Key", "type": "string", "secret": True, "default": ""},
+            {"key": "base_url", "label": "Base URL", "required": True, "type": "string", "default": "https://api.openai.com/v1"},
+            {"key": "api_key", "label": "API Key", "type": "string", "secret": True, "required": True, "default": ""},
         ],
     },
     {
@@ -74,8 +91,8 @@ MODEL_PROVIDER_CATALOG: List[Dict[str, Any]] = [
         "badge": "聚合",
         "capabilities": ["LLM", "Embedding", "Vision"],
         "config_fields": [
-            {"key": "base_url", "label": "Base URL", "type": "string", "default": "https://openrouter.ai/api/v1"},
-            {"key": "api_key", "label": "API Key", "type": "string", "secret": True, "default": ""},
+            {"key": "base_url", "label": "Base URL", "required": True, "type": "string", "default": "https://openrouter.ai/api/v1"},
+            {"key": "api_key", "label": "API Key", "type": "string", "secret": True, "required": True, "default": ""},
         ],
     },
     {
@@ -85,8 +102,8 @@ MODEL_PROVIDER_CATALOG: List[Dict[str, Any]] = [
         "badge": "国产",
         "capabilities": ["LLM", "Embedding", "Vision"],
         "config_fields": [
-            {"key": "base_url", "label": "Base URL", "type": "string", "default": "https://api.siliconflow.cn/v1"},
-            {"key": "api_key", "label": "API Key", "type": "string", "secret": True, "default": ""},
+            {"key": "base_url", "label": "Base URL", "required": True, "type": "string", "default": "https://api.siliconflow.cn/v1"},
+            {"key": "api_key", "label": "API Key", "type": "string", "secret": True, "required": True, "default": ""},
         ],
     },
     {
@@ -96,8 +113,8 @@ MODEL_PROVIDER_CATALOG: List[Dict[str, Any]] = [
         "badge": "推理优先",
         "capabilities": ["LLM"],
         "config_fields": [
-            {"key": "base_url", "label": "Base URL", "type": "string", "default": "https://api.deepseek.com/v1"},
-            {"key": "api_key", "label": "API Key", "type": "string", "secret": True, "default": ""},
+            {"key": "base_url", "label": "Base URL", "required": True, "type": "string", "default": "https://api.deepseek.com/v1"},
+            {"key": "api_key", "label": "API Key", "type": "string", "secret": True, "required": True, "default": ""},
         ],
     },
     {
@@ -107,8 +124,8 @@ MODEL_PROVIDER_CATALOG: List[Dict[str, Any]] = [
         "badge": "低延迟",
         "capabilities": ["LLM"],
         "config_fields": [
-            {"key": "base_url", "label": "Base URL", "type": "string", "default": "https://api.groq.com/openai/v1"},
-            {"key": "api_key", "label": "API Key", "type": "string", "secret": True, "default": ""},
+            {"key": "base_url", "label": "Base URL", "required": True, "type": "string", "default": "https://api.groq.com/openai/v1"},
+            {"key": "api_key", "label": "API Key", "type": "string", "secret": True, "required": True, "default": ""},
         ],
     },
     {
@@ -118,8 +135,8 @@ MODEL_PROVIDER_CATALOG: List[Dict[str, Any]] = [
         "badge": "开源生态",
         "capabilities": ["LLM", "Embedding", "Vision"],
         "config_fields": [
-            {"key": "base_url", "label": "Base URL", "type": "string", "default": "https://api.together.xyz/v1"},
-            {"key": "api_key", "label": "API Key", "type": "string", "secret": True, "default": ""},
+            {"key": "base_url", "label": "Base URL", "required": True, "type": "string", "default": "https://api.together.xyz/v1"},
+            {"key": "api_key", "label": "API Key", "type": "string", "secret": True, "required": True, "default": ""},
         ],
     },
     {
@@ -129,8 +146,8 @@ MODEL_PROVIDER_CATALOG: List[Dict[str, Any]] = [
         "badge": "Multimodal Ready",
         "capabilities": ["LLM", "Speech", "Vision", "Video"],
         "config_fields": [
-            {"key": "base_url", "label": "Base URL", "type": "string", "default": "https://dashscope.aliyuncs.com/compatible-mode/v1"},
-            {"key": "api_key", "label": "API Key", "type": "string", "secret": True, "default": ""},
+            {"key": "base_url", "label": "Base URL", "required": True, "type": "string", "default": "https://dashscope.aliyuncs.com/compatible-mode/v1"},
+            {"key": "api_key", "label": "API Key", "type": "string", "secret": True, "required": True, "default": ""},
         ],
     },
     {
@@ -140,8 +157,8 @@ MODEL_PROVIDER_CATALOG: List[Dict[str, Any]] = [
         "badge": "国产多模态",
         "capabilities": ["LLM", "Vision", "Video"],
         "config_fields": [
-            {"key": "base_url", "label": "Base URL", "type": "string", "default": "https://open.bigmodel.cn/api/paas/v4"},
-            {"key": "api_key", "label": "API Key", "type": "string", "secret": True, "default": ""},
+            {"key": "base_url", "label": "Base URL", "required": True, "type": "string", "default": "https://open.bigmodel.cn/api/paas/v4"},
+            {"key": "api_key", "label": "API Key", "type": "string", "secret": True, "required": True, "default": ""},
         ],
     },
     {
@@ -151,7 +168,7 @@ MODEL_PROVIDER_CATALOG: List[Dict[str, Any]] = [
         "badge": "开源生态",
         "capabilities": ["Speech", "Vision"],
         "config_fields": [
-            {"key": "api_key", "label": "HF Access Token", "type": "string", "secret": True, "default": ""},
+            {"key": "api_key", "label": "HF Access Token", "type": "string", "secret": True, "required": True, "default": ""},
             {"key": "endpoint", "label": "下载镜像 / Endpoint", "type": "string", "default": ""},
         ],
     },
@@ -248,15 +265,16 @@ def _is_provider_configured(provider_id: str, config: Dict[str, Any], is_configu
     if provider_id == "paddleocr_v5_cpu":
         return str(config.get("enabled", "true")).strip().lower() not in {"false", "0", "no", "off"}
 
-    api_key = config.get("api_key")
-    if isinstance(api_key, str):
-        return bool(api_key)
-
-    host = config.get("host")
-    if isinstance(host, str):
-        return bool(host)
-
-    return is_configured_in_db
+    if not is_configured_in_db:
+        return False
+    provider = _catalog_map().get(provider_id)
+    if not provider:
+        return False
+    return all(
+        isinstance(config.get(field["key"]), str) and bool(config[field["key"]].strip())
+        for field in provider.get("config_fields", [])
+        if field.get("required")
+    )
 
 
 def _normalize_ollama_host(host: str) -> str:
@@ -296,15 +314,17 @@ async def _load_json_config(key: str, default: Dict[str, Any]) -> Dict[str, Any]
         default=None,
         user_id=SYSTEM_CONFIG_USER_ID,
     )
-    if not raw_value:
-        return dict(default)
+    return _decode_json_config(raw_value, default)[0]
+
+
+def _decode_json_config(raw_value: str | None, default: Dict[str, Any]) -> tuple[Dict[str, Any], bool]:
     try:
-        parsed = json.loads(raw_value)
+        parsed = json.loads(raw_value) if raw_value else None
         if isinstance(parsed, dict):
-            return parsed
-    except json.JSONDecodeError:
+            return {**default, **parsed}, True
+    except (json.JSONDecodeError, TypeError):
         pass
-    return dict(default)
+    return dict(default), False
 
 
 async def _save_json_config(key: str, value: Dict[str, Any], description: str) -> bool:
@@ -331,21 +351,22 @@ async def get_model_provider_state() -> Dict[str, Any]:
             default=None,
             user_id=SYSTEM_CONFIG_USER_ID,
         )
-        is_configured_in_db = raw_value is not None
-        
-        config = await _load_json_config(_provider_config_key(provider["id"]), defaults)
-        secret_preview = None
-        api_key = config.get("api_key")
-        if isinstance(api_key, str) and api_key:
-            secret_preview = f"{api_key[:4]}..." if len(api_key) > 4 else api_key
-            config["api_key"] = ""
-            
+        config, is_configured_in_db = _decode_json_config(raw_value, defaults)
         is_configured = _is_provider_configured(provider["id"], config, is_configured_in_db)
+        # Never mutate the real configuration while constructing the response.
+        public_config = dict(config)
+        has_api_key = bool(str(config.get("api_key") or "").strip())
+        for field in provider.get("config_fields", []):
+            if field.get("secret"):
+                public_config[field["key"]] = ""
+        # A constant mask also protects short keys; no key characters are exposed.
+        secret_preview = "********" if has_api_key else None
 
         provider_states.append(
             {
                 **provider,
-                "config": config,
+                "config": public_config,
+                "has_api_key": has_api_key,
                 "is_configured": is_configured,
                 "secret_preview": secret_preview,
             }
@@ -361,7 +382,7 @@ async def get_model_provider_state() -> Dict[str, Any]:
 async def save_model_provider_config(provider_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     provider = _catalog_map().get(provider_id)
     if not provider:
-        raise ValueError("Unknown model provider.")
+        raise ApiError(ERR_INVALID_INPUT, "Unknown model provider.")
 
     defaults = {
         field["key"]: field.get("default")
@@ -369,15 +390,30 @@ async def save_model_provider_config(provider_id: str, payload: Dict[str, Any]) 
     }
     current = await _load_json_config(_provider_config_key(provider_id), defaults)
 
+    clear_api_key = payload.get("clear_api_key", False)
+    if not isinstance(clear_api_key, bool):
+        raise ApiError(ERR_INVALID_INPUT, "clear_api_key must be a boolean.")
+    if clear_api_key and str(payload.get("api_key") or "").strip():
+        raise ApiError(ERR_INVALID_INPUT, "Cannot replace and clear an API key in the same request.")
+
     merged = dict(current)
+    if clear_api_key:
+        merged["api_key"] = ""
     for field in provider.get("config_fields", []):
         key = field["key"]
         if key not in payload:
             continue
         value = payload.get(key)
-        if field.get("secret") and (value is None or str(value).strip() == ""):
+        if value is not None and not isinstance(value, str):
+            raise ApiError(ERR_INVALID_INPUT, f"{key} must be a string.")
+        if field.get("secret") and (value is None or value.strip() == ""):
             continue
-        merged[key] = value
+        merged[key] = value.strip() if isinstance(value, str) else ""
+
+    if provider_id in {"openai_compatible", "llama_cpp"}:
+        _resolve_thinking_mode(merged)
+    if provider_id in {"openai_compatible", "llama_cpp"} and merged.get("base_url"):
+        merged["base_url"] = _normalize_compatible_base_url(merged["base_url"])
 
     success = await _save_json_config(
         _provider_config_key(provider_id),
@@ -385,7 +421,7 @@ async def save_model_provider_config(provider_id: str, payload: Dict[str, Any]) 
         description=f"模型提供商配置: {provider['name']}",
     )
     if not success:
-        raise ValueError("保存模型提供商配置失败")
+        raise ApiError(ERR_INTERNAL_SERVER_ERROR, "Failed to save model provider configuration.", status_code=500)
 
     return await get_model_provider_state()
 
@@ -456,6 +492,40 @@ async def _resolve_assignment(purpose: str) -> Dict[str, Any]:
     raise ValueError(f"未知模型用途: {purpose}")
 
 
+def _normalize_compatible_base_url(base_url: str) -> str:
+    normalized = base_url.strip().rstrip("/")
+    parts = urlsplit(normalized)
+    if parts.scheme not in {"http", "https"} or not parts.hostname or parts.query or parts.fragment:
+        raise ApiError(ERR_INVALID_INPUT, "Base URL must be an absolute HTTP(S) URL without a query or fragment.")
+    # A bare server address uses /v1. Preserve explicit API/proxy prefixes so
+    # existing compatible providers (including non-v1 upstreams) keep working.
+    if not parts.path:
+        normalized += "/v1"
+    return normalized
+
+
+def _resolve_openai_config(provider_id: str, config: Dict[str, Any]) -> tuple[str, str]:
+    provider = _catalog_map().get(provider_id)
+    if not provider:
+        raise ApiError(ERR_INVALID_INPUT, "Unknown model provider.")
+    defaults = {field["key"]: field.get("default") for field in provider["config_fields"]}
+    resolved = {**defaults, **config}
+    if not _is_provider_configured(provider_id, resolved, True):
+        raise ApiError(ERR_INVALID_INPUT, f"Provider [{provider_id}] is missing required configuration.")
+    api_key = (resolved.get("api_key") or "").strip()
+    base_url = resolved["base_url"].strip().rstrip("/")
+    if provider_id in {"openai_compatible", "llama_cpp"}:
+        base_url = _normalize_compatible_base_url(base_url)
+    return api_key, base_url
+
+
+def _resolve_thinking_mode(config: Dict[str, Any]) -> bool | None:
+    mode = config.get("thinking_mode", "auto")
+    if mode not in {"auto", "enabled", "disabled"}:
+        raise ApiError(ERR_INVALID_INPUT, "thinking_mode must be auto, enabled, or disabled.")
+    return None if mode == "auto" else mode == "enabled"
+
+
 async def _build_llm_provider(purpose: str):
     assignment = await _resolve_assignment(purpose)
     provider_id = assignment["provider"]
@@ -465,18 +535,16 @@ async def _build_llm_provider(purpose: str):
     if provider_id == "ollama":
         return OllamaProvider(_normalize_ollama_host(provider_config.get("host", get_default_ollama_base_url())), model), model
 
-    api_key = provider_config.get("api_key")
-    base_url = provider_config.get("base_url", "https://api.openai.com/v1")
-    if not api_key:
-        raise ValueError(f"Provider [{provider_id}] does not have an API key configured.")
-    return OpenAIProvider(api_key=api_key, base_url=base_url, model=model), model
+    api_key, base_url = _resolve_openai_config(provider_id, provider_config)
+    enable_thinking = _resolve_thinking_mode(provider_config) if provider_id in {"openai_compatible", "llama_cpp"} else None
+    return OpenAIProvider(api_key=api_key, base_url=base_url, model=model, enable_thinking=enable_thinking), model
 
 
 async def generate_summary(text: str, length: str = "short", preferred_locale: str | None = None) -> Tuple[str, str]:
     purpose = "short_summary" if length == "short" else "long_summary"
     provider, model_name = await _build_llm_provider(purpose)
     summary = await provider.generate_summary(text, length=length, preferred_locale=preferred_locale)
-    return summary, model_name
+    return validate_summary(summary), model_name
 
 
 async def extract_tags(text: str, preferred_locale: str | None = None) -> Tuple[List[str], str]:
@@ -506,21 +574,28 @@ async def embed_text(text: str) -> Tuple[List[float], str]:
             completion_tokens=0,
             force_zero_cost=True,
         )
-        return vector, model_name
+        return validate_embedding(vector), model_name
 
-    api_key = provider_config.get("api_key")
-    base_url = provider_config.get("base_url", "https://api.openai.com/v1")
-    if not api_key:
-        raise ValueError(f"Provider [{provider_id}] does not have an API key configured.")
-
-    client = openai.AsyncOpenAI(api_key=api_key, base_url=base_url)
-    response = await client.embeddings.create(model=model_name, input=text)
-    usage = read_response_usage(response)
+    api_key, base_url = _resolve_openai_config(provider_id, provider_config)
+    async with create_openai_client(api_key, base_url) as client:
+        raw_response = await client.embeddings.with_raw_response.create(
+            model=model_name, input=text, encoding_format="float",
+        )
+        try:
+            payload = raw_response.http_response.json()
+        except ValueError:
+            payload = None
+    # A successful upstream request incurred usage even if its vector is invalid.
+    # Read raw usage without SDK coercion of the vector's numeric components.
+    usage = read_response_usage(payload)
     if usage:
         await record_api_usage(model_name, *usage)
     else:
         await record_api_usage(model_name, prompt_tokens=estimate_tokens(text), completion_tokens=0)
-    return response.data[0].embedding, model_name
+    data = payload.get("data") if isinstance(payload, dict) else None
+    first = data[0] if isinstance(data, list) and data else None
+    vector = validate_embedding(first.get("embedding") if isinstance(first, dict) else None)
+    return vector, model_name
 
 
 def _normalize_image_understanding_result(payload: Dict[str, Any]) -> Dict[str, Any]:

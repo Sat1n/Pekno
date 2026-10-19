@@ -1,0 +1,5 @@
+{"provider": "openai_compatible", "purpose": "short_summary", "status": "running"}
+{"provider": "openai_compatible", "purpose": "short_summary", "model": "qwen9b", "status": "passed", "output_size": 121, "elapsed_seconds": 5.78, "http_status": 200, "interface_success": true, "finish_reason": "stop", "content_size": 121, "reasoning_size": 0}
+{"provider": "llama_cpp", "purpose": "short_summary", "status": "running"}
+{"provider": "llama_cpp", "purpose": "short_summary", "model": "qwen9b", "status": "passed", "output_size": 116, "elapsed_seconds": 0.41, "http_status": 200, "interface_success": true, "finish_reason": "stop", "content_size": 116, "reasoning_size": 0}
+{"requests": 2, "authentication": "no_authorization_header", "passed": 2, "failed": 0}

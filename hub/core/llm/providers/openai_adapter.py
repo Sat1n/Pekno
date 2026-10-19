@@ -1,8 +1,9 @@
-import openai
+from .openai_client import create_openai_client
 from ..base import BaseLLMProvider
 import re
 import json
 from shared.locale import build_output_language_instruction
+from hub.core.llm.summary_call import request_summary
 
 from hub.core.billing import (
     check_api_limit_or_raise,
@@ -23,10 +24,14 @@ def _parse_tag_list(raw_text: str) -> list[str]:
     return cleaned[:8]
 
 class OpenAIProvider(BaseLLMProvider):
-    def __init__(self, api_key: str, base_url: str, model: str):
-        self.client = openai.AsyncOpenAI(api_key=api_key, base_url=base_url)
+    def __init__(self, api_key: str | None, base_url: str, model: str, enable_thinking: bool | None = None):
+        self.client = create_openai_client(api_key, base_url)
         self.model = model
         self.model_name = model
+        self.completion_options = (
+            {"extra_body": {"chat_template_kwargs": {"enable_thinking": enable_thinking}}}
+            if enable_thinking is not None else {}
+        )
 
     async def generate_summary(self, text: str, length: str = "short", preferred_locale: str | None = None) -> str:
         await check_api_limit_or_raise()
@@ -43,20 +48,27 @@ class OpenAIProvider(BaseLLMProvider):
                 f"涵盖核心结论、重要细节与可执行信息。\n"
                 f"{language_instruction}\n{text[:8000]}"
             )
-        response = await self.client.chat.completions.create(
+        async def record_summary_usage(response, content):
+            usage = read_response_usage(response)
+            if usage:
+                await record_api_usage(self.model, *usage)
+            else:
+                await record_api_usage(
+                    self.model,
+                    prompt_tokens=estimate_tokens(prompt),
+                    completion_tokens=estimate_tokens(content),
+                )
+
+        response, content = await request_summary(
+            lambda: self.client.chat.completions.create(
+                model=self.model,
+                messages=[{"role": "user", "content": prompt}],
+                **self.completion_options,
+            ),
             model=self.model,
-            messages=[{"role": "user", "content": prompt}]
+            purpose="short_summary" if length == "short" else "long_summary",
+            record_usage=record_summary_usage,
         )
-        content = response.choices[0].message.content or ""
-        usage = read_response_usage(response)
-        if usage:
-            await record_api_usage(self.model, *usage)
-        else:
-            await record_api_usage(
-                self.model,
-                prompt_tokens=estimate_tokens(prompt),
-                completion_tokens=estimate_tokens(content),
-            )
         return content
 
     async def extract_tags(self, text: str, preferred_locale: str | None = None) -> list[str]:
@@ -69,7 +81,8 @@ class OpenAIProvider(BaseLLMProvider):
         response = await self.client.chat.completions.create(
             model=self.model,
             messages=[{"role": "system", "content": system_prompt},
-                      {"role": "user", "content": prompt_text}]
+                      {"role": "user", "content": prompt_text}],
+            **self.completion_options,
         )
         tags_raw = response.choices[0].message.content or ""
         usage = read_response_usage(response)
@@ -107,6 +120,7 @@ class OpenAIProvider(BaseLLMProvider):
                 }
             ],
             response_format={"type": "json_object"},
+            **self.completion_options,
         )
         raw = response.choices[0].message.content or "{}"
         usage = read_response_usage(response)

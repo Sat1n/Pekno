@@ -254,6 +254,7 @@ export interface ModelProviderField {
   label: string
   type: 'string'
   secret?: boolean
+  required?: boolean
   default?: string
 }
 
@@ -266,7 +267,14 @@ export interface ModelProviderInfo {
   config_fields: ModelProviderField[]
   config: Record<string, string>
   is_configured: boolean
+  has_api_key: boolean
   secret_preview?: string | null
+}
+
+export interface ModelProviderConfigUpdate {
+  [key: string]: string | boolean | undefined
+  api_key?: string
+  clear_api_key?: boolean
 }
 
 export interface ModelAssignmentInfo {
@@ -733,7 +741,7 @@ export async function getModelProviders(): Promise<{ providers: ModelProviderInf
   return response.data
 }
 
-export async function saveModelProvider(providerId: string, payload: Record<string, string>): Promise<{ providers: ModelProviderInfo[]; assignments: ModelAssignmentInfo[] }> {
+export async function saveModelProvider(providerId: string, payload: ModelProviderConfigUpdate): Promise<{ providers: ModelProviderInfo[]; assignments: ModelAssignmentInfo[] }> {
   const response = await apiClient.put(`/api/admin/models/providers/${providerId}`, payload)
   return response.data
 }

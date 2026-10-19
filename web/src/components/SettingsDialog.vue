@@ -41,6 +41,7 @@ const isSavingModelProvider = ref(false)
 const isSavingModelAssignments = ref(false)
 const selectedProviderId = ref('ollama')
 const providerDraft = ref<Record<string, string>>({})
+const clearApiKey = ref(false)
 const modelSettingsTab = ref<'providers' | 'assignments'>('providers')
 const providerSearch = ref('')
 const providerCapabilityFilter = ref<'all' | string>('all')
@@ -340,6 +341,7 @@ async function loadModelSettings() {
       selectedProviderId.value = firstProvider.id
     }
     providerDraft.value = { ...(selectedProvider.value?.config || {}) }
+    clearApiKey.value = false
   } catch (error) {
     console.error('Failed to load model settings:', error)
     toast({
@@ -391,6 +393,7 @@ async function copyInviteCode(code: string) {
 
 watch(selectedProvider, (provider) => {
   providerDraft.value = { ...(provider?.config || {}) }
+  clearApiKey.value = false
 })
 
 watch(filteredProviders, (providers) => {
@@ -406,7 +409,10 @@ async function handleSaveModelProvider() {
   if (!selectedProvider.value) return
   isSavingModelProvider.value = true
   try {
-    const state = await saveModelProvider(selectedProvider.value.id, providerDraft.value)
+    const state = await saveModelProvider(selectedProvider.value.id, {
+      ...providerDraft.value,
+      ...(clearApiKey.value ? { api_key: '', clear_api_key: true } : {}),
+    })
     modelProviders.value = state.providers
     modelAssignments.value = state.assignments
     toast({
@@ -568,8 +574,17 @@ onMounted(async () => {
 watch(
   () => props.open,
   async (newVal) => {
-    if (!newVal) return
-    activeTab.value = props.initialTab || 'plugins'
+    if (!newVal) {
+      providerDraft.value = {}
+      clearApiKey.value = false
+      return
+    }
+    const nextTab = props.initialTab || 'plugins'
+    const tabChanged = activeTab.value !== nextTab
+    activeTab.value = nextTab
+    if (!tabChanged && nextTab === 'models') {
+      void loadModelSettings()
+    }
     await loadAllPlugins()
   }
 )
@@ -851,7 +866,7 @@ function formatBillingCost(value: number | undefined, currency: string | undefin
                                   {{ t('settings.modelProviderMetadata.' + provider.id + '.badge', provider.badge || '') }}
                                 </div>
                               </div>
-                              <div class="h-2.5 w-2.5 rounded-full" :class="provider.is_configured ? 'bg-green-500' : 'bg-muted-foreground/40'"></div>
+                              <div :title="t('settings.providerStatusHint')" class="h-2.5 w-2.5 rounded-full" :class="provider.is_configured ? 'bg-green-500' : 'bg-muted-foreground/40'"></div>
                             </div>
                             <p class="text-sm text-muted-foreground leading-relaxed mt-3">
                               {{ t('settings.modelProviderMetadata.' + provider.id + '.description', provider.description) }}
@@ -897,18 +912,42 @@ function formatBillingCost(value: number | undefined, currency: string | undefin
                           class="rounded-xl border bg-muted/30 px-4 py-3 text-sm text-muted-foreground"
                         >
                           {{ t('settings.providerConfigHint') }}
+                          {{ t('settings.providerStatusHint') }}
                         </div>
 
                       <div v-for="field in selectedProvider.config_fields" :key="field.key" class="space-y-2">
-                        <Label>{{ t('settings.modelConfigFields.' + field.key, field.label) }}</Label>
+                        <Label>
+                          {{ t('settings.modelConfigFields.' + field.key, field.label) }}
+                          <span v-if="field.secret" class="text-xs text-muted-foreground">
+                            {{ t(field.required ? 'settings.keyRequired' : 'settings.keyOptional') }}
+                          </span>
+                        </Label>
                         <Input
                           v-model="providerDraft[field.key]"
                           :type="field.secret ? 'password' : 'text'"
+                          :autocomplete="field.secret ? 'new-password' : undefined"
                           :placeholder="field.default || ''"
+                          :disabled="isSavingModelProvider || (field.key === 'api_key' && clearApiKey)"
                         />
-                        <p v-if="field.secret && selectedProvider.secret_preview" class="text-xs text-muted-foreground">
-                          {{ t('settings.currentlySaved') }}: <code class="bg-muted px-1.5 py-0.5 rounded text-[10px]">{{ selectedProvider.secret_preview }}</code>
+                        <p v-if="field.key === 'thinking_mode'" class="text-xs text-muted-foreground">
+                          {{ t('settings.thinkingModeHint') }}
                         </p>
+                        <p v-if="field.secret" class="text-xs text-muted-foreground">
+                          {{ t('settings.keyUpdateHint') }}
+                        </p>
+                        <div v-if="field.key === 'api_key' && selectedProvider.has_api_key" class="space-y-2">
+                          <p class="text-xs text-muted-foreground">{{ t('settings.savedKeyPresent') }}</p>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            :disabled="isSavingModelProvider"
+                            :aria-pressed="clearApiKey"
+                            @click="clearApiKey = !clearApiKey"
+                          >
+                            {{ t(clearApiKey ? 'settings.cancelClearKey' : 'settings.clearSavedKey') }}
+                          </Button>
+                          <p v-if="clearApiKey" class="text-xs text-destructive">{{ t('settings.clearKeyPending') }}</p>
+                        </div>
                       </div>
 
                       <Button
